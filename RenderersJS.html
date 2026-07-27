@@ -1,0 +1,998 @@
+  function renderGeneralFilterGroups() {
+  const container = document.getElementById(
+    "generalFilterGroups"
+  );
+
+  container.innerHTML = "";
+
+  PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+    const section = document.createElement("section");
+    section.className = "filter-group";
+    section.dataset.filterGroup =
+  group.key;
+
+    const header = document.createElement("div");
+    header.className = "filter-group-header";
+
+    const title = document.createElement("h3");
+    title.className = "filter-group-title";
+    title.textContent = group.label;
+
+    const count = document.createElement("span");
+    count.className = "filter-group-count";
+    count.id = `${group.key}SelectedCount`;
+    count.textContent = "0 selected";
+
+    const chipRow = document.createElement("div");
+    chipRow.className = "chip-row";
+
+    group.values.forEach(value => {
+      chipRow.appendChild(
+        createFilterChip_({
+          label: value,
+          groupKey: group.key,
+          value,
+        })
+      );
+    });
+
+    header.append(title, count);
+    section.append(header, chipRow);
+    container.appendChild(section);
+  });
+}
+
+function renderRankGroups() {
+  renderRankGroup_(
+    "commissionedRanks",
+    PERSONNEL_APP_CONFIG.rankGroups.commissioned.values
+  );
+
+  renderRankGroup_(
+    "nonCommissionedRanks",
+    PERSONNEL_APP_CONFIG.rankGroups.nonCommissioned.values
+  );
+
+  renderRankGroup_(
+    "technicalRanks",
+    PERSONNEL_APP_CONFIG.rankGroups.technical.values
+  );
+
+  updateRankCounts();
+}
+
+function renderRankGroup_(containerId, ranks) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+
+  ranks.forEach(rank => {
+    container.appendChild(
+      createFilterChip_({
+        label: rank,
+        groupKey: "ranks",
+        value: rank,
+      })
+    );
+  });
+}
+
+function createFilterChip_({
+  label,
+  groupKey,
+  value,
+}) {
+  const button = document.createElement("button");
+
+  button.type = "button";
+  button.className = "filter-chip";
+  button.textContent = label;
+  button.dataset.groupKey = groupKey;
+  button.dataset.value = value;
+
+  button.addEventListener("click", () => {
+    handleChipClick(button);
+  });
+
+  return button;
+}
+
+function renderPreviewHeader() {
+  const row = document.getElementById(
+    "previewTableHeader"
+  );
+
+  row.innerHTML = "";
+
+  PERSONNEL_APP_CONFIG.previewColumns.forEach(column => {
+    const th = document.createElement("th");
+    th.textContent = column;
+    row.appendChild(th);
+  });
+}
+
+function renderPreviewTable() {
+  const body = document.getElementById(
+    "previewTableBody"
+  );
+
+  const emptyState = document.getElementById(
+    "emptyState"
+  );
+
+  body.innerHTML = "";
+
+  const filteredRecords =
+    PersonnelState.filteredRecords;
+
+  const visibleRecords = filteredRecords.slice(
+    0,
+    PERSONNEL_APP_CONFIG.previewRowLimit
+  );
+
+  const duplicateAnalysis =
+    analyzePersonnelDuplicates(filteredRecords);
+
+  PersonnelState.duplicateAnalysis =
+    duplicateAnalysis;
+
+    renderCountingReports_(
+    filteredRecords
+  );
+
+  document.getElementById(
+    "resultCount"
+  ).textContent =
+    `${duplicateAnalysis.uniqueCount.toLocaleString()} personnel`;
+
+  document.getElementById(
+    "rawResultCount"
+  ).textContent =
+    `${filteredRecords.length.toLocaleString()} rows`;
+
+  document.getElementById(
+    "minimizedResultCount"
+  ).textContent =
+    `${duplicateAnalysis.uniqueCount.toLocaleString()} personnel`;
+
+  updateDuplicateButton_(duplicateAnalysis);
+
+  if (!visibleRecords.length) {
+    emptyState.hidden = false;
+    emptyState.style.display = "grid";
+
+    updatePreviewLimitLabel_(
+      filteredRecords.length
+    );
+
+    return;
+  }
+
+  emptyState.hidden = true;
+  emptyState.style.display = "none";
+
+  const duplicateNameSet = new Set(
+    duplicateAnalysis.duplicateGroups.map(
+      group => group.normalizedName
+    )
+  );
+
+  const fragment =
+    document.createDocumentFragment();
+
+  visibleRecords.forEach(record => {
+    const row = document.createElement("tr");
+
+    const normalizedName =
+      normalizePersonnelName_(
+        record["Full Name"]
+      );
+
+    const isDuplicate =
+      duplicateNameSet.has(normalizedName);
+
+    if (isDuplicate) {
+      row.classList.add("duplicate-row");
+      row.title =
+        "This personnel name appears more than once.";
+    }
+
+    PERSONNEL_APP_CONFIG.previewColumns.forEach(
+      column => {
+        const cell = document.createElement("td");
+        const value = record[column];
+
+        cell.textContent =
+          value !== null && value !== undefined
+            ? String(value)
+            : "";
+
+        if (
+          column === "Full Name" &&
+          isDuplicate
+        ) {
+          const badge = document.createElement(
+            "span"
+          );
+
+          badge.className =
+            "duplicate-name-badge";
+
+          badge.textContent = "Duplicate";
+
+          cell.appendChild(badge);
+        }
+
+        row.appendChild(cell);
+      }
+    );
+
+    fragment.appendChild(row);
+  });
+
+  body.appendChild(fragment);
+
+  updatePreviewLimitLabel_(
+    filteredRecords.length
+  );
+}
+
+function updatePreviewLimitLabel_(total) {
+  const limitLabel = document.getElementById(
+    "previewLimitLabel"
+  );
+
+  if (
+    total >
+    PERSONNEL_APP_CONFIG.previewRowLimit
+  ) {
+    limitLabel.textContent =
+      `Showing first ${PERSONNEL_APP_CONFIG.previewRowLimit}`;
+
+    return;
+  }
+
+  limitLabel.textContent = "";
+}
+
+function updateDuplicateButton_(analysis) {
+  const button = document.getElementById(
+    "showDuplicatesButton"
+  );
+
+  if (!analysis.duplicateNameCount) {
+    button.hidden = true;
+    button.textContent = "Show Duplicates";
+    return;
+  }
+
+  button.hidden = false;
+
+  button.textContent =
+    `${analysis.duplicateNameCount.toLocaleString()} duplicated names`;
+}
+
+function renderDuplicatePanel() {
+  const analysis =
+    PersonnelState.duplicateAnalysis;
+
+  const list = document.getElementById(
+    "duplicateList"
+  );
+
+  list.innerHTML = "";
+
+  if (!analysis) {
+    return;
+  }
+
+  document.getElementById(
+    "duplicateNameCount"
+  ).textContent =
+    analysis.duplicateNameCount.toLocaleString();
+
+  document.getElementById(
+    "duplicateRowCount"
+  ).textContent =
+    analysis.duplicateTotalRows.toLocaleString();
+
+  const fragment =
+    document.createDocumentFragment();
+
+  analysis.duplicateGroups.forEach(group => {
+    const item = document.createElement("article");
+    item.className = "duplicate-item";
+
+    const header = document.createElement("div");
+    header.className = "duplicate-item-header";
+
+    const name = document.createElement("strong");
+    name.textContent = group.displayName;
+
+    const count = document.createElement("span");
+    count.className = "duplicate-record-count";
+    count.textContent =
+      `${group.records.length} records`;
+
+    header.append(name, count);
+
+    const details = document.createElement("div");
+    details.className = "duplicate-record-list";
+
+    group.records.forEach(record => {
+      const recordItem =
+        document.createElement("div");
+
+      recordItem.className =
+        "duplicate-record-item";
+
+      const main = document.createElement("span");
+
+      main.textContent = [
+        record.Rank,
+        record.Office,
+        record.Camp,
+      ]
+        .filter(Boolean)
+        .join(" · ") ||
+        "No additional information";
+
+      const row = document.createElement("small");
+
+      row.textContent =
+        `Sheet row: ${record.__sheetRow || "Unknown"}`;
+
+      recordItem.append(main, row);
+      details.appendChild(recordItem);
+    });
+
+    item.append(header, details);
+    fragment.appendChild(item);
+  });
+
+  list.appendChild(fragment);
+}
+
+function openDuplicatePanel() {
+  renderDuplicatePanel();
+
+  document.getElementById(
+    "duplicatePanel"
+  ).hidden = false;
+
+  document.getElementById(
+    "duplicatePanelBackdrop"
+  ).hidden = false;
+}
+
+function closeDuplicatePanel() {
+  document.getElementById(
+    "duplicatePanel"
+  ).hidden = true;
+
+  document.getElementById(
+    "duplicatePanelBackdrop"
+  ).hidden = true;
+}
+
+function renderActiveFilterSummary() {
+  const parts = [];
+  const search =
+    PersonnelState.filters.search.trim();
+
+  if (search) {
+    parts.push(`Search: "${search}"`);
+  }
+
+  PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+    const values = [
+      ...PersonnelState.filters[group.key],
+    ];
+
+    if (values.length) {
+      parts.push(
+        `${group.label}: ${values.join(", ")}`
+      );
+    }
+  });
+
+  const ranks = [
+    ...PersonnelState.filters.ranks,
+  ];
+
+  if (ranks.length) {
+    parts.push(`Ranks: ${ranks.join(", ")}`);
+  }
+
+  document.getElementById(
+    "activeFilterSummary"
+  ).textContent =
+    parts.length
+      ? parts.join(" · ")
+      : "No active filters";
+}
+
+function updateFilterCounts() {
+  PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+    const count =
+      PersonnelState.filters[group.key].size;
+
+    const element = document.getElementById(
+      `${group.key}SelectedCount`
+    );
+
+    if (element) {
+      element.textContent =
+        `${count} selected`;
+    }
+  });
+}
+
+function updateRankCounts() {
+  setRankCount_(
+    "commissionedCount",
+    PERSONNEL_APP_CONFIG.rankGroups.commissioned.values
+  );
+
+  setRankCount_(
+    "nonCommissionedCount",
+    PERSONNEL_APP_CONFIG.rankGroups.nonCommissioned.values
+  );
+
+  setRankCount_(
+    "technicalCount",
+    PERSONNEL_APP_CONFIG.rankGroups.technical.values
+  );
+}
+
+function setRankCount_(elementId, ranks) {
+  const count = ranks.filter(rank =>
+    PersonnelState.filters.ranks.has(rank)
+  ).length;
+
+  document.getElementById(
+    elementId
+  ).textContent =
+    `${count} selected`;
+}
+
+function syncChipVisuals() {
+  document
+    .querySelectorAll(".filter-chip")
+    .forEach(button => {
+      const groupKey =
+        button.dataset.groupKey;
+
+      const value =
+        button.dataset.value;
+
+      const targetSet =
+        PersonnelState.filters[groupKey];
+
+      const isSelected =
+        targetSet?.has(value);
+
+      button.classList.toggle(
+        "is-selected",
+        isSelected
+      );
+
+      button.textContent =
+        isSelected
+          ? `✓ ${value}`
+          : value;
+    });
+}
+
+function setSyncStatus(
+  message,
+  state = "ready"
+) {
+  const element = document.getElementById(
+    "syncStatus"
+  );
+
+  element.textContent = message;
+
+  element.classList.remove(
+    "sync-ready",
+    "sync-pending",
+    "sync-working",
+    "sync-error"
+  );
+
+  const className = {
+    ready: "sync-ready",
+    pending: "sync-pending",
+    working: "sync-working",
+    error: "sync-error",
+  }[state];
+
+  element.classList.add(
+    className || "sync-ready"
+  );
+}
+
+function setLastSyncLabel(message) {
+  document.getElementById(
+    "lastSyncLabel"
+  ).textContent = message;
+}
+
+//----------------------------------
+// Render Counting Reports
+//----------------------------------
+
+function renderCountingReports_(records) {
+
+  //----------------------------------
+  // Gender
+  //----------------------------------
+
+  renderReportList_(
+    "genderReport",
+    countRecordsByField_(
+      records,
+      "Gender"
+    )
+  );
+
+  //----------------------------------
+  // Category
+  //----------------------------------
+
+  renderReportList_(
+    "categoryReport",
+    countRecordsByField_(
+      records,
+      "Category"
+    )
+  );
+
+  //----------------------------------
+  // Type with Category Breakdown
+  //----------------------------------
+
+  renderTypeBreakdown_(
+    records
+  );
+
+  //----------------------------------
+  // Camp
+  //----------------------------------
+
+  renderReportList_(
+    "campReport",
+    countRecordsByField_(
+      records,
+      "Camp"
+    )
+  );
+
+  //----------------------------------
+  // Offices
+  //----------------------------------
+
+  renderReportList_(
+    "officeReport",
+    countRecordsByField_(
+      records,
+      "Office"
+    )
+  );
+
+  //----------------------------------
+  // Ranks
+  //----------------------------------
+
+  renderReportList_(
+    "rankReport",
+    countRecordsByField_(
+      records,
+      "Rank"
+    )
+  );
+
+}
+
+//----------------------------------
+// Render Report List
+//----------------------------------
+
+function renderReportList_(
+  containerId,
+  items
+) {
+
+  const container =
+    document.getElementById(
+      containerId
+    );
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  //----------------------------------
+  // Empty State
+  //----------------------------------
+
+  if (!items.length) {
+
+    const empty =
+      document.createElement(
+        "div"
+      );
+
+    empty.className =
+      "report-empty";
+
+    empty.textContent =
+      "No data";
+
+    container.appendChild(
+      empty
+    );
+
+    return;
+
+  }
+
+  //----------------------------------
+  // Build Rows
+  //----------------------------------
+
+  const fragment =
+    document.createDocumentFragment();
+
+  items.forEach(item => {
+
+    const row =
+      document.createElement(
+        "div"
+      );
+
+    row.className =
+      "report-row";
+
+    const label =
+      document.createElement(
+        "span"
+      );
+
+    label.className =
+      "report-label";
+
+    label.textContent =
+      item.label;
+
+    const count =
+      document.createElement(
+        "strong"
+      );
+
+    count.className =
+      "report-count";
+
+    count.textContent =
+      item.count.toLocaleString();
+
+    row.append(
+      label,
+      count
+    );
+
+    fragment.appendChild(
+      row
+    );
+
+  });
+
+  container.appendChild(
+    fragment
+  );
+
+}
+//----------------------------------
+// Render Type Breakdown
+//----------------------------------
+
+function renderTypeBreakdown_(
+  records
+) {
+
+  const container =
+    document.getElementById(
+      "typeReport"
+    );
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  //----------------------------------
+  // Group by Type, then Category
+  //----------------------------------
+
+  const typeGroups =
+    new Map();
+
+  records.forEach(record => {
+
+    const type =
+      String(
+        record.Type || ""
+      ).trim();
+
+    const category =
+      String(
+        record.Category || ""
+      ).trim();
+
+    //----------------------------------
+    // Ignore Blank Type
+    //----------------------------------
+
+    if (!type) {
+      return;
+    }
+
+    //----------------------------------
+    // Create Type Group
+    //----------------------------------
+
+    if (
+      !typeGroups.has(type)
+    ) {
+
+      typeGroups.set(
+        type,
+        {
+          total: 0,
+          categories: new Map(),
+        }
+      );
+
+    }
+
+    const group =
+      typeGroups.get(type);
+
+    group.total++;
+
+    //----------------------------------
+    // Count Category Under Type
+    //----------------------------------
+
+    if (category) {
+
+      group.categories.set(
+        category,
+        (
+          group.categories.get(category) || 0
+        ) + 1
+      );
+
+    }
+
+  });
+
+  //----------------------------------
+  // Sort Type Groups
+  //----------------------------------
+
+  const sortedTypes = [
+    ...typeGroups.entries(),
+  ].sort((a, b) => {
+
+    if (
+      b[1].total !==
+      a[1].total
+    ) {
+
+      return (
+        b[1].total -
+        a[1].total
+      );
+
+    }
+
+    return a[0].localeCompare(
+      b[0],
+      undefined,
+      {
+        sensitivity: "base",
+      }
+    );
+
+  });
+
+  //----------------------------------
+  // Empty State
+  //----------------------------------
+
+  if (!sortedTypes.length) {
+
+    const empty =
+      document.createElement(
+        "div"
+      );
+
+    empty.className =
+      "report-empty";
+
+    empty.textContent =
+      "No data";
+
+    container.appendChild(
+      empty
+    );
+
+    return;
+
+  }
+
+  //----------------------------------
+  // Build Type Breakdown
+  //----------------------------------
+
+  const fragment =
+    document.createDocumentFragment();
+
+  sortedTypes.forEach(
+    ([
+      typeLabel,
+      typeData,
+    ]) => {
+
+      //----------------------------------
+      // Type Group Container
+      //----------------------------------
+
+      const group =
+        document.createElement(
+          "div"
+        );
+
+      group.className =
+        "type-breakdown-group";
+
+      //----------------------------------
+      // Parent Type Row
+      //----------------------------------
+
+      const parentRow =
+        document.createElement(
+          "div"
+        );
+
+      parentRow.className =
+        "type-breakdown-parent";
+
+      const parentLabel =
+        document.createElement(
+          "span"
+        );
+
+      parentLabel.className =
+        "type-breakdown-parent-label";
+
+      parentLabel.textContent =
+        typeLabel;
+
+      const parentCount =
+        document.createElement(
+          "strong"
+        );
+
+      parentCount.className =
+        "type-breakdown-parent-count";
+
+      parentCount.textContent =
+        typeData.total.toLocaleString();
+
+      parentRow.append(
+        parentLabel,
+        parentCount
+      );
+
+      group.appendChild(
+        parentRow
+      );
+
+      //----------------------------------
+      // Sort Categories
+      //----------------------------------
+
+      const sortedCategories = [
+        ...typeData.categories.entries(),
+      ].sort((a, b) => {
+
+        if (
+          b[1] !== a[1]
+        ) {
+
+          return (
+            b[1] -
+            a[1]
+          );
+
+        }
+
+        return a[0].localeCompare(
+          b[0],
+          undefined,
+          {
+            sensitivity: "base",
+          }
+        );
+
+      });
+
+      //----------------------------------
+      // Child Category Rows
+      //----------------------------------
+
+      sortedCategories.forEach(
+        ([
+          categoryLabel,
+          categoryCount,
+        ]) => {
+
+          const childRow =
+            document.createElement(
+              "div"
+            );
+
+          childRow.className =
+            "type-breakdown-child";
+
+          const childLabel =
+            document.createElement(
+              "span"
+            );
+
+          childLabel.className =
+            "type-breakdown-child-label";
+
+          childLabel.textContent =
+            categoryLabel;
+
+          const childCount =
+            document.createElement(
+              "strong"
+            );
+
+          childCount.className =
+            "type-breakdown-child-count";
+
+          childCount.textContent =
+            categoryCount.toLocaleString();
+
+          childRow.append(
+            childLabel,
+            childCount
+          );
+
+          group.appendChild(
+            childRow
+          );
+
+        }
+      );
+
+      fragment.appendChild(
+        group
+      );
+
+    }
+  );
+
+  container.appendChild(
+    fragment
+  );
+
+}

@@ -1,0 +1,29 @@
+  const PersonnelState = {
+  records: [],
+  filteredRecords: [],
+
+  duplicateAnalysis: {
+    uniqueCount: 0,
+    duplicateNameCount: 0,
+    duplicateExtraRows: 0,
+    duplicateTotalRows: 0,
+    duplicateGroups: [],
+  },
+
+  filters: {
+    search: "",
+    ranks: new Set(),
+  },
+
+  syncTimer: null,
+  syncRequestNumber: 0,
+
+  autoApply: true,
+  minimized: false,
+  initialized: false,
+};
+
+PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+  PersonnelState.filters[group.key] = new Set();
+});
+

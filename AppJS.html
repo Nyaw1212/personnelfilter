@@ -1,0 +1,302 @@
+document.addEventListener(
+  "DOMContentLoaded",
+  initializePersonnelApp
+);
+
+async function initializePersonnelApp() {
+  bindPersonnelEvents();
+
+  renderRankGroups();
+  renderPreviewHeader();
+
+  setSyncStatus(
+    "Loading personnel...",
+    "working"
+  );
+
+  setLastSyncLabel(
+    "Reading personnel data from Google Sheets..."
+  );
+
+  try {
+    const response =
+      await PersonnelAPI.loadPersonnel();
+
+    PersonnelState.records =
+      Array.isArray(response?.records)
+        ? response.records
+        : [];
+
+    populateFilterValuesFromRecords();
+    renderGeneralFilterGroups();
+
+    PersonnelState.initialized = true;
+
+    filterAndRenderPersonnel();
+
+    setSyncStatus(
+      "Preview ready",
+      "ready"
+    );
+
+    setLastSyncLabel(
+      `${PersonnelState.records.length.toLocaleString()} personnel rows loaded from Google Sheets.`
+    );
+  } catch (error) {
+    console.error(
+      "Personnel load error:",
+      error
+    );
+
+    PersonnelState.records = [];
+    PersonnelState.filteredRecords = [];
+
+    renderGeneralFilterGroups();
+    renderPreviewTable();
+
+    setSyncStatus(
+      "Load failed",
+      "error"
+    );
+
+    setLastSyncLabel(
+      error?.message ||
+      "Personnel data could not be loaded."
+    );
+  }
+}
+
+function populateFilterValuesFromRecords() {
+  PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+    const uniqueValues = new Set();
+
+    PersonnelState.records.forEach(record => {
+      const value = String(
+        record[group.recordKey] || ""
+      ).trim();
+
+      if (value) {
+        uniqueValues.add(value);
+      }
+    });
+
+    group.values = [...uniqueValues].sort(
+      (a, b) =>
+        a.localeCompare(
+          b,
+          undefined,
+          {
+            numeric: true,
+            sensitivity: "base",
+          }
+        )
+    );
+  });
+}
+
+function bindPersonnelEvents() {
+  document
+    .getElementById("searchInput")
+    .addEventListener("input", event => {
+      PersonnelState.filters.search =
+        event.target.value;
+
+      handleFilterChange();
+    });
+
+  document
+    .getElementById("clearFiltersButton")
+    .addEventListener(
+      "click",
+      clearAllFilters
+    );
+
+  document
+    .getElementById("clearRanksButton")
+    .addEventListener(
+      "click",
+      clearRanks
+    );
+
+  document
+    .getElementById("applyNowButton")
+    .addEventListener(
+      "click",
+      applyCurrentResultToSheet
+    );
+
+  document
+    .getElementById("showDuplicatesButton")
+    .addEventListener(
+      "click",
+      openDuplicatePanel
+    );
+
+  document
+    .getElementById("closeDuplicatePanelButton")
+    .addEventListener(
+      "click",
+      closeDuplicatePanel
+    );
+
+  document
+    .getElementById("duplicatePanelBackdrop")
+    .addEventListener(
+      "click",
+      closeDuplicatePanel
+    );
+
+  document.addEventListener(
+    "keydown",
+    event => {
+      if (event.key === "Escape") {
+        closeDuplicatePanel();
+      }
+    }
+  );
+
+  document
+    .getElementById("autoApplyToggle")
+    .addEventListener("change", event => {
+      PersonnelState.autoApply =
+        event.target.checked;
+
+      if (PersonnelState.autoApply) {
+        scheduleSheetSync();
+        return;
+      }
+
+      clearTimeout(
+        PersonnelState.syncTimer
+      );
+
+      setSyncStatus(
+        "Preview only",
+        "ready"
+      );
+
+      setLastSyncLabel(
+        "Auto Apply is off. Click Apply Now to sync."
+      );
+    });
+
+  document
+    .getElementById("minimizeButton")
+    .addEventListener(
+      "click",
+      minimizeApp
+    );
+
+  document
+    .getElementById("restoreButton")
+    .addEventListener(
+      "click",
+      restoreApp
+    );
+
+  document
+    .getElementById("restoreFromBarButton")
+    .addEventListener(
+      "click",
+      restoreApp
+    );
+}
+
+function handleChipClick(button) {
+  const groupKey =
+    button.dataset.groupKey;
+
+  const value =
+    button.dataset.value;
+
+  const targetSet =
+    PersonnelState.filters[groupKey];
+
+  if (!(targetSet instanceof Set)) {
+    console.warn(
+      `Filter group "${groupKey}" is not configured.`
+    );
+
+    return;
+  }
+
+  toggleSetValue_(
+    targetSet,
+    value
+  );
+
+  handleFilterChange();
+}
+
+function handleFilterChange() {
+  if (!PersonnelState.initialized) {
+    return;
+  }
+
+  filterAndRenderPersonnel();
+  scheduleSheetSync();
+}
+
+function filterAndRenderPersonnel() {
+  PersonnelState.filteredRecords =
+    filterPersonnelRecords();
+
+  syncChipVisuals();
+  updateFilterCounts();
+  updateRankCounts();
+
+  renderPreviewTable();
+  renderActiveFilterSummary();
+}
+
+function clearRanks() {
+  PersonnelState.filters.ranks.clear();
+  handleFilterChange();
+}
+
+function clearAllFilters() {
+  PersonnelState.filters.search = "";
+  PersonnelState.filters.ranks.clear();
+
+  PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
+    const filterSet =
+      PersonnelState.filters[group.key];
+
+    if (filterSet instanceof Set) {
+      filterSet.clear();
+    }
+  });
+
+  document.getElementById(
+    "searchInput"
+  ).value = "";
+
+  closeDuplicatePanel();
+  handleFilterChange();
+}
+
+function minimizeApp() {
+  PersonnelState.minimized = true;
+
+  document
+    .getElementById("app")
+    .classList
+    .add("is-minimized");
+
+  document.getElementById(
+    "minimizedBar"
+  ).hidden = false;
+}
+
+function restoreApp() {
+  PersonnelState.minimized = false;
+
+  document
+    .getElementById("app")
+    .classList
+    .remove("is-minimized");
+
+  document.getElementById(
+    "minimizedBar"
+  ).hidden = true;
+}

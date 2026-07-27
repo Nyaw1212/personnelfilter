@@ -1,0 +1,225 @@
+  function filterPersonnelRecords() {
+  const searchTerm = PersonnelState.filters.search
+    .trim()
+    .toLowerCase();
+
+  return PersonnelState.records.filter(record => {
+    if (!recordMatchesGeneralFilters_(record)) {
+      return false;
+    }
+
+    if (!recordMatchesRanks_(record)) {
+      return false;
+    }
+
+    if (!recordMatchesSearch_(record, searchTerm)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function recordMatchesGeneralFilters_(record) {
+  return PERSONNEL_APP_CONFIG.filterGroups.every(group => {
+    const selectedValues = PersonnelState.filters[group.key];
+
+    if (!selectedValues.size) {
+      return true;
+    }
+
+    const recordValue = normalizeValue_(record[group.recordKey]);
+
+    return selectedValues.has(recordValue);
+  });
+}
+
+function recordMatchesRanks_(record) {
+  const selectedRanks = PersonnelState.filters.ranks;
+
+  if (!selectedRanks.size) {
+    return true;
+  }
+
+  return selectedRanks.has(
+    normalizeValue_(record.Rank)
+  );
+}
+
+function recordMatchesSearch_(record, searchTerm) {
+  if (!searchTerm) {
+    return true;
+  }
+
+  return PERSONNEL_APP_CONFIG.searchableColumns.some(column => {
+    return normalizeValue_(record[column])
+      .toLowerCase()
+      .includes(searchTerm);
+  });
+}
+
+function toggleSetValue_(targetSet, value) {
+  const normalizedValue = normalizeValue_(value);
+
+  if (targetSet.has(normalizedValue)) {
+    targetSet.delete(normalizedValue);
+    return false;
+  }
+
+  targetSet.add(normalizedValue);
+  return true;
+}
+
+function normalizeValue_(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizePersonnelName_(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function analyzePersonnelDuplicates(records) {
+  const nameGroups = new Map();
+
+  records.forEach(record => {
+    const displayName = String(
+      record["Full Name"] || ""
+    ).trim();
+
+    const normalizedName =
+      normalizePersonnelName_(displayName);
+
+    if (!normalizedName) {
+      return;
+    }
+
+    if (!nameGroups.has(normalizedName)) {
+      nameGroups.set(normalizedName, {
+        normalizedName,
+        displayName,
+        records: [],
+      });
+    }
+
+    nameGroups
+      .get(normalizedName)
+      .records
+      .push(record);
+  });
+
+  const duplicateGroups = [...nameGroups.values()]
+    .filter(group => group.records.length > 1)
+    .sort((a, b) => {
+      if (b.records.length !== a.records.length) {
+        return b.records.length - a.records.length;
+      }
+
+      return a.displayName.localeCompare(
+        b.displayName,
+        undefined,
+        { sensitivity: "base" }
+      );
+    });
+
+  const duplicateExtraRows = duplicateGroups.reduce(
+    (total, group) =>
+      total + group.records.length - 1,
+    0
+  );
+
+  const duplicateTotalRows = duplicateGroups.reduce(
+    (total, group) =>
+      total + group.records.length,
+    0
+  );
+
+  return {
+    uniqueCount: nameGroups.size,
+    duplicateNameCount: duplicateGroups.length,
+    duplicateExtraRows,
+    duplicateTotalRows,
+    duplicateGroups,
+  };
+}
+
+//----------------------------------
+// Count Records by Field
+//----------------------------------
+
+function countRecordsByField_(
+  records,
+  fieldName
+) {
+
+  const counts =
+    new Map();
+
+  records.forEach(record => {
+
+    const value =
+      String(
+        record[fieldName] || ""
+      ).trim();
+
+    //----------------------------------
+    // Ignore Blank Values
+    //----------------------------------
+
+    if (!value) {
+      return;
+    }
+
+    counts.set(
+      value,
+      (
+        counts.get(value) || 0
+      ) + 1
+    );
+
+  });
+
+  return [
+    ...counts.entries(),
+  ]
+    .map(
+      ([label, count]) => ({
+        label,
+        count,
+      })
+    )
+    .sort((a, b) => {
+
+      //----------------------------------
+      // Highest Count First
+      //----------------------------------
+
+      if (
+        b.count !== a.count
+      ) {
+
+        return (
+          b.count -
+          a.count
+        );
+
+      }
+
+      //----------------------------------
+      // Alphabetical
+      //----------------------------------
+
+      return a.label.localeCompare(
+        b.label,
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        }
+      );
+
+    });
+
+}

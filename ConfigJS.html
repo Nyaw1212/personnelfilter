@@ -1,0 +1,114 @@
+  const PERSONNEL_APP_CONFIG = {
+  syncDelayMs: 2000,
+  previewRowLimit: 300,
+
+  previewColumns: [
+    "Full Name",
+    "Rank",
+    "Gender",
+    "Category",
+    "Type",
+    "Office",
+    "Camp",
+    "Status",
+  ],
+
+  searchableColumns: [
+    "Full Name",
+    "Rank",
+    "Gender",
+    "Category",
+    "Type",
+    "Office",
+    "Camp",
+    "Status",
+  ],
+
+  filterGroups: [
+    {
+      key: "camps",
+      recordKey: "Camp",
+      label: "Camp",
+      values: ["NBP", "CIW", "SPPF", "Sablayan", "Leyte"],
+    },
+
+    {
+      key: "genders",
+      recordKey: "Gender",
+      label: "Gender",
+      values: ["Male", "Female"],
+    },
+
+    {
+      key: "categories",
+      recordKey: "Category",
+      label: "Category",
+      values: ["Custodial", "Non-Custodial", "Non-Uniformed Personnel"],
+    },
+
+    {
+      key: "types",
+      recordKey: "Type",
+      label: "Type",
+      values: ["Uniformed", "Non-Uniformed"],
+    },
+
+    {
+      key: "offices",
+      recordKey: "Office",
+      label: "Office",
+      values: [],
+    },
+
+    {
+      key: "statuses",
+      recordKey: "Status",
+      label: "Status",
+      values: [
+        "Active",
+        "OB",
+        "VL",
+        "SL",
+        "SPL",
+        "FL",
+        "AWOL",
+        "Under Investigation",
+        "On Suspension",
+        "Retired",
+      ],
+    },
+  ],
+
+  rankGroups: {
+    commissioned: {
+      label: "Commissioned Officers",
+
+      values: [
+        "CCSUPT",
+        "CTCSUPT",
+        "CSSUPT",
+        "CTSSUPT",
+        "CSUPT",
+        "CTSUPT",
+        "CCINSP",
+        "CTCINSP",
+        "CSINSP",
+        "CTSINSP",
+        "CINSP",
+        "CTINSP",
+      ],
+    },
+
+    nonCommissioned: {
+      label: "Non-Commissioned",
+
+      values: ["CSO4", "CSO3", "CSO2", "CSO1", "CO3", "CO2", "CO1"],
+    },
+
+    technical: {
+      label: "Technical (Non-Commissioned)",
+
+      values: ["CTSO4", "CTSO3", "CTSO2", "CTSO1", "CTO3", "CTO2", "CTO1"],
+    },
+  },
+};

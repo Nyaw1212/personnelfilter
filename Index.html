@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+        <base target="_top" />
+
+<meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Personnel Filter Web App</title>
+    <?!= include("Styles"); ?>
+</head>
+
+  <body>
+    <div id="app" class="app-shell">
+     <!-- ================================== -->
+<!-- Header -->
+<!-- ================================== -->
+
+<header class="app-header">
+
+  <div class="app-title-block">
+
+    <div class="app-logo">
+
+      <img
+  src="https://lh3.googleusercontent.com/d/1LUuNAJp8zC5gdwY8dfUPGxSn7NggVbSE"
+  alt="New Bilibid Prison Logo"
+>
+
+    </div>
+
+    <div class="app-title">
+
+      <h1>Personnel Filter</h1>
+
+      <p>
+        Search, filter, preview, and sync personnel records
+      </p>
+
+    </div>
+
+  </div>
+
+  <div class="window-actions">
+
+    <div
+      id="syncStatus"
+      class="sync-status sync-ready"
+    >
+      Preview ready
+    </div>
+
+    <button
+      id="minimizeButton"
+      class="window-button"
+      type="button"
+      title="Minimize"
+    >
+      —
+    </button>
+
+    <button
+      id="restoreButton"
+      class="window-button"
+      type="button"
+      title="Restore"
+      hidden
+    >
+      □
+    </button>
+
+  </div>
+
+</header>
+
+      <!-- ================================== -->
+      <!-- Main Content -->
+      <!-- ================================== -->
+
+      <main id="appContent" class="app-content">
+        <!-- ================================== -->
+        <!-- Filter Panel -->
+        <!-- ================================== -->
+
+        <section class="filter-panel">
+          <div class="search-row">
+            <div class="search-box">
+              <span class="search-icon"> ⌕ </span>
+
+              <input
+                id="searchInput"
+                type="search"
+                placeholder="Search personnel..."
+                autocomplete="off"
+              />
+            </div>
+
+            <button
+              id="clearFiltersButton"
+              class="button button-secondary"
+              type="button"
+            >
+              Clear All
+            </button>
+          </div>
+
+          <div id="generalFilterGroups" class="general-filter-groups"></div>
+
+          <!-- ================================== -->
+          <!-- Rank Filter -->
+          <!-- ================================== -->
+
+          <section class="rank-section">
+            <div class="section-heading">
+              <div>
+                <span class="section-eyebrow"> RANK SELECTION </span>
+
+                <h2>Rank Filter</h2>
+              </div>
+
+              <button
+                id="clearRanksButton"
+                class="button button-ghost"
+                type="button"
+              >
+                Clear Ranks
+              </button>
+            </div>
+
+            <div class="rank-layout">
+              <!-- ================================== -->
+              <!-- Commissioned Officers -->
+              <!-- ================================== -->
+
+              <article class="rank-card commissioned-card">
+                <div class="rank-card-header">
+                  <h3>Commissioned Officers</h3>
+
+                  <span id="commissionedCount" class="count-badge">
+                    0 selected
+                  </span>
+                </div>
+
+                <div
+                  id="commissionedRanks"
+                  class="rank-chip-grid commissioned-grid"
+                ></div>
+              </article>
+
+              <!-- ================================== -->
+              <!-- Non-Commissioned -->
+              <!-- ================================== -->
+
+              <article class="rank-card">
+                <div class="rank-card-header">
+                  <h3>Non-Commissioned</h3>
+
+                  <span id="nonCommissionedCount" class="count-badge">
+                    0 selected
+                  </span>
+                </div>
+
+                <div id="nonCommissionedRanks" class="rank-chip-grid"></div>
+              </article>
+
+              <!-- ================================== -->
+              <!-- Technical Non-Commissioned -->
+              <!-- ================================== -->
+
+              <article class="rank-card">
+                <div class="rank-card-header">
+                  <h3>Technical (Non-Commissioned)</h3>
+
+                  <span id="technicalCount" class="count-badge">
+                    0 selected
+                  </span>
+                </div>
+
+                <div id="technicalRanks" class="rank-chip-grid"></div>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <!-- ================================== -->
+        <!-- Preview Panel -->
+        <!-- ================================== -->
+
+        <section class="preview-panel">
+          <div class="preview-toolbar">
+            <div>
+              <span class="section-eyebrow"> LIVE PREVIEW </span>
+
+              <h2>Personnel Table</h2>
+            </div>
+
+            <div class="preview-stats">
+              <span id="resultCount" class="result-count"> 0 personnel </span>
+
+              <span id="rawResultCount" class="raw-result-count"> 0 rows </span>
+
+              <button
+                id="showDuplicatesButton"
+                class="duplicate-button"
+                type="button"
+                hidden
+              >
+                Show Duplicates
+              </button>
+
+              <span id="previewLimitLabel" class="preview-limit-label"></span>
+            </div>
+          </div>
+
+          <div class="table-shell">
+            <table class="personnel-table">
+              <thead>
+                <tr id="previewTableHeader"></tr>
+              </thead>
+
+              <tbody id="previewTableBody"></tbody>
+            </table>
+
+            <div id="emptyState" class="empty-state" hidden>
+              <div class="empty-state-icon">⌕</div>
+
+              <h3>No personnel found</h3>
+
+              <p>Try changing or clearing the active filters.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================================== -->
+        <!-- Counting Reports -->
+        <!-- ================================== -->
+
+        <aside class="report-panel">
+          <div class="report-panel-header">
+            <span class="section-eyebrow"> LIVE COUNTS </span>
+
+            <h2>Personnel Summary</h2>
+
+            <p>Counts update with the current filters.</p>
+          </div>
+
+          <div class="report-panel-content">
+            <section class="report-card">
+              <div class="report-card-header">
+                <h3>Gender</h3>
+              </div>
+
+              <div id="genderReport" class="report-list"></div>
+            </section>
+
+            <section class="report-card">
+              <div class="report-card-header">
+                <h3>Category</h3>
+              </div>
+
+              <div id="categoryReport" class="report-list"></div>
+            </section>
+
+            <section class="report-card">
+              <div class="report-card-header">
+                <h3>Type</h3>
+              </div>
+
+              <div id="typeReport" class="report-list"></div>
+            </section>
+
+            <section class="report-card">
+              <div class="report-card-header">
+                <h3>Offices</h3>
+              </div>
+
+              <div
+                id="officeReport"
+                class="report-list report-list-offices"
+              ></div>
+            </section>
+
+            <section class="report-card">
+              <div class="report-card-header">
+                <h3>Ranks</h3>
+              </div>
+
+              <div id="rankReport" class="report-list report-list-ranks"></div>
+            </section>
+          </div>
+        </aside>
+
+        <!-- ================================== -->
+        <!-- Duplicate Panel Backdrop -->
+        <!-- ================================== -->
+
+        <div
+          id="duplicatePanelBackdrop"
+          class="duplicate-panel-backdrop"
+          hidden
+        ></div>
+
+        <!-- ================================== -->
+        <!-- Duplicate Personnel Panel -->
+        <!-- ================================== -->
+
+        <aside id="duplicatePanel" class="duplicate-panel" hidden>
+          <div class="duplicate-panel-header">
+            <div>
+              <span class="section-eyebrow"> DATA QUALITY </span>
+
+              <h2>Duplicated Personnel Names</h2>
+            </div>
+
+            <button
+              id="closeDuplicatePanelButton"
+              class="duplicate-close-button"
+              type="button"
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="duplicate-panel-summary">
+            <div class="duplicate-summary-card">
+              <span> Duplicate Names </span>
+
+              <strong id="duplicateNameCount"> 0 </strong>
+            </div>
+
+            <div class="duplicate-summary-card">
+              <span> Duplicate Rows </span>
+
+              <strong id="duplicateRowCount"> 0 </strong>
+            </div>
+          </div>
+
+          <div id="duplicateList" class="duplicate-list"></div>
+        </aside>
+      </main>
+
+      <!-- ================================== -->
+      <!-- Footer -->
+      <!-- ================================== -->
+
+      <footer id="appFooter" class="app-footer">
+        <div>
+          <div id="activeFilterSummary" class="active-filter-summary">
+            No active filters
+          </div>
+
+          <div id="lastSyncLabel" class="last-sync-label">
+            Connected to Google Sheets through Apps Script.
+          </div>
+        </div>
+
+        <div class="footer-actions">
+          <label class="toggle-control">
+            <input id="autoApplyToggle" type="checkbox" checked />
+
+            <span class="toggle-slider"></span>
+
+            <span class="toggle-label"> Auto Apply </span>
+          </label>
+
+          <button
+            id="applyNowButton"
+            class="button button-primary"
+            type="button"
+          >
+            Apply Now
+          </button>
+        </div>
+      </footer>
+
+      <!-- ================================== -->
+      <!-- Minimized Bar -->
+      <!-- ================================== -->
+
+      <div id="minimizedBar" class="minimized-bar" hidden>
+        <div>
+          <strong> Personnel Filter </strong>
+
+          <span id="minimizedResultCount"> 0 personnel </span>
+        </div>
+
+        <button
+          id="restoreFromBarButton"
+          class="button button-primary button-small"
+          type="button"
+        >
+          Restore
+        </button>
+      </div>
+    </div>
+    <!-- ================================== -->
+    <!-- Apps Script JavaScript Includes -->
+    <!-- ================================== -->
+
+    <?!= include("AOBucketJS"); ?>
+
+<!-- ================================== -->
+<!-- Apps Script JavaScript -->
+<!-- ================================== -->
+
+<script>
+
+  <?!= include("ConfigJS"); ?>
+
+  <?!= include("PersonnelAPIJS"); ?>
+
+  <?!= include("StateJS"); ?>
+
+  <?!= include("FilterEngineJS"); ?>
+
+  <?!= include("RenderersJS"); ?>
+
+  <?!= include("SyncEngineJS"); ?>
+
+  <?!= include("AppJS"); ?>
+
+</script>
+</body>
+</html>
