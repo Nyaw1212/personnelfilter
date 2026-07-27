@@ -2,106 +2,143 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "aoBucketsV1";
+  const STORAGE_KEY = "aoBucketsV2";
+
   const state = {
     buckets: [],
     activeBucketId: "",
   };
 
-  document.addEventListener("DOMContentLoaded", initAoBuckets);
+  document.addEventListener("DOMContentLoaded", initializeAoBuckets);
 
-  function initAoBuckets() {
-    loadState();
-    injectStyles();
-    buildUi();
-    watchPreview();
-    refreshUi();
+  function initializeAoBuckets() {
+    loadState_();
+    injectStyles_();
+    buildControls_();
+    observePreviewTable_();
+    refreshUi_();
+
+    window.AOBucket = {
+      add: addVisibleRecord_,
+      addAllVisible,
+      contains: recordIsInActiveBucket_,
+      refresh: refreshUi_,
+      open: openDrawer_,
+    };
   }
 
-  function buildUi() {
-    const app = document.getElementById("app") || document.body;
+  function buildControls_() {
+    const previewToolbar = document.querySelector(".preview-toolbar");
+    const previewStats = document.querySelector(".preview-stats");
 
-    const toolbar = document.createElement("div");
-    toolbar.id = "aoBucketToolbar";
-    toolbar.className = "ao-bucket-toolbar";
-    toolbar.innerHTML = `
-      <button id="createAoBucketButton" class="ao-btn ao-primary" type="button">+ Create AO Bucket</button>
-      <button id="addAllVisibleButton" class="ao-btn" type="button">+ Add All Visible</button>
-      <button id="openAoBucketsButton" class="ao-btn" type="button">
-        AO Buckets <span id="aoBucketCount" class="ao-badge">0</span>
-      </button>
-    `;
-
-    const previewHeader = document.getElementById("previewTableHeader");
-    const previewSection = previewHeader?.closest("section") || previewHeader?.parentElement;
-
-    if (previewSection?.parentNode) {
-      previewSection.parentNode.insertBefore(toolbar, previewSection);
-    } else {
-      app.prepend(toolbar);
+    if (!previewToolbar || !previewStats) {
+      window.setTimeout(buildControls_, 250);
+      return;
     }
 
-    const backdrop = document.createElement("div");
-    backdrop.id = "aoBucketBackdrop";
-    backdrop.className = "ao-backdrop";
-    backdrop.hidden = true;
+    if (!document.getElementById("aoBucketControls")) {
+      const controls = document.createElement("div");
+      controls.id = "aoBucketControls";
+      controls.className = "ao-bucket-controls";
+      controls.innerHTML = `
+        <button id="createAoBucketButton" class="ao-control-button ao-control-primary" type="button">
+          + Bucket
+        </button>
+        <button id="addAllVisibleButton" class="ao-control-button" type="button">
+          + Add visible
+        </button>
+        <button id="openAoBucketsButton" class="ao-control-button" type="button">
+          AO Cart <span id="aoBucketCount" class="ao-count-badge">0</span>
+        </button>
+      `;
 
-    const drawer = document.createElement("aside");
-    drawer.id = "aoBucketDrawer";
-    drawer.className = "ao-drawer";
-    drawer.hidden = true;
-    drawer.innerHTML = `
-      <div class="ao-drawer-header">
-        <div>
-          <small>Administrative Order</small>
-          <h2>AO Buckets</h2>
+      previewStats.prepend(controls);
+    }
+
+    if (!document.getElementById("aoBucketBackdrop")) {
+      const backdrop = document.createElement("div");
+      backdrop.id = "aoBucketBackdrop";
+      backdrop.className = "ao-bucket-backdrop";
+      backdrop.hidden = true;
+      document.body.appendChild(backdrop);
+    }
+
+    if (!document.getElementById("aoBucketDrawer")) {
+      const drawer = document.createElement("aside");
+      drawer.id = "aoBucketDrawer";
+      drawer.className = "ao-bucket-drawer";
+      drawer.hidden = true;
+      drawer.innerHTML = `
+        <div class="ao-drawer-header">
+          <div>
+            <span>ADMINISTRATIVE ORDER</span>
+            <h2>AO Buckets</h2>
+          </div>
+          <button id="closeAoBucketsButton" class="ao-icon-button" type="button" aria-label="Close">×</button>
         </div>
-        <button id="closeAoBucketsButton" class="ao-icon-btn" type="button">×</button>
-      </div>
 
-      <div id="aoBucketMessage" class="ao-message"></div>
+        <div id="aoBucketMessage" class="ao-message"></div>
 
-      <div class="ao-create-grid">
-        <input id="aoBucketNameInput" type="text" placeholder="Bucket name">
-        <input id="aoBucketDestinationInput" type="text" placeholder="Destination office">
-        <button id="saveAoBucketButton" class="ao-btn ao-primary" type="button">Create Bucket</button>
-      </div>
+        <div class="ao-create-form">
+          <input id="aoBucketNameInput" type="text" placeholder="Bucket name, e.g. Transfer to Command Center">
+          <input id="aoBucketDestinationInput" type="text" placeholder="Destination office">
+          <button id="saveAoBucketButton" class="ao-control-button ao-control-primary" type="button">
+            Create Bucket
+          </button>
+        </div>
 
-      <div id="aoBucketList" class="ao-bucket-list"></div>
-    `;
+        <div id="aoBucketList" class="ao-bucket-list"></div>
+      `;
+      document.body.appendChild(drawer);
+    }
 
-    document.body.append(backdrop, drawer);
-
-    document.getElementById("createAoBucketButton").addEventListener("click", () => {
-      openDrawer();
-      document.getElementById("aoBucketNameInput").focus();
-    });
-
-    document.getElementById("openAoBucketsButton").addEventListener("click", openDrawer);
-    document.getElementById("closeAoBucketsButton").addEventListener("click", closeDrawer);
-    document.getElementById("aoBucketBackdrop").addEventListener("click", closeDrawer);
-    document.getElementById("saveAoBucketButton").addEventListener("click", createBucket);
-    document.getElementById("addAllVisibleButton").addEventListener("click", addAllVisible);
-
-    document.addEventListener("keydown", event => {
-      if (event.key === "Escape") closeDrawer();
-    });
+    bindControls_();
   }
 
-  function createBucket() {
+  function bindControls_() {
+    bindClick_("createAoBucketButton", function () {
+      openDrawer_();
+      document.getElementById("aoBucketNameInput")?.focus();
+    });
+
+    bindClick_("addAllVisibleButton", addAllVisible);
+    bindClick_("openAoBucketsButton", openDrawer_);
+    bindClick_("closeAoBucketsButton", closeDrawer_);
+    bindClick_("saveAoBucketButton", createBucket_);
+    bindClick_("aoBucketBackdrop", closeDrawer_);
+
+    if (!document.body.dataset.aoEscapeBound) {
+      document.body.dataset.aoEscapeBound = "true";
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          closeDrawer_();
+        }
+      });
+    }
+  }
+
+  function bindClick_(id, handler) {
+    const element = document.getElementById(id);
+    if (!element || element.dataset.aoBound === "true") return;
+
+    element.dataset.aoBound = "true";
+    element.addEventListener("click", handler);
+  }
+
+  function createBucket_() {
     const nameInput = document.getElementById("aoBucketNameInput");
     const destinationInput = document.getElementById("aoBucketDestinationInput");
 
-    const name = String(nameInput.value || "").trim();
-    const destinationOffice = String(destinationInput.value || "").trim();
+    const name = clean_(nameInput?.value);
+    const destinationOffice = clean_(destinationInput?.value);
 
     if (!name || !destinationOffice) {
-      showMessage("Enter both the bucket name and destination office.", "error");
+      showMessage_("Enter both a bucket name and destination office.", "error");
       return;
     }
 
     const bucket = {
-      id: `bucket_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: `bucket_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       name,
       destinationOffice,
       personnel: [],
@@ -113,61 +150,87 @@
     nameInput.value = "";
     destinationInput.value = "";
 
-    saveState();
-    refreshUi();
-    showMessage(`Created "${bucket.name}".`, "success");
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
+    showMessage_(`Created “${bucket.name}”. It is now active.`, "success");
   }
 
   function addAllVisible() {
-    const bucket = getActiveBucket();
+    const bucket = requireActiveBucket_();
+    if (!bucket) return;
 
-    if (!bucket) {
-      openDrawer();
-      showMessage("Create or select an AO bucket first.", "error");
+    const records = getVisibleRecords_();
+
+    if (!records.length) {
+      openDrawer_();
+      showMessage_("No visible personnel were found.", "error");
       return;
     }
 
-    const records = getVisibleRecords();
     let added = 0;
 
-    records.forEach(record => {
-      if (addRecord(bucket, record)) added++;
+    records.forEach(function (record) {
+      if (addRecordToBucket_(bucket, record)) {
+        added++;
+      }
     });
 
-    saveState();
-    refreshUi();
-    decorateRows();
-    openDrawer();
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
+    openDrawer_();
 
-    showMessage(
+    showMessage_(
       added
-        ? `${added} visible personnel added to "${bucket.name}".`
-        : "All visible personnel are already in this bucket.",
+        ? `${added.toLocaleString()} personnel added to “${bucket.name}”.`
+        : "All visible personnel are already in the active bucket.",
       added ? "success" : ""
     );
   }
 
-  function addRecord(bucket, record) {
-    const item = normalizeRecord(record, bucket.destinationOffice);
+  function addVisibleRecord_(record) {
+    const bucket = requireActiveBucket_();
+    if (!bucket) return false;
 
-    if (bucket.personnel.some(person => person.key === item.key)) {
+    const added = addRecordToBucket_(bucket, record);
+
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
+
+    if (added) {
+      showMessage_(`${getRecordName_(record)} added to “${bucket.name}”.`, "success");
+    }
+
+    return added;
+  }
+
+  function addRecordToBucket_(bucket, record) {
+    const normalized = normalizeRecord_(record, bucket.destinationOffice);
+
+    if (bucket.personnel.some(function (person) {
+      return person.key === normalized.key;
+    })) {
       return false;
     }
 
-    bucket.personnel.push(item);
+    bucket.personnel.push(normalized);
     return true;
   }
 
-  function normalizeRecord(record, destinationOffice) {
-    const rank = pick(record, ["Rank", "RANK", "rank"]);
-    const fullName = pick(record, ["Full Name", "FULL NAME", "fullName", "name"]);
-    const from = pick(record, ["Office", "OFFICE", "office"]);
-    const sourceRow = pick(record, ["__sheetRow", "sheetRow", "rowIndex", "id"]);
+  function normalizeRecord_(record, destinationOffice) {
+    const rank = pick_(record, ["Rank", "RANK", "rank"]);
+    const fullName = pick_(record, ["Full Name", "FULL NAME", "fullName", "name"]);
+    const from = pick_(record, ["Office", "OFFICE", "office"]);
+    const sourceRow = pick_(record, ["__sheetRow", "sheetRow", "rowIndex", "id"]);
+
+    const key = sourceRow
+      ? `row:${sourceRow}`
+      : [rank, fullName, from].map(normalizeKey_).join("|");
 
     return {
-      key: sourceRow
-        ? `row:${sourceRow}`
-        : [rank, fullName, from].map(normalize).join("|"),
+      key,
       sourceRow,
       rank,
       fullName,
@@ -177,117 +240,145 @@
     };
   }
 
-  function pick(record, keys) {
-    for (const key of keys) {
-      const value = record?.[key];
-      if (value !== null && value !== undefined && String(value).trim()) {
-        return String(value).trim();
-      }
-    }
-    return "";
-  }
-
-  function normalize(value) {
-    return String(value || "").trim().toLowerCase();
-  }
-
-  function getVisibleRecords() {
+  function getVisibleRecords_() {
     return Array.isArray(window.PersonnelState?.filteredRecords)
       ? window.PersonnelState.filteredRecords
       : [];
   }
 
-  function getActiveBucket() {
-    return state.buckets.find(bucket => bucket.id === state.activeBucketId) || null;
+  function getActiveBucket_() {
+    return state.buckets.find(function (bucket) {
+      return bucket.id === state.activeBucketId;
+    }) || null;
   }
 
-  function setActiveBucket(bucketId) {
+  function requireActiveBucket_() {
+    const bucket = getActiveBucket_();
+
+    if (!bucket) {
+      openDrawer_();
+      showMessage_("Create or select an AO bucket first.", "error");
+      return null;
+    }
+
+    return bucket;
+  }
+
+  function recordIsInActiveBucket_(record) {
+    const bucket = getActiveBucket_();
+    if (!bucket) return false;
+
+    const normalized = normalizeRecord_(record, bucket.destinationOffice);
+    return bucket.personnel.some(function (person) {
+      return person.key === normalized.key;
+    });
+  }
+
+  function setActiveBucket_(bucketId) {
     state.activeBucketId = bucketId;
-    saveState();
-    refreshUi();
-    decorateRows();
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
   }
 
-  function removePerson(bucketId, personKey) {
-    const bucket = state.buckets.find(item => item.id === bucketId);
+  function removePerson_(bucketId, personKey) {
+    const bucket = state.buckets.find(function (item) {
+      return item.id === bucketId;
+    });
+
     if (!bucket) return;
 
-    bucket.personnel = bucket.personnel.filter(person => person.key !== personKey);
-    saveState();
-    refreshUi();
-    decorateRows();
+    bucket.personnel = bucket.personnel.filter(function (person) {
+      return person.key !== personKey;
+    });
+
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
   }
 
-  function clearBucket(bucketId) {
-    const bucket = state.buckets.find(item => item.id === bucketId);
-    if (!bucket || !confirm(`Clear "${bucket.name}"?`)) return;
+  function clearBucket_(bucketId) {
+    const bucket = state.buckets.find(function (item) {
+      return item.id === bucketId;
+    });
+
+    if (!bucket || !window.confirm(`Clear all personnel from “${bucket.name}”?`)) return;
 
     bucket.personnel = [];
-    saveState();
-    refreshUi();
-    decorateRows();
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
   }
 
-  function deleteBucket(bucketId) {
-    const bucket = state.buckets.find(item => item.id === bucketId);
-    if (!bucket || !confirm(`Delete "${bucket.name}"?`)) return;
+  function deleteBucket_(bucketId) {
+    const bucket = state.buckets.find(function (item) {
+      return item.id === bucketId;
+    });
 
-    state.buckets = state.buckets.filter(item => item.id !== bucketId);
+    if (!bucket || !window.confirm(`Delete “${bucket.name}”?`)) return;
+
+    state.buckets = state.buckets.filter(function (item) {
+      return item.id !== bucketId;
+    });
 
     if (state.activeBucketId === bucketId) {
       state.activeBucketId = state.buckets[0]?.id || "";
     }
 
-    saveState();
-    refreshUi();
-    decorateRows();
+    saveState_();
+    refreshUi_();
+    decoratePreviewRows_();
   }
 
-  function updateDestination(bucketId, destinationOffice) {
-    const bucket = state.buckets.find(item => item.id === bucketId);
+  function updateDestination_(bucketId, destinationOffice) {
+    const bucket = state.buckets.find(function (item) {
+      return item.id === bucketId;
+    });
+
     if (!bucket) return;
 
-    bucket.destinationOffice = String(destinationOffice || "").trim();
-
-    bucket.personnel.forEach(person => {
+    bucket.destinationOffice = clean_(destinationOffice);
+    bucket.personnel.forEach(function (person) {
       person.to = bucket.destinationOffice;
     });
 
-    saveState();
-    refreshUi();
+    saveState_();
+    refreshUi_();
   }
 
-  function sendBucket(bucketId) {
-    const bucket = state.buckets.find(item => item.id === bucketId);
+  function sendBucket_(bucketId) {
+    const bucket = state.buckets.find(function (item) {
+      return item.id === bucketId;
+    });
 
     if (!bucket) {
-      showMessage("Bucket not found.", "error");
+      showMessage_("Bucket not found.", "error");
       return;
     }
 
     if (!bucket.destinationOffice) {
-      showMessage("Destination office is required.", "error");
+      showMessage_("Enter a destination office first.", "error");
       return;
     }
 
     if (!bucket.personnel.length) {
-      showMessage("This bucket is empty.", "error");
+      showMessage_("This bucket is empty.", "error");
       return;
     }
 
-    showMessage(`Sending ${bucket.personnel.length} personnel to AOGENup...`, "working");
+    showMessage_(`Sending ${bucket.personnel.length} personnel to AOGENup…`, "working");
 
     google.script.run
-      .withSuccessHandler(result => {
-        showMessage(
+      .withSuccessHandler(function (result) {
+        showMessage_(
           result?.success
-            ? `${result.receivedCount || bucket.personnel.length} personnel sent successfully.`
+            ? `${result.receivedCount || bucket.personnel.length} personnel sent to AOGENup.`
             : result?.message || "AOGENup rejected the bucket.",
           result?.success ? "success" : "error"
         );
       })
-      .withFailureHandler(error => {
-        showMessage(error?.message || String(error), "error");
+      .withFailureHandler(function (error) {
+        showMessage_(error?.message || String(error || "Unable to send bucket."), "error");
       })
       .sendAoBucketToAogen({
         id: bucket.id,
@@ -297,165 +388,161 @@
       });
   }
 
-  function watchPreview() {
+  function observePreviewTable_() {
     const body = document.getElementById("previewTableBody");
 
     if (!body) {
-      setTimeout(watchPreview, 300);
+      window.setTimeout(observePreviewTable_, 250);
       return;
     }
 
-    new MutationObserver(decorateRows).observe(body, {
+    const observer = new MutationObserver(decoratePreviewRows_);
+    observer.observe(body, {
       childList: true,
       subtree: false,
     });
 
-    decorateRows();
+    decoratePreviewRows_();
   }
 
-  function decorateRows() {
-    const body = document.getElementById("previewTableBody");
+  function decoratePreviewRows_() {
     const header = document.getElementById("previewTableHeader");
+    const body = document.getElementById("previewTableBody");
 
-    if (!body || !header) return;
+    if (!header || !body) return;
 
-    if (!header.querySelector(".ao-action-header")) {
-      const th = document.createElement("th");
-      th.className = "ao-action-header";
-      th.textContent = "AO Bucket";
-      header.appendChild(th);
+    let actionHeader = header.querySelector(".ao-action-header");
+
+    if (!actionHeader) {
+      actionHeader = document.createElement("th");
+      actionHeader.className = "ao-action-header";
+      actionHeader.textContent = "AO";
     }
 
-    const records = getVisibleRecords();
-    const activeBucket = getActiveBucket();
+    if (header.firstElementChild !== actionHeader) {
+      header.insertBefore(actionHeader, header.firstElementChild);
+    }
 
-    [...body.querySelectorAll("tr")].forEach((row, index) => {
-      let cell = row.querySelector(".ao-action-cell");
+    const records = getVisibleRecords_().slice(
+      0,
+      window.PERSONNEL_APP_CONFIG?.previewRowLimit || 300
+    );
 
-      if (!cell) {
-        cell = document.createElement("td");
-        cell.className = "ao-action-cell";
-        row.appendChild(cell);
+    Array.from(body.querySelectorAll("tr")).forEach(function (row, index) {
+      let actionCell = row.querySelector(".ao-action-cell");
+
+      if (!actionCell) {
+        actionCell = document.createElement("td");
+        actionCell.className = "ao-action-cell";
+      }
+
+      if (row.firstElementChild !== actionCell) {
+        row.insertBefore(actionCell, row.firstElementChild);
       }
 
       const record = records[index];
+      actionCell.innerHTML = "";
 
-      if (!record) {
-        cell.textContent = "";
-        return;
-      }
+      if (!record) return;
 
-      const item = normalizeRecord(record, activeBucket?.destinationOffice || "");
-      const added = Boolean(
-        activeBucket?.personnel.some(person => person.key === item.key)
-      );
-
+      const added = recordIsInActiveBucket_(record);
       const button = document.createElement("button");
+
       button.type = "button";
-      button.className = `ao-row-btn${added ? " is-added" : ""}`;
+      button.className = `ao-row-button${added ? " is-added" : ""}`;
       button.textContent = added ? "✓ Added" : "+ Add";
       button.disabled = added;
 
-      button.addEventListener("click", () => {
-        const bucket = getActiveBucket();
-
-        if (!bucket) {
-          openDrawer();
-          showMessage("Create or select an AO bucket first.", "error");
-          return;
-        }
-
-        addRecord(bucket, record);
-        saveState();
-        refreshUi();
-        decorateRows();
+      button.addEventListener("click", function () {
+        addVisibleRecord_(record);
       });
 
-      cell.innerHTML = "";
-      cell.appendChild(button);
+      actionCell.appendChild(button);
     });
   }
 
-  function refreshUi() {
-    renderBucketList();
-    updateBadge();
+  function refreshUi_() {
+    renderBuckets_();
+    updateCounts_();
   }
 
-  function renderBucketList() {
+  function renderBuckets_() {
     const list = document.getElementById("aoBucketList");
     if (!list) return;
 
     list.innerHTML = "";
 
     if (!state.buckets.length) {
-      list.innerHTML = '<div class="ao-empty">No AO buckets yet.</div>';
+      list.innerHTML = '<div class="ao-empty-state">No AO buckets yet. Create one to begin.</div>';
       return;
     }
 
-    state.buckets.forEach(bucket => {
+    state.buckets.forEach(function (bucket) {
       const card = document.createElement("article");
-      card.className = `ao-card${bucket.id === state.activeBucketId ? " is-active" : ""}`;
+      card.className = `ao-bucket-card${bucket.id === state.activeBucketId ? " is-active" : ""}`;
 
-      const people = bucket.personnel.map((person, index) => `
-        <div class="ao-person">
-          <div>
-            <strong>${index + 1}. ${escapeHtml([person.rank, person.fullName].filter(Boolean).join(" "))}</strong>
-            <small>${escapeHtml(person.from)} → ${escapeHtml(bucket.destinationOffice)}</small>
+      const personnelHtml = bucket.personnel.map(function (person, index) {
+        return `
+          <div class="ao-person-row">
+            <div>
+              <strong>${index + 1}. ${escapeHtml_([person.rank, person.fullName].filter(Boolean).join(" "))}</strong>
+              <small>${escapeHtml_(person.from || "No current office")} → ${escapeHtml_(bucket.destinationOffice)}</small>
+            </div>
+            <button class="ao-icon-button" type="button" data-remove-person="${escapeHtml_(person.key)}">×</button>
           </div>
-          <button class="ao-icon-btn" type="button" data-remove-person="${escapeHtml(person.key)}">×</button>
-        </div>
-      `).join("");
+        `;
+      }).join("");
 
       card.innerHTML = `
-        <div class="ao-card-header">
+        <div class="ao-bucket-card-header">
           <div>
-            <strong>${escapeHtml(bucket.name)}</strong>
-            <small>${bucket.personnel.length} personnel</small>
+            <strong>${escapeHtml_(bucket.name)}</strong>
+            <small>${bucket.personnel.length.toLocaleString()} personnel</small>
           </div>
-          <button class="ao-btn" type="button" data-active-bucket="${bucket.id}">
-            ${bucket.id === state.activeBucketId ? "Active Bucket" : "Set Active"}
+          <button class="ao-control-button" type="button" data-set-active="${bucket.id}" ${bucket.id === state.activeBucketId ? "disabled" : ""}>
+            ${bucket.id === state.activeBucketId ? "Active" : "Set active"}
           </button>
         </div>
 
         <label class="ao-field">
           <span>Destination office</span>
-          <input type="text" value="${escapeHtml(bucket.destinationOffice)}" data-destination="${bucket.id}">
+          <input type="text" value="${escapeHtml_(bucket.destinationOffice)}" data-destination="${bucket.id}">
         </label>
 
         <div class="ao-person-list">
-          ${people || '<div class="ao-empty-small">No personnel added.</div>'}
+          ${personnelHtml || '<div class="ao-empty-small">No personnel added.</div>'}
         </div>
 
-        <div class="ao-card-actions">
-          <button class="ao-btn" type="button" data-clear-bucket="${bucket.id}">Clear</button>
-          <button class="ao-btn ao-danger" type="button" data-delete-bucket="${bucket.id}">Delete</button>
-          <button class="ao-btn ao-primary" type="button" data-send-bucket="${bucket.id}">Send to AOGENup</button>
+        <div class="ao-bucket-actions">
+          <button class="ao-control-button" type="button" data-clear="${bucket.id}">Clear</button>
+          <button class="ao-control-button ao-danger" type="button" data-delete="${bucket.id}">Delete</button>
+          <button class="ao-control-button ao-control-primary" type="button" data-send="${bucket.id}">Send to AOGENup</button>
         </div>
       `;
 
-      card.querySelector("[data-active-bucket]").addEventListener("click", () => {
-        setActiveBucket(bucket.id);
+      card.querySelector("[data-set-active]")?.addEventListener("click", function () {
+        setActiveBucket_(bucket.id);
       });
 
-      card.querySelector("[data-destination]").addEventListener("change", event => {
-        updateDestination(bucket.id, event.target.value);
+      card.querySelector("[data-destination]")?.addEventListener("change", function (event) {
+        updateDestination_(bucket.id, event.target.value);
       });
 
-      card.querySelector("[data-clear-bucket]").addEventListener("click", () => {
-        clearBucket(bucket.id);
+      card.querySelector("[data-clear]")?.addEventListener("click", function () {
+        clearBucket_(bucket.id);
       });
 
-      card.querySelector("[data-delete-bucket]").addEventListener("click", () => {
-        deleteBucket(bucket.id);
+      card.querySelector("[data-delete]")?.addEventListener("click", function () {
+        deleteBucket_(bucket.id);
       });
 
-      card.querySelector("[data-send-bucket]").addEventListener("click", () => {
-        sendBucket(bucket.id);
+      card.querySelector("[data-send]")?.addEventListener("click", function () {
+        sendBucket_(bucket.id);
       });
 
-      card.querySelectorAll("[data-remove-person]").forEach(button => {
-        button.addEventListener("click", () => {
-          removePerson(bucket.id, button.dataset.removePerson);
+      card.querySelectorAll("[data-remove-person]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          removePerson_(bucket.id, button.dataset.removePerson);
         });
       });
 
@@ -463,56 +550,63 @@
     });
   }
 
-  function updateBadge() {
-    const total = state.buckets.reduce(
-      (sum, bucket) => sum + bucket.personnel.length,
-      0
-    );
+  function updateCounts_() {
+    const total = state.buckets.reduce(function (sum, bucket) {
+      return sum + bucket.personnel.length;
+    }, 0);
 
     const badge = document.getElementById("aoBucketCount");
-    if (badge) badge.textContent = total;
+    if (badge) badge.textContent = total.toLocaleString();
 
     const addAllButton = document.getElementById("addAllVisibleButton");
-    const activeBucket = getActiveBucket();
+    const active = getActiveBucket_();
 
     if (addAllButton) {
-      addAllButton.textContent = activeBucket
-        ? `+ Add All Visible to ${activeBucket.name}`
-        : "+ Add All Visible";
+      addAllButton.textContent = active
+        ? `+ Add visible to ${active.name}`
+        : "+ Add visible";
     }
   }
 
-  function openDrawer() {
-    document.getElementById("aoBucketDrawer").hidden = false;
-    document.getElementById("aoBucketBackdrop").hidden = false;
-    refreshUi();
+  function openDrawer_() {
+    const drawer = document.getElementById("aoBucketDrawer");
+    const backdrop = document.getElementById("aoBucketBackdrop");
+
+    if (drawer) drawer.hidden = false;
+    if (backdrop) backdrop.hidden = false;
+    refreshUi_();
   }
 
-  function closeDrawer() {
-    document.getElementById("aoBucketDrawer").hidden = true;
-    document.getElementById("aoBucketBackdrop").hidden = true;
+  function closeDrawer_() {
+    const drawer = document.getElementById("aoBucketDrawer");
+    const backdrop = document.getElementById("aoBucketBackdrop");
+
+    if (drawer) drawer.hidden = true;
+    if (backdrop) backdrop.hidden = true;
   }
 
-  function showMessage(message, type) {
+  function showMessage_(message, type) {
     const element = document.getElementById("aoBucketMessage");
+    if (!element) return;
+
     element.textContent = message || "";
     element.className = `ao-message${type ? ` is-${type}` : ""}`;
   }
 
-  function loadState() {
+  function loadState_() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
 
       if (saved && Array.isArray(saved.buckets)) {
         state.buckets = saved.buckets;
-        state.activeBucketId = saved.activeBucketId || "";
+        state.activeBucketId = saved.activeBucketId || saved.buckets[0]?.id || "";
       }
     } catch (error) {
-      console.warn("AO bucket storage error:", error);
+      console.warn("Unable to load AO buckets:", error);
     }
   }
 
-  function saveState() {
+  function saveState_() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -522,8 +616,30 @@
     );
   }
 
-  function escapeHtml(value) {
-    return String(value || "")
+  function pick_(record, keys) {
+    for (const key of keys) {
+      const value = record?.[key];
+      if (value !== null && value !== undefined && clean_(value)) {
+        return clean_(value);
+      }
+    }
+    return "";
+  }
+
+  function getRecordName_(record) {
+    return pick_(record, ["Full Name", "FULL NAME", "fullName", "name"]) || "Personnel";
+  }
+
+  function clean_(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function normalizeKey_(value) {
+    return clean_(value).toLowerCase();
+  }
+
+  function escapeHtml_(value) {
+    return clean_(value)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
@@ -531,37 +647,34 @@
       .replace(/'/g, "&#039;");
   }
 
-  function injectStyles() {
+  function injectStyles_() {
+    if (document.getElementById("aoBucketStyles")) return;
+
     const style = document.createElement("style");
+    style.id = "aoBucketStyles";
     style.textContent = `
-      .ao-bucket-toolbar{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:18px;background:rgba(255,255,255,.07);backdrop-filter:blur(14px)}
-      .ao-btn,.ao-row-btn{min-height:38px;padding:8px 13px;border:1px solid rgba(255,255,255,.18);border-radius:12px;color:inherit;background:rgba(255,255,255,.08);font:inherit;font-size:12px;font-weight:800;cursor:pointer}
-      .ao-btn:disabled,.ao-row-btn:disabled{opacity:.58;cursor:default}
-      .ao-primary{color:#061906;border-color:#fff200;background:linear-gradient(135deg,#fff200,#fff88b)}
-      .ao-danger{color:#ffd8d4;border-color:rgba(198,59,50,.45);background:rgba(198,59,50,.16)}
-      .ao-badge{display:inline-grid;min-width:24px;height:24px;margin-left:6px;padding:0 6px;place-items:center;border-radius:999px;color:#061906;background:#fff200}
-      .ao-backdrop{position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.55);backdrop-filter:blur(6px)}
-      .ao-drawer{position:fixed;top:0;right:0;bottom:0;z-index:12001;width:min(520px,96vw);overflow-y:auto;padding:22px;color:#fff;background:linear-gradient(160deg,rgba(11,76,18,.98),rgba(6,25,6,.99));box-shadow:-22px 0 55px rgba(0,0,0,.42)}
-      .ao-backdrop[hidden],.ao-drawer[hidden]{display:none}
-      .ao-drawer-header,.ao-card-header,.ao-card-actions,.ao-person{display:flex;gap:12px;align-items:center;justify-content:space-between}
-      .ao-drawer-header h2{margin:3px 0 0}.ao-drawer-header small{color:#fff200;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
-      .ao-icon-btn{display:grid;width:34px;height:34px;padding:0;place-items:center;border:1px solid rgba(255,255,255,.15);border-radius:10px;color:#fff;background:rgba(255,255,255,.07);font-size:20px;cursor:pointer}
-      .ao-message{min-height:22px;margin:14px 0;font-size:12px}.ao-message.is-success{color:#b9ffbf}.ao-message.is-error{color:#ffd8d4}.ao-message.is-working{color:#fff200}
-      .ao-create-grid{display:grid;gap:10px;margin-bottom:16px}
-      .ao-create-grid input,.ao-field input{width:100%;min-height:42px;padding:9px 12px;border:1px solid rgba(255,255,255,.16);border-radius:12px;outline:none;color:#fff;background:rgba(255,255,255,.08);font:inherit}
-      .ao-bucket-list{display:grid;gap:14px}
-      .ao-card{padding:15px;border:1px solid rgba(255,255,255,.11);border-radius:18px;background:rgba(255,255,255,.055)}
-      .ao-card.is-active{border-color:rgba(255,242,0,.65);box-shadow:0 0 0 3px rgba(255,242,0,.08)}
-      .ao-card-header small,.ao-person small{display:block;margin-top:4px;color:rgba(255,255,255,.66)}
-      .ao-field{display:grid;gap:6px;margin:13px 0;font-size:11px;font-weight:800}
-      .ao-person-list{display:grid;gap:8px;max-height:330px;overflow-y:auto}
-      .ao-person{padding:10px;border-radius:12px;background:rgba(0,0,0,.16)}
-      .ao-card-actions{flex-wrap:wrap;justify-content:flex-end;margin-top:14px}
-      .ao-empty,.ao-empty-small{padding:18px;border:1px dashed rgba(255,255,255,.16);border-radius:14px;color:rgba(255,255,255,.66);text-align:center}
-      .ao-empty-small{padding:12px;font-size:12px}
-      .ao-action-cell,.ao-action-header{white-space:nowrap}
-      .ao-row-btn{min-height:32px;padding:6px 10px}.ao-row-btn.is-added{color:#061906;border-color:#fff200;background:#fff200}
+      .ao-bucket-controls{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;margin-right:4px}
+      .ao-control-button,.ao-row-button{min-height:30px;padding:6px 10px;border:1px solid rgba(35,105,50,.18);border-radius:10px;color:#174623;background:rgba(255,255,255,.76);font:inherit;font-size:11px;font-weight:800;line-height:1;white-space:nowrap;cursor:pointer}
+      .ao-control-button:hover:not(:disabled),.ao-row-button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 12px rgba(30,90,45,.12)}
+      .ao-control-button:disabled,.ao-row-button:disabled{opacity:.62;cursor:default}
+      .ao-control-primary{color:#173b18;border-color:#e2d600;background:linear-gradient(135deg,#fff200,#fff88b)}
+      .ao-danger{color:#9d2f28;border-color:rgba(190,55,45,.25);background:rgba(255,235,232,.84)}
+      .ao-count-badge{display:inline-grid;min-width:20px;height:20px;margin-left:4px;padding:0 5px;place-items:center;border-radius:999px;color:#173b18;background:#fff200}
+      .ao-bucket-backdrop{position:fixed;inset:0;z-index:12000;background:rgba(10,35,15,.42);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+      .ao-bucket-drawer{position:fixed;top:0;right:0;bottom:0;z-index:12001;width:min(540px,96vw);overflow-y:auto;padding:22px;color:#173b20;background:linear-gradient(150deg,rgba(248,255,249,.98),rgba(226,244,229,.98));box-shadow:-22px 0 55px rgba(30,80,40,.24)}
+      .ao-bucket-backdrop[hidden],.ao-bucket-drawer[hidden]{display:none}
+      .ao-drawer-header,.ao-bucket-card-header,.ao-bucket-actions,.ao-person-row{display:flex;gap:12px;align-items:center;justify-content:space-between}
+      .ao-drawer-header span{color:#21783a;font-size:10px;font-weight:900;letter-spacing:.12em}
+      .ao-drawer-header h2{margin:3px 0 0}
+      .ao-icon-button{display:grid;flex:0 0 auto;width:32px;height:32px;padding:0;place-items:center;border:1px solid rgba(35,105,50,.16);border-radius:10px;color:#174623;background:rgba(255,255,255,.72);font-size:19px;cursor:pointer}
+      .ao-message{min-height:20px;margin:12px 0;font-size:12px}.ao-message.is-success{color:#17742d}.ao-message.is-error{color:#a8322a}.ao-message.is-working{color:#7d7000}
+      .ao-create-form{display:grid;gap:9px;margin-bottom:15px}.ao-create-form input,.ao-field input{width:100%;min-height:40px;padding:9px 11px;border:1px solid rgba(35,105,50,.16);border-radius:11px;outline:none;color:#173b20;background:rgba(255,255,255,.78);font:inherit}
+      .ao-bucket-list{display:grid;gap:13px}.ao-bucket-card{padding:14px;border:1px solid rgba(35,105,50,.14);border-radius:16px;background:rgba(255,255,255,.62)}.ao-bucket-card.is-active{border-color:rgba(225,211,0,.9);box-shadow:0 0 0 3px rgba(255,242,0,.13)}
+      .ao-bucket-card-header small,.ao-person-row small{display:block;margin-top:3px;color:#5d7863}.ao-field{display:grid;gap:5px;margin:12px 0;font-size:11px;font-weight:800}.ao-person-list{display:grid;gap:7px;max-height:330px;overflow-y:auto}.ao-person-row{padding:9px;border-radius:11px;background:rgba(218,239,222,.65)}.ao-bucket-actions{flex-wrap:wrap;justify-content:flex-end;margin-top:12px}.ao-empty-state,.ao-empty-small{padding:16px;border:1px dashed rgba(35,105,50,.2);border-radius:13px;color:#69806e;text-align:center}.ao-empty-small{padding:11px;font-size:11px}
+      .ao-action-header,.ao-action-cell{position:sticky;left:0;z-index:5;width:72px;min-width:72px;max-width:72px;text-align:center;white-space:nowrap;background:#eff8f0!important}.ao-action-header{z-index:8}.ao-row-button{min-height:28px;padding:5px 8px}.ao-row-button.is-added{color:#173b18;border-color:#e2d600;background:#fff200}
+      @media(max-width:900px){.ao-bucket-controls{width:100%;margin-top:7px}.preview-stats{flex-wrap:wrap}.ao-control-button{flex:1 1 auto}}
     `;
+
     document.head.appendChild(style);
   }
 })();
