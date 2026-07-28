@@ -1,4 +1,4 @@
-const PersonnelState = {
+  const PersonnelState = {
   records: [],
   filteredRecords: [],
 
@@ -23,10 +23,7 @@ const PersonnelState = {
   initialized: false,
 };
 
-// Expose the shared app state to standalone modules such as AOBucketJS.html.
-// Top-level const declarations are not automatically added to window.
-window.PersonnelState = PersonnelState;
-
 PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
   PersonnelState.filters[group.key] = new Set();
 });
+

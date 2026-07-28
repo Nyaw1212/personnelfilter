@@ -172,7 +172,7 @@
     .search-row {
       display: grid;
       grid-template-columns:
-        minmax(0, 1fr) auto auto auto;
+        minmax(0, 1fr) auto auto;
       gap: 12px;
       align-items: center;
     }
@@ -285,119 +285,6 @@
         rgba(255, 255, 255, 0.20);
       background:
         rgba(255, 255, 255, 0.08);
-    }
-
-    .generate-ao-button {
-      color: var(--white);
-      border:
-        1px solid
-        rgba(255, 242, 0, 0.45);
-      background:
-        rgba(255, 255, 255, 0.08);
-    }
-
-    .ao-modal[hidden] {
-      display: none;
-    }
-
-    .ao-modal {
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      display: grid;
-      place-items: center;
-      padding: 20px;
-      background:
-        rgba(3, 16, 5, 0.72);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-
-    .ao-dialog {
-      width: min(520px, 100%);
-      padding: 22px;
-      border:
-        1px solid
-        rgba(255, 255, 255, 0.14);
-      border-radius: 22px;
-      background:
-        linear-gradient(
-          160deg,
-          rgba(11, 76, 18, 0.94),
-          rgba(6, 25, 6, 0.96)
-        );
-      box-shadow:
-        0 24px 60px
-        rgba(0, 0, 0, 0.42);
-    }
-
-    .ao-dialog-header {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      justify-content: space-between;
-    }
-
-    .ao-dialog-title {
-      margin: 0;
-      color: var(--yellow-500);
-      font-size: 20px;
-    }
-
-    .ao-dialog-copy {
-      margin: 8px 0 0;
-      color:
-        rgba(255, 255, 255, 0.72);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .ao-close {
-      flex: 0 0 auto;
-      width: 36px;
-      height: 36px;
-      border:
-        1px solid
-        rgba(255, 255, 255, 0.14);
-      border-radius: 11px;
-      color: var(--white);
-      background:
-        rgba(255, 255, 255, 0.07);
-      font-size: 23px;
-      cursor: pointer;
-    }
-
-    .ao-message {
-      min-height: 22px;
-      margin-top: 16px;
-      color:
-        rgba(255, 255, 255, 0.78);
-      font-size: 12px;
-      line-height: 1.55;
-      white-space: pre-line;
-    }
-
-    .ao-message.success {
-      color: #b9ffbf;
-    }
-
-    .ao-message.error {
-      color: #ffd8d4;
-    }
-
-    .ao-message a {
-      display: inline-block;
-      margin-top: 9px;
-      color: var(--yellow-500);
-      font-weight: 900;
-    }
-
-    .ao-dialog-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      justify-content: flex-end;
-      margin-top: 20px;
     }
 
     .filter-toolbar {
@@ -735,14 +622,6 @@
           Show all
         </button>
 
-        <button
-          id="generateAoButton"
-          class="action-button generate-ao-button"
-          type="button"
-        >
-          Generate AO
-        </button>
-
       </div>
 
       <div class="filter-toolbar">
@@ -771,67 +650,6 @@
     </section>
 
   </main>
-
-  <div
-    id="aoModal"
-    class="ao-modal"
-    hidden
-  >
-    <section
-      class="ao-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="aoDialogTitle"
-    >
-      <div class="ao-dialog-header">
-        <div>
-          <h2
-            id="aoDialogTitle"
-            class="ao-dialog-title"
-          >
-            Generate Administrative Order
-          </h2>
-
-          <p class="ao-dialog-copy">
-            This uses the information currently entered in the Order and
-            Personnel tabs of the AOGEN spreadsheet.
-          </p>
-        </div>
-
-        <button
-          id="closeAoButton"
-          class="ao-close"
-          type="button"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-
-      <div
-        id="aoMessage"
-        class="ao-message"
-      ></div>
-
-      <div class="ao-dialog-actions">
-        <button
-          id="cancelAoButton"
-          class="action-button show-all-button"
-          type="button"
-        >
-          Cancel
-        </button>
-
-        <button
-          id="confirmAoButton"
-          class="action-button apply-button"
-          type="button"
-        >
-          Generate document
-        </button>
-      </div>
-    </section>
-  </div>
 
   <script>
     "use strict";
@@ -897,36 +715,6 @@
     const showAllButton =
       document.getElementById(
         "showAllButton"
-      );
-
-    const generateAoButton =
-      document.getElementById(
-        "generateAoButton"
-      );
-
-    const aoModal =
-      document.getElementById(
-        "aoModal"
-      );
-
-    const closeAoButton =
-      document.getElementById(
-        "closeAoButton"
-      );
-
-    const cancelAoButton =
-      document.getElementById(
-        "cancelAoButton"
-      );
-
-    const confirmAoButton =
-      document.getElementById(
-        "confirmAoButton"
-      );
-
-    const aoMessage =
-      document.getElementById(
-        "aoMessage"
       );
 
     const chipSections =
@@ -1021,35 +809,6 @@
       showAllButton.addEventListener(
         "click",
         showAll
-      );
-
-      generateAoButton.addEventListener(
-        "click",
-        openAoDialog
-      );
-
-      closeAoButton.addEventListener(
-        "click",
-        closeAoDialog
-      );
-
-      cancelAoButton.addEventListener(
-        "click",
-        closeAoDialog
-      );
-
-      confirmAoButton.addEventListener(
-        "click",
-        requestAdministrativeOrder
-      );
-
-      aoModal.addEventListener(
-        "click",
-        function (event) {
-          if (event.target === aoModal) {
-            closeAoDialog();
-          }
-        }
       );
     }
 
@@ -1467,133 +1226,6 @@
     }
 
 
-    function openAoDialog() {
-      aoMessage.textContent = "";
-      aoMessage.className =
-        "ao-message";
-
-      aoModal.hidden = false;
-      confirmAoButton.focus();
-    }
-
-
-    function closeAoDialog() {
-      if (confirmAoButton.disabled) {
-        return;
-      }
-
-      aoModal.hidden = true;
-      generateAoButton.focus();
-    }
-
-
-    function requestAdministrativeOrder() {
-      confirmAoButton.disabled = true;
-      cancelAoButton.disabled = true;
-      closeAoButton.disabled = true;
-      generateAoButton.disabled = true;
-
-      confirmAoButton.textContent =
-        "Generating…";
-
-      aoMessage.textContent =
-        "Creating the Administrative Order…";
-
-      aoMessage.className =
-        "ao-message";
-
-      google.script.run
-        .withSuccessHandler(
-          handleAoSuccess
-        )
-        .withFailureHandler(
-          handleAoError
-        )
-        .generateAdministrativeOrderFromWebApp();
-    }
-
-
-    function handleAoSuccess(result) {
-      resetAoControls();
-
-      if (
-        !result ||
-        !result.success
-      ) {
-        handleAoError(
-          new Error(
-            result &&
-            result.message
-              ? result.message
-              : "The document could not be generated."
-          )
-        );
-
-        return;
-      }
-
-      aoMessage.className =
-        "ao-message success";
-
-      aoMessage.innerHTML =
-        "Administrative Order generated successfully.<br>" +
-        escapeAoHtml(
-          String(
-            result.personnelCount || 0
-          )
-        ) +
-        " personnel included.<br>" +
-        '<a href="' +
-        escapeAoHtml(
-          result.documentUrl
-        ) +
-        '" target="_blank" rel="noopener noreferrer">' +
-        "Open generated document" +
-        "</a>";
-    }
-
-
-    function handleAoError(error) {
-      resetAoControls();
-
-      const message =
-        error &&
-        error.message
-          ? error.message
-          : String(
-              error ||
-              "Unknown error"
-            );
-
-      aoMessage.textContent =
-        "Error: " + message;
-
-      aoMessage.className =
-        "ao-message error";
-    }
-
-
-    function resetAoControls() {
-      confirmAoButton.disabled = false;
-      cancelAoButton.disabled = false;
-      closeAoButton.disabled = false;
-      generateAoButton.disabled = false;
-
-      confirmAoButton.textContent =
-        "Generate document";
-    }
-
-
-    function escapeAoHtml(value) {
-      return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-
-
     function updateCount(
       value,
       label
@@ -1625,9 +1257,6 @@
         isBusy;
 
       showAllButton.disabled =
-        isBusy;
-
-      generateAoButton.disabled =
         isBusy;
     }
 
