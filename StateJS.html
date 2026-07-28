@@ -1,4 +1,4 @@
-  const PersonnelState = {
+const PersonnelState = {
   records: [],
   filteredRecords: [],
 
@@ -15,6 +15,10 @@
     ranks: new Set(),
   },
 
+  // Temporary AO selection cart. Bucket names and destinations
+  // will be added in the next phase.
+  aoCart: new Map(),
+
   syncTimer: null,
   syncRequestNumber: 0,
 
@@ -27,3 +31,411 @@ PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
   PersonnelState.filters[group.key] = new Set();
 });
 
+//----------------------------------
+// AO Personnel Selection — Phase 1
+//----------------------------------
+
+const AO_CART_STORAGE_KEY = "personnelFilterAoCartV1";
+
+loadAoCart_();
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeAoSelection_
+);
+
+function initializeAoSelection_() {
+  patchAoPreviewRenderers_();
+  addAoToolbarControls_();
+  injectAoSelectionStyles_();
+  updateAoCartCount_();
+}
+
+function patchAoPreviewRenderers_() {
+  const originalRenderPreviewHeader =
+    renderPreviewHeader;
+
+  const originalRenderPreviewTable =
+    renderPreviewTable;
+
+  renderPreviewHeader = function () {
+    originalRenderPreviewHeader();
+
+    const header = document.getElementById(
+      "previewTableHeader"
+    );
+
+    if (!header) {
+      return;
+    }
+
+    const actionHeader =
+      document.createElement("th");
+
+    actionHeader.className =
+      "ao-selection-column ao-selection-header";
+
+    actionHeader.textContent = "AO";
+
+    header.prepend(actionHeader);
+  };
+
+  renderPreviewTable = function () {
+    originalRenderPreviewTable();
+
+    const body = document.getElementById(
+      "previewTableBody"
+    );
+
+    if (!body) {
+      return;
+    }
+
+    const visibleRecords =
+      PersonnelState.filteredRecords.slice(
+        0,
+        PERSONNEL_APP_CONFIG.previewRowLimit
+      );
+
+    const rows = [
+      ...body.querySelectorAll("tr"),
+    ];
+
+    rows.forEach((row, index) => {
+      const record = visibleRecords[index];
+
+      if (!record) {
+        return;
+      }
+
+      const actionCell =
+        document.createElement("td");
+
+      actionCell.className =
+        "ao-selection-column ao-selection-cell";
+
+      actionCell.appendChild(
+        createAoAddButton_(record)
+      );
+
+      row.prepend(actionCell);
+    });
+
+    updateAoCartCount_();
+  };
+}
+
+function addAoToolbarControls_() {
+  const previewToolbar =
+    document.querySelector(".preview-toolbar");
+
+  if (
+    !previewToolbar ||
+    document.getElementById("addAllVisibleAoButton")
+  ) {
+    return;
+  }
+
+  const controls =
+    document.createElement("div");
+
+  controls.className =
+    "ao-selection-toolbar";
+
+  const count =
+    document.createElement("span");
+
+  count.id = "aoCartCount";
+  count.className = "ao-cart-count";
+  count.textContent = "0 selected";
+
+  const addAllButton =
+    document.createElement("button");
+
+  addAllButton.id =
+    "addAllVisibleAoButton";
+
+  addAllButton.type = "button";
+  addAllButton.className =
+    "button button-secondary ao-add-all-button";
+
+  addAllButton.textContent =
+    "+ Add All Visible";
+
+  addAllButton.addEventListener(
+    "click",
+    addAllVisiblePersonnelToAo_
+  );
+
+  controls.append(
+    count,
+    addAllButton
+  );
+
+  previewToolbar.appendChild(controls);
+}
+
+function createAoAddButton_(record) {
+  const key = getAoPersonnelKey_(record);
+
+  const button =
+    document.createElement("button");
+
+  button.type = "button";
+  button.className = "ao-row-add-button";
+
+  const isAdded =
+    PersonnelState.aoCart.has(key);
+
+  button.classList.toggle(
+    "is-added",
+    isAdded
+  );
+
+  button.textContent =
+    isAdded
+      ? "✓ Added"
+      : "+ Add";
+
+  button.title =
+    isAdded
+      ? "Remove from AO selection"
+      : "Add to AO selection";
+
+  button.addEventListener(
+    "click",
+    () => {
+      togglePersonnelInAoCart_(record);
+      renderPreviewTable();
+    }
+  );
+
+  return button;
+}
+
+function togglePersonnelInAoCart_(record) {
+  const key = getAoPersonnelKey_(record);
+
+  if (PersonnelState.aoCart.has(key)) {
+    PersonnelState.aoCart.delete(key);
+  } else {
+    PersonnelState.aoCart.set(
+      key,
+      normalizeAoPersonnel_(record)
+    );
+  }
+
+  saveAoCart_();
+  updateAoCartCount_();
+}
+
+function addAllVisiblePersonnelToAo_() {
+  const records =
+    PersonnelState.filteredRecords;
+
+  records.forEach(record => {
+    PersonnelState.aoCart.set(
+      getAoPersonnelKey_(record),
+      normalizeAoPersonnel_(record)
+    );
+  });
+
+  saveAoCart_();
+  updateAoCartCount_();
+  renderPreviewTable();
+}
+
+function normalizeAoPersonnel_(record) {
+  return {
+    sourceRow:
+      record.__sheetRow || "",
+
+    rank:
+      String(record.Rank || "").trim(),
+
+    fullName:
+      String(record["Full Name"] || "").trim(),
+
+    office:
+      String(record.Office || "").trim(),
+
+    record: {
+      ...record,
+    },
+  };
+}
+
+function getAoPersonnelKey_(record) {
+  const sourceRow =
+    String(record.__sheetRow || "").trim();
+
+  if (sourceRow) {
+    return `row:${sourceRow}`;
+  }
+
+  return [
+    record.Rank,
+    record["Full Name"],
+    record.Office,
+  ]
+    .map(value =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    )
+    .join("|");
+}
+
+function updateAoCartCount_() {
+  const count =
+    document.getElementById("aoCartCount");
+
+  if (!count) {
+    return;
+  }
+
+  count.textContent =
+    `${PersonnelState.aoCart.size.toLocaleString()} selected`;
+}
+
+function saveAoCart_() {
+  try {
+    localStorage.setItem(
+      AO_CART_STORAGE_KEY,
+      JSON.stringify([
+        ...PersonnelState.aoCart.entries(),
+      ])
+    );
+  } catch (error) {
+    console.warn(
+      "Unable to save AO selection:",
+      error
+    );
+  }
+}
+
+function loadAoCart_() {
+  try {
+    const stored =
+      JSON.parse(
+        localStorage.getItem(
+          AO_CART_STORAGE_KEY
+        ) || "[]"
+      );
+
+    if (Array.isArray(stored)) {
+      PersonnelState.aoCart =
+        new Map(stored);
+    }
+  } catch (error) {
+    PersonnelState.aoCart = new Map();
+
+    console.warn(
+      "Unable to load AO selection:",
+      error
+    );
+  }
+}
+
+function injectAoSelectionStyles_() {
+  if (
+    document.getElementById(
+      "aoSelectionStyles"
+    )
+  ) {
+    return;
+  }
+
+  const style =
+    document.createElement("style");
+
+  style.id = "aoSelectionStyles";
+
+  style.textContent = `
+    .ao-selection-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+
+    .ao-cart-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid rgba(31, 111, 52, 0.18);
+      border-radius: 999px;
+      color: var(--green-800, #185c2b);
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .ao-add-all-button {
+      white-space: nowrap;
+    }
+
+    .ao-selection-column {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      width: 82px;
+      min-width: 82px;
+      max-width: 82px;
+      text-align: center;
+    }
+
+    .ao-selection-header {
+      z-index: 6;
+    }
+
+    .ao-selection-cell {
+      background: rgba(248, 252, 248, 0.96);
+      box-shadow: 1px 0 0 rgba(31, 111, 52, 0.1);
+    }
+
+    .duplicate-row .ao-selection-cell {
+      background: rgba(255, 248, 222, 0.97);
+    }
+
+    .ao-row-add-button {
+      width: 66px;
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 1px solid rgba(31, 111, 52, 0.28);
+      border-radius: 9px;
+      color: #185c2b;
+      background: rgba(255, 255, 255, 0.92);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .ao-row-add-button:hover {
+      border-color: #2d7d46;
+      background: #f2fff4;
+    }
+
+    .ao-row-add-button.is-added {
+      color: #173c1f;
+      border-color: #e4d600;
+      background: #fff200;
+    }
+
+    @media (max-width: 760px) {
+      .ao-selection-toolbar {
+        width: 100%;
+        justify-content: flex-start;
+        margin-left: 0;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
