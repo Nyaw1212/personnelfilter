@@ -37,12 +37,18 @@ function include(
     )
     .getContent();
 
-  // Keep the reassignment workspace in its own file while
-  // loading it inside the existing application script block.
+  // Keep the reassignment workspace in separate modules while
+  // loading them inside the existing application script block.
   if (filename === "AppJS") {
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentJS"
+      )
+      .getContent();
+
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentPatchJS"
       )
       .getContent();
   }
