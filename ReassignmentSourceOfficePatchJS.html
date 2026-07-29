@@ -74,7 +74,7 @@ function buildReassignmentGeneratePayload_() {
       "FULL NAME",
     ]);
 
-    const from = getReassignmentPersonValue_(person, [
+    const sourceOffice = getReassignmentPersonValue_(person, [
       "office",
       "Office",
       "OFFICE",
@@ -82,7 +82,7 @@ function buildReassignmentGeneratePayload_() {
       "Current Office",
     ]);
 
-    if (!from) {
+    if (!sourceOffice) {
       missingSourceOffices.push(
         `${index + 1}. ${[rank, fullName].filter(Boolean).join(" ") || "Unknown personnel"}`
       );
@@ -91,20 +91,18 @@ function buildReassignmentGeneratePayload_() {
     return {
       rank,
       fullName,
-      from,
+      // Do not block report generation when the Personnel sheet has no Office.
+      // N/A is used so both the bridge and the document generator can continue.
+      from: sourceOffice || "N/A",
       to: String(destinationOffice || "").trim(),
       notes: "",
     };
   });
 
   if (missingSourceOffices.length) {
-    throw new Error(
-      "The following personnel have no current office in the Personnel sheet:\n\n" +
-      missingSourceOffices.slice(0, 10).join("\n") +
-      (missingSourceOffices.length > 10
-        ? `\n…and ${missingSourceOffices.length - 10} more.`
-        : "") +
-      "\n\nUpdate their Office value, remove them from the selection, or re-add them after the source data is corrected."
+    console.warn(
+      "Generating reassignment report with missing source offices:",
+      missingSourceOffices
     );
   }
 
