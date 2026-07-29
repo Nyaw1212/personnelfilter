@@ -1,0 +1,137 @@
+//----------------------------------
+// Reassignment Clear Personnel Patch
+//----------------------------------
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeReassignmentClearControl_
+);
+
+function initializeReassignmentClearControl_() {
+  addReassignmentClearPersonnelButton_();
+  injectReassignmentClearPersonnelStyles_();
+}
+
+function addReassignmentClearPersonnelButton_() {
+  const summary = document.querySelector(
+    ".reassignment-personnel-summary"
+  );
+
+  if (
+    !summary ||
+    document.getElementById(
+      "clearReassignmentPersonnelButton"
+    )
+  ) {
+    return;
+  }
+
+  const row = document.createElement("div");
+  row.className = "reassignment-personnel-summary-row";
+
+  const count = document.getElementById(
+    "reassignmentGeneratePersonnelCount"
+  );
+
+  const clearButton = document.createElement("button");
+  clearButton.id = "clearReassignmentPersonnelButton";
+  clearButton.type = "button";
+  clearButton.className = "button button-secondary";
+  clearButton.textContent = "Clear Personnel";
+  clearButton.title =
+    "Remove all personnel from this reassignment report";
+
+  clearButton.addEventListener(
+    "click",
+    clearReassignmentPersonnelFromDialog_
+  );
+
+  if (count) {
+    row.append(count, clearButton);
+  } else {
+    row.appendChild(clearButton);
+  }
+
+  summary.appendChild(row);
+}
+
+function clearReassignmentPersonnelFromDialog_() {
+  if (ReassignmentGenerateState.submitting) {
+    return;
+  }
+
+  const total = PersonnelState.aoCart.size;
+
+  if (!total) {
+    showReassignmentGenerateMessage_(
+      "There are no personnel to clear.",
+      "info"
+    );
+    return;
+  }
+
+  if (
+    !confirm(
+      `Remove all ${total} personnel from this report?`
+    )
+  ) {
+    return;
+  }
+
+  PersonnelState.aoCart.clear();
+  ReassignmentState.assignments.clear();
+  ReassignmentState.selectedKeys.clear();
+
+  saveAoCart_();
+  saveReassignmentState_();
+  updateAoCartCount_();
+  updateReportGeneratorButton_();
+
+  document.getElementById(
+    "reassignmentGeneratePersonnelCount"
+  ).textContent = "0 personnel";
+
+  closeReassignmentGenerateDialog_();
+  renderReassignmentWorkspace_();
+
+  if (typeof renderPreviewTable === "function") {
+    renderPreviewTable();
+  }
+}
+
+function injectReassignmentClearPersonnelStyles_() {
+  if (
+    document.getElementById(
+      "reassignmentClearPersonnelStyles"
+    )
+  ) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "reassignmentClearPersonnelStyles";
+  style.textContent = `
+    .reassignment-personnel-summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    #clearReassignmentPersonnelButton {
+      flex: 0 0 auto;
+      min-height: 34px;
+      padding: 6px 11px;
+      font-size: 11px;
+    }
+
+    @media (max-width: 520px) {
+      .reassignment-personnel-summary-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
