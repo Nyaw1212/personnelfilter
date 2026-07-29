@@ -94,7 +94,7 @@ function sendReassignmentToAogen(payload) {
       );
     }
 
-    return {
+    const normalizedResult = {
       success: true,
       message:
         result.message ||
@@ -102,8 +102,22 @@ function sendReassignmentToAogen(payload) {
       documentId: cleanBridgeValue_(result.documentId),
       url: cleanBridgeValue_(result.url),
       outputName: cleanBridgeValue_(result.outputName),
-      personnelCount: Number(result.personnelCount || 0),
+      personnelCount: Number(
+        result.personnelCount || normalizedPayload.personnel.length || 0
+      ),
     };
+
+    // Keep a permanent summary in the Personnel Filter spreadsheet.
+    // A logging failure should not invalidate a successfully generated report.
+    try {
+      logGeneratedReport_(normalizedPayload, normalizedResult);
+    } catch (logError) {
+      console.error("Generated report logging failed:", logError);
+      normalizedResult.logWarning =
+        "The document was generated, but its summary could not be saved.";
+    }
+
+    return normalizedResult;
   } catch (error) {
     console.error("sendReassignmentToAogen error:", error);
 
