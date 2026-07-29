@@ -1,0 +1,117 @@
+//----------------------------------
+// Reassignment Workspace Enhancements
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  // Destination choices must come from the complete Personnel Filter
+  // dataset, not only from the personnel currently selected in the cart.
+  renderDestinationChips_ = function () {
+    const container = document.getElementById(
+      "destinationOfficeChips"
+    );
+
+    if (!container) return;
+
+    container.replaceChildren();
+
+    const offices = getAllPersonnelOffices_();
+
+    if (!offices.length) {
+      container.appendChild(
+        makeText_("div", "No offices available.")
+      );
+      return;
+    }
+
+    offices.forEach(office => {
+      container.appendChild(
+        makeChip_(
+          office,
+          ReassignmentState.activeOffice === office,
+          () => {
+            ReassignmentState.activeOffice = office;
+            saveReassignmentState_();
+            renderReassignmentWorkspace_();
+          }
+        )
+      );
+    });
+  };
+
+  function getAllPersonnelOffices_() {
+    const offices = new Set();
+
+    const records = Array.isArray(PersonnelState.records)
+      ? PersonnelState.records
+      : [];
+
+    records.forEach(record => {
+      const office = String(record?.Office || "").trim();
+      if (office) offices.add(office);
+    });
+
+    // Config values provide a fallback while records are loading.
+    const officeGroup = PERSONNEL_APP_CONFIG.filterGroups.find(
+      group => group.key === "offices"
+    );
+
+    (officeGroup?.values || []).forEach(value => {
+      const office = String(value || "").trim();
+      if (office) offices.add(office);
+    });
+
+    // Preserve offices already present in the report selection.
+    PersonnelState.aoCart.forEach(person => {
+      const office = String(person?.office || "").trim();
+      if (office) offices.add(office);
+    });
+
+    return [...offices].sort((a, b) =>
+      a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    );
+  }
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    addClearSourceFiltersButton_
+  );
+
+  function addClearSourceFiltersButton_() {
+    const actions = document.querySelector(
+      ".reassignment-source-panel .source-actions"
+    );
+
+    if (
+      !actions ||
+      document.getElementById("clearReassignmentFiltersButton")
+    ) {
+      return;
+    }
+
+    const button = makeText_("button", "Clear Filters");
+    button.id = "clearReassignmentFiltersButton";
+    button.type = "button";
+    button.className = "reassignment-clear-filters";
+    button.addEventListener("click", clearReassignmentFilters_);
+
+    actions.appendChild(button);
+  }
+
+  function clearReassignmentFilters_() {
+    ReassignmentState.filters.search = "";
+    ReassignmentState.filters.rank = "";
+    ReassignmentState.filters.office = "";
+    ReassignmentState.filters.camp = "";
+    ReassignmentState.selectedKeys.clear();
+
+    const search = document.getElementById("reassignmentSearch");
+    if (search) search.value = "";
+
+    renderReassignmentWorkspace_();
+  }
+})();
