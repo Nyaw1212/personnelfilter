@@ -1,0 +1,109 @@
+//----------------------------------
+// Reassignment Workspace Clear Control
+//----------------------------------
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeReassignmentWorkspaceClear_
+);
+
+function initializeReassignmentWorkspaceClear_() {
+  const attach = () => {
+    const actions = document.querySelector(
+      ".reassignment-source-panel .source-actions"
+    );
+
+    if (!actions) {
+      return false;
+    }
+
+    if (document.getElementById(
+      "clearAllSelectedPersonnelButton"
+    )) {
+      return true;
+    }
+
+    const button = document.createElement("button");
+    button.id = "clearAllSelectedPersonnelButton";
+    button.type = "button";
+    button.className = "button button-secondary";
+    button.textContent = "Clear All Selected";
+    button.title = "Remove all personnel from this reassignment report";
+
+    button.addEventListener(
+      "click",
+      clearAllSelectedPersonnel_
+    );
+
+    const clearFiltersButton = [
+      ...actions.querySelectorAll("button"),
+    ].find(item =>
+      item.textContent.trim().toLowerCase() === "clear filters"
+    );
+
+    if (clearFiltersButton) {
+      actions.insertBefore(button, clearFiltersButton);
+    } else {
+      actions.appendChild(button);
+    }
+
+    return true;
+  };
+
+  if (attach()) {
+    return;
+  }
+
+  const observer = new MutationObserver(() => {
+    if (attach()) {
+      observer.disconnect();
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+function clearAllSelectedPersonnel_() {
+  const total = PersonnelState.aoCart.size;
+
+  if (!total) {
+    return;
+  }
+
+  if (!confirm(
+    `Remove all ${total} selected personnel from this reassignment report?`
+  )) {
+    return;
+  }
+
+  PersonnelState.aoCart.clear();
+  ReassignmentState.assignments.clear();
+  ReassignmentState.selectedKeys.clear();
+
+  if (typeof saveAoCart_ === "function") {
+    saveAoCart_();
+  }
+
+  if (typeof saveReassignmentState_ === "function") {
+    saveReassignmentState_();
+  }
+
+  if (typeof updateAoCartCount_ === "function") {
+    updateAoCartCount_();
+  }
+
+  if (typeof updateReportGeneratorButton_ === "function") {
+    updateReportGeneratorButton_();
+  }
+
+  if (typeof renderPreviewTable === "function") {
+    renderPreviewTable();
+  }
+
+  if (typeof renderReassignmentWorkspace_ === "function") {
+    renderReassignmentWorkspace_();
+  }
+}
