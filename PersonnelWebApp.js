@@ -58,6 +58,14 @@ function include(
         "ReassignmentPatchJS"
       )
       .getContent();
+
+    // Loaded last to override the payload builder with robust
+    // source-office field detection and clearer validation.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentSourceOfficePatchJS"
+      )
+      .getContent();
   }
 
   return content;
