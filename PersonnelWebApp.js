@@ -37,9 +37,16 @@ function include(
     )
     .getContent();
 
-  // Keep the reassignment workspace in separate modules while
-  // loading them inside the existing application script block.
+  // Load the generate-dialog module first so it replaces the
+  // temporary validation handler before the workspace button
+  // attaches its click listener.
   if (filename === "AppJS") {
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentGenerateJS"
+      )
+      .getContent();
+
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentJS"
@@ -49,12 +56,6 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentPatchJS"
-      )
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentGenerateJS"
       )
       .getContent();
   }
