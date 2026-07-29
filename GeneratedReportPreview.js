@@ -4,17 +4,20 @@
 
 /**
  * Reads a generated Google Doc and returns a lightweight report preview.
- * Works for both old and newly generated reports as long as Document ID exists.
+ * Accepts either a Google Docs file ID or a full document URL so older
+ * GENERATED_REPORTS rows remain previewable even when Document ID is blank.
  *
- * @param {string} documentId Google Docs file ID.
+ * @param {string} documentReference Google Docs file ID or document URL.
  * @return {Object} Preview metadata and personnel rows.
  */
-function getGeneratedReportPreview(documentId) {
+function getGeneratedReportPreview(documentReference) {
   try {
-    const id = String(documentId || "").trim();
+    const id = extractGeneratedReportDocumentId_(documentReference);
 
     if (!id) {
-      throw new Error("This report does not have a Document ID.");
+      throw new Error(
+        "This report does not have a valid Document ID or Google Docs URL."
+      );
     }
 
     const document = DocumentApp.openById(id);
@@ -70,4 +73,19 @@ function getGeneratedReportPreview(documentId) {
         : String(error || "Report preview could not be loaded."),
     };
   }
+}
+
+/**
+ * Extracts a Drive file ID from either a raw ID or a Google Docs URL.
+ *
+ * @param {*} value Raw file ID or URL.
+ * @return {string} Extracted file ID, or blank when invalid.
+ */
+function extractGeneratedReportDocumentId_(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  // Standard Google Docs/Drive URLs and raw Apps Script file IDs.
+  const match = text.match(/[-\w]{25,}/);
+  return match ? match[0] : "";
 }
