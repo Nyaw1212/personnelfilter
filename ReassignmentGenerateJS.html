@@ -1,0 +1,475 @@
+//----------------------------------
+// Reassignment Generation Dialog
+//----------------------------------
+
+const ReassignmentGenerateState = {
+  directory: [],
+  selectedOffice: "",
+  selectedRole: "CHIEF",
+  submitting: false,
+};
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeReassignmentGenerateDialog_
+);
+
+function initializeReassignmentGenerateDialog_() {
+  buildReassignmentGenerateDialog_();
+  injectReassignmentGenerateStyles_();
+
+  // Replace the temporary validation-only action from ReassignmentJS.
+  validateReassignment_ = openReassignmentGenerateDialog_;
+}
+
+function buildReassignmentGenerateDialog_() {
+  if (document.getElementById("reassignmentGenerateDialog")) {
+    return;
+  }
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "reassignmentGenerateBackdrop";
+  backdrop.className = "reassignment-generate-backdrop";
+  backdrop.hidden = true;
+
+  const dialog = document.createElement("section");
+  dialog.id = "reassignmentGenerateDialog";
+  dialog.className = "reassignment-generate-dialog";
+  dialog.hidden = true;
+
+  const today = new Date();
+  const localDate = new Date(
+    today.getTime() - today.getTimezoneOffset() * 60000
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  dialog.innerHTML = `
+    <div class="reassignment-generate-header">
+      <div>
+        <span>REASSIGNMENT REPORT</span>
+        <h2>Order and Signing Details</h2>
+      </div>
+      <button id="closeReassignmentGenerateButton" type="button" title="Close">×</button>
+    </div>
+
+    <div class="reassignment-generate-grid">
+      <label class="reassignment-field">
+        <span>Order Number</span>
+        <input id="reassignmentOrderNumber" type="text" placeholder="Example: 207-S-2026" autocomplete="off">
+      </label>
+
+      <label class="reassignment-field">
+        <span>Order Date</span>
+        <input id="reassignmentOrderDate" type="date" value="${localDate}">
+      </label>
+
+      <label class="reassignment-field reassignment-field-wide">
+        <span>Signing Office</span>
+        <input
+          id="reassignmentSigningOffice"
+          type="search"
+          list="reassignmentOfficeDirectoryList"
+          placeholder="Search or select an office..."
+          autocomplete="off"
+        >
+        <datalist id="reassignmentOfficeDirectoryList"></datalist>
+        <small id="reassignmentDirectoryStatus">Loading office directory...</small>
+      </label>
+
+      <label class="reassignment-field">
+        <span>Signing Authority</span>
+        <select id="reassignmentSigningRole">
+          <option value="CHIEF">Chief</option>
+          <option value="DEPUTY">Deputy</option>
+        </select>
+      </label>
+
+      <label class="reassignment-field">
+        <span>File Reference</span>
+        <input id="reassignmentFileReference" type="text" value="CSA/JagAO2026" autocomplete="off">
+      </label>
+
+      <div class="reassignment-signing-preview reassignment-field-wide">
+        <span>Selected Signing Officer</span>
+        <strong id="reassignmentSigningOfficerPreview">Select an office and signing authority.</strong>
+        <small id="reassignmentSigningPositionPreview"></small>
+      </div>
+
+      <div class="reassignment-personnel-summary reassignment-field-wide">
+        <span>Personnel Included</span>
+        <strong id="reassignmentGeneratePersonnelCount">0 personnel</strong>
+      </div>
+    </div>
+
+    <div id="reassignmentGenerateMessage" class="reassignment-generate-message" hidden></div>
+
+    <div class="reassignment-generate-actions">
+      <button id="cancelReassignmentGenerateButton" class="button button-secondary" type="button">Cancel</button>
+      <button id="submitReassignmentGenerateButton" class="button button-primary" type="button">Generate Report</button>
+    </div>
+  `;
+
+  document.body.append(backdrop, dialog);
+
+  backdrop.addEventListener(
+    "click",
+    closeReassignmentGenerateDialog_
+  );
+
+  document
+    .getElementById("closeReassignmentGenerateButton")
+    .addEventListener("click", closeReassignmentGenerateDialog_);
+
+  document
+    .getElementById("cancelReassignmentGenerateButton")
+    .addEventListener("click", closeReassignmentGenerateDialog_);
+
+  document
+    .getElementById("reassignmentSigningOffice")
+    .addEventListener("input", event => {
+      ReassignmentGenerateState.selectedOffice = event.target.value.trim();
+      updateSigningOfficerPreview_();
+    });
+
+  document
+    .getElementById("reassignmentSigningRole")
+    .addEventListener("change", event => {
+      ReassignmentGenerateState.selectedRole = event.target.value;
+      updateSigningOfficerPreview_();
+    });
+
+  document
+    .getElementById("submitReassignmentGenerateButton")
+    .addEventListener("click", submitReassignmentGenerate_);
+}
+
+function openReassignmentGenerateDialog_() {
+  const total = PersonnelState.aoCart.size;
+  const assigned = ReassignmentState.assignments.size;
+
+  if (!total) {
+    alert("No personnel selected.");
+    return;
+  }
+
+  if (assigned !== total) {
+    alert(
+      `${total - assigned} personnel still need a destination office.`
+    );
+    return;
+  }
+
+  document.getElementById(
+    "reassignmentGeneratePersonnelCount"
+  ).textContent = `${assigned} personnel`;
+
+  clearReassignmentGenerateMessage_();
+  setReassignmentGenerateSubmitting_(false);
+
+  document.getElementById(
+    "reassignmentGenerateBackdrop"
+  ).hidden = false;
+
+  document.getElementById(
+    "reassignmentGenerateDialog"
+  ).hidden = false;
+
+  loadOfficeSigningDirectory_();
+}
+
+function closeReassignmentGenerateDialog_() {
+  if (ReassignmentGenerateState.submitting) {
+    return;
+  }
+
+  document.getElementById(
+    "reassignmentGenerateBackdrop"
+  ).hidden = true;
+
+  document.getElementById(
+    "reassignmentGenerateDialog"
+  ).hidden = true;
+}
+
+function loadOfficeSigningDirectory_() {
+  const status = document.getElementById(
+    "reassignmentDirectoryStatus"
+  );
+
+  status.textContent = "Loading office directory...";
+
+  google.script.run
+    .withSuccessHandler(response => {
+      if (!response || response.success !== true) {
+        status.textContent =
+          response?.message || "Office directory could not be loaded.";
+        return;
+      }
+
+      ReassignmentGenerateState.directory = Array.isArray(response.records)
+        ? response.records
+        : [];
+
+      renderOfficeDirectoryOptions_();
+
+      status.textContent = ReassignmentGenerateState.directory.length
+        ? `${ReassignmentGenerateState.directory.length} office record(s) available.`
+        : response.message || "No office records are available.";
+    })
+    .withFailureHandler(error => {
+      status.textContent =
+        error?.message || "Office directory could not be loaded.";
+    })
+    .getOfficeSigningDirectory();
+}
+
+function renderOfficeDirectoryOptions_() {
+  const list = document.getElementById(
+    "reassignmentOfficeDirectoryList"
+  );
+
+  list.replaceChildren();
+
+  ReassignmentGenerateState.directory.forEach(record => {
+    const option = document.createElement("option");
+    option.value = record.office;
+    option.label = [record.officeCode, record.camp]
+      .filter(Boolean)
+      .join(" · ");
+    list.appendChild(option);
+  });
+
+  updateSigningOfficerPreview_();
+}
+
+function findSelectedOfficeRecord_() {
+  const office = ReassignmentGenerateState.selectedOffice
+    .trim()
+    .toLowerCase();
+
+  return ReassignmentGenerateState.directory.find(record =>
+    String(record.office || "").trim().toLowerCase() === office
+  ) || null;
+}
+
+function updateSigningOfficerPreview_() {
+  const record = findSelectedOfficeRecord_();
+  const role = ReassignmentGenerateState.selectedRole;
+
+  const officer = role === "DEPUTY"
+    ? record?.deputyName || ""
+    : record?.chiefName || "";
+
+  const position = role === "DEPUTY"
+    ? record?.deputyPosition || ""
+    : record?.chiefPosition || "";
+
+  document.getElementById(
+    "reassignmentSigningOfficerPreview"
+  ).textContent = officer || (
+    record
+      ? `No ${role === "DEPUTY" ? "deputy" : "chief"} is recorded for this office.`
+      : "Select an office from the directory."
+  );
+
+  document.getElementById(
+    "reassignmentSigningPositionPreview"
+  ).textContent = position;
+}
+
+function buildReassignmentGeneratePayload_() {
+  const record = findSelectedOfficeRecord_();
+  const role = ReassignmentGenerateState.selectedRole;
+
+  if (!record) {
+    throw new Error("Select a valid signing office from the directory.");
+  }
+
+  const signingOfficer = role === "DEPUTY"
+    ? record.deputyName
+    : record.chiefName;
+
+  const signingPosition = role === "DEPUTY"
+    ? record.deputyPosition
+    : record.chiefPosition;
+
+  if (!signingOfficer || !signingPosition) {
+    throw new Error(
+      `The selected office does not have a complete ${role.toLowerCase()} record.`
+    );
+  }
+
+  const personnel = [
+    ...ReassignmentState.assignments.entries(),
+  ].map(([key, destinationOffice]) => {
+    const person = PersonnelState.aoCart.get(key);
+
+    if (!person) {
+      throw new Error("A selected personnel record is no longer available.");
+    }
+
+    return {
+      rank: person.rank || "",
+      fullName: person.fullName || "",
+      from: person.office || "",
+      to: destinationOffice || "",
+      notes: "",
+    };
+  });
+
+  return {
+    orderNumber: document
+      .getElementById("reassignmentOrderNumber")
+      .value.trim(),
+    orderDate: document
+      .getElementById("reassignmentOrderDate")
+      .value,
+    signingOfficer,
+    signingPosition,
+    fileReference: document
+      .getElementById("reassignmentFileReference")
+      .value.trim(),
+    personnel,
+  };
+}
+
+function submitReassignmentGenerate_() {
+  try {
+    const payload = buildReassignmentGeneratePayload_();
+
+    if (!payload.orderNumber) {
+      throw new Error("Enter the Order Number.");
+    }
+
+    if (!payload.orderDate) {
+      throw new Error("Select the Order Date.");
+    }
+
+    setReassignmentGenerateSubmitting_(true);
+    showReassignmentGenerateMessage_(
+      "Generating the reassignment report...",
+      "working"
+    );
+
+    google.script.run
+      .withSuccessHandler(handleReassignmentGenerateSuccess_)
+      .withFailureHandler(handleReassignmentGenerateFailure_)
+      .sendReassignmentToAogen(payload);
+  } catch (error) {
+    showReassignmentGenerateMessage_(
+      error?.message || String(error),
+      "error"
+    );
+  }
+}
+
+function handleReassignmentGenerateSuccess_(response) {
+  setReassignmentGenerateSubmitting_(false);
+
+  if (!response || response.success !== true) {
+    showReassignmentGenerateMessage_(
+      response?.message || "The report could not be generated.",
+      "error"
+    );
+    return;
+  }
+
+  const message = document.getElementById(
+    "reassignmentGenerateMessage"
+  );
+
+  message.className =
+    "reassignment-generate-message is-success";
+  message.hidden = false;
+  message.replaceChildren();
+
+  const text = document.createElement("span");
+  text.textContent =
+    response.message || "Reassignment Report generated successfully.";
+  message.appendChild(text);
+
+  if (response.url) {
+    const link = document.createElement("a");
+    link.href = response.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Open generated Google Doc";
+    message.appendChild(link);
+  }
+}
+
+function handleReassignmentGenerateFailure_(error) {
+  setReassignmentGenerateSubmitting_(false);
+  showReassignmentGenerateMessage_(
+    error?.message || "The report could not be generated.",
+    "error"
+  );
+}
+
+function setReassignmentGenerateSubmitting_(submitting) {
+  ReassignmentGenerateState.submitting = Boolean(submitting);
+
+  const button = document.getElementById(
+    "submitReassignmentGenerateButton"
+  );
+
+  button.disabled = ReassignmentGenerateState.submitting;
+  button.textContent = ReassignmentGenerateState.submitting
+    ? "Generating..."
+    : "Generate Report";
+}
+
+function clearReassignmentGenerateMessage_() {
+  const message = document.getElementById(
+    "reassignmentGenerateMessage"
+  );
+  message.hidden = true;
+  message.replaceChildren();
+}
+
+function showReassignmentGenerateMessage_(text, type) {
+  const message = document.getElementById(
+    "reassignmentGenerateMessage"
+  );
+
+  message.className =
+    `reassignment-generate-message is-${type || "info"}`;
+  message.textContent = text;
+  message.hidden = false;
+}
+
+function injectReassignmentGenerateStyles_() {
+  if (document.getElementById("reassignmentGenerateStyles")) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "reassignmentGenerateStyles";
+  style.textContent = `
+    .reassignment-generate-backdrop { position: fixed; inset: 0; z-index: 16000; background: rgba(0,0,0,.5); backdrop-filter: blur(6px); }
+    .reassignment-generate-dialog { position: fixed; z-index: 16001; top: 50%; left: 50%; width: min(760px,94vw); max-height: 92vh; overflow: auto; transform: translate(-50%,-50%); padding: 22px; border: 1px solid rgba(31,111,52,.22); border-radius: 22px; background: rgba(246,252,247,.99); box-shadow: 0 28px 80px rgba(0,0,0,.3); }
+    .reassignment-generate-backdrop[hidden], .reassignment-generate-dialog[hidden] { display: none; }
+    .reassignment-generate-header, .reassignment-generate-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .reassignment-generate-header h2 { margin: 2px 0 0; }
+    .reassignment-generate-header > div > span { font-size: 11px; font-weight: 900; letter-spacing: .12em; color: #276538; }
+    .reassignment-generate-header > button { border: 0; background: transparent; font-size: 24px; cursor: pointer; }
+    .reassignment-generate-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 18px; }
+    .reassignment-field { display: grid; gap: 7px; }
+    .reassignment-field > span, .reassignment-signing-preview > span, .reassignment-personnel-summary > span { font-size: 12px; font-weight: 850; color: #255b34; }
+    .reassignment-field input, .reassignment-field select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid rgba(31,111,52,.22); border-radius: 11px; background: rgba(255,255,255,.92); font: inherit; }
+    .reassignment-field small { opacity: .7; }
+    .reassignment-field-wide { grid-column: 1 / -1; }
+    .reassignment-signing-preview, .reassignment-personnel-summary { display: grid; gap: 5px; padding: 14px; border: 1px solid rgba(31,111,52,.16); border-radius: 14px; background: rgba(255,255,255,.72); }
+    .reassignment-signing-preview strong { font-size: 15px; }
+    .reassignment-generate-message { display: grid; gap: 8px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; }
+    .reassignment-generate-message.is-working { background: #eef5ff; }
+    .reassignment-generate-message.is-error { background: #fff0f0; color: #8a1f1f; }
+    .reassignment-generate-message.is-success { background: #eaf8ed; color: #195c2b; }
+    .reassignment-generate-message a { width: fit-content; font-weight: 850; color: inherit; }
+    .reassignment-generate-actions { justify-content: flex-end; margin-top: 18px; }
+    @media (max-width: 680px) { .reassignment-generate-grid { grid-template-columns: 1fr; } .reassignment-field-wide { grid-column: auto; } }
+  `;
+
+  document.head.appendChild(style);
+}
