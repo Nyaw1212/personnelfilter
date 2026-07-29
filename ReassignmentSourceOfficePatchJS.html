@@ -1,0 +1,125 @@
+//----------------------------------
+// Reassignment Source Office Patch
+//----------------------------------
+
+function getReassignmentPersonValue_(person, keys) {
+  const sources = [
+    person || {},
+    person && person.record ? person.record : {},
+  ];
+
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+
+      if (
+        value !== null &&
+        value !== undefined &&
+        String(value).trim() !== ""
+      ) {
+        return String(value).trim();
+      }
+    }
+  }
+
+  return "";
+}
+
+function buildReassignmentGeneratePayload_() {
+  const record = findSelectedOfficeRecord_();
+  const role = ReassignmentGenerateState.selectedRole;
+
+  if (!record) {
+    throw new Error(
+      "Select a valid signing office from the directory."
+    );
+  }
+
+  const signingOfficer = role === "DEPUTY"
+    ? record.deputyName
+    : record.chiefName;
+
+  const signingPosition = role === "DEPUTY"
+    ? record.deputyPosition
+    : record.chiefPosition;
+
+  if (!signingOfficer || !signingPosition) {
+    throw new Error(
+      `The selected office does not have a complete ${role.toLowerCase()} record.`
+    );
+  }
+
+  const missingSourceOffices = [];
+
+  const personnel = [
+    ...ReassignmentState.assignments.entries(),
+  ].map(([key, destinationOffice], index) => {
+    const person = PersonnelState.aoCart.get(key);
+
+    if (!person) {
+      throw new Error(
+        "A selected personnel record is no longer available."
+      );
+    }
+
+    const rank = getReassignmentPersonValue_(person, [
+      "rank",
+      "Rank",
+      "RANK",
+    ]);
+
+    const fullName = getReassignmentPersonValue_(person, [
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+    ]);
+
+    const from = getReassignmentPersonValue_(person, [
+      "office",
+      "Office",
+      "OFFICE",
+      "currentOffice",
+      "Current Office",
+    ]);
+
+    if (!from) {
+      missingSourceOffices.push(
+        `${index + 1}. ${[rank, fullName].filter(Boolean).join(" ") || "Unknown personnel"}`
+      );
+    }
+
+    return {
+      rank,
+      fullName,
+      from,
+      to: String(destinationOffice || "").trim(),
+      notes: "",
+    };
+  });
+
+  if (missingSourceOffices.length) {
+    throw new Error(
+      "The following personnel have no current office in the Personnel sheet:\n\n" +
+      missingSourceOffices.slice(0, 10).join("\n") +
+      (missingSourceOffices.length > 10
+        ? `\n…and ${missingSourceOffices.length - 10} more.`
+        : "") +
+      "\n\nUpdate their Office value, remove them from the selection, or re-add them after the source data is corrected."
+    );
+  }
+
+  return {
+    orderNumber: document
+      .getElementById("reassignmentOrderNumber")
+      .value.trim(),
+    orderDate: document
+      .getElementById("reassignmentOrderDate")
+      .value,
+    signingOfficer,
+    signingPosition,
+    fileReference: document
+      .getElementById("reassignmentFileReference")
+      .value.trim(),
+    personnel,
+  };
+}
