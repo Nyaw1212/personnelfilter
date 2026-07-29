@@ -89,11 +89,19 @@ function include(
       )
       .getContent();
 
-    // Loaded last to add the live order preview, polish workspace
-    // controls, and remove duplicated rank prefixes before sending.
+    // Adds the live order preview, polishes workspace controls, and
+    // removes duplicated rank prefixes before sending.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentPreviewPolishJS"
+      )
+      .getContent();
+
+    // Loaded last so successful generation returns to Personnel Filter
+    // and generated reports can be reviewed from the main header.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "GeneratedReportsJS"
       )
       .getContent();
   }
