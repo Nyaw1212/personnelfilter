@@ -2,6 +2,8 @@
 // Personnel Spreadsheet Menu
 //----------------------------------
 
+const PERSONNEL_WEB_APP_URL_PROPERTY = "PERSONNEL_WEBAPP_URL";
+
 function onOpen() {
   SpreadsheetApp
     .getUi()
@@ -16,12 +18,12 @@ function onOpen() {
 }
 
 function openPersonnelWebApp() {
-  const url = String(ScriptApp.getService().getUrl() || "").trim();
+  const url = getPersonnelWebAppUrl_();
 
   if (!url) {
     SpreadsheetApp.getUi().alert(
       "Personnel Web App",
-      "No deployed web app URL was found. Deploy this Apps Script project as a web app first.",
+      "PERSONNEL_WEBAPP_URL is not configured. Add the deployed Personnel Filter /exec URL in Project Settings → Script Properties.",
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     return;
@@ -87,7 +89,7 @@ function openPersonnelWebApp() {
           <div class="url">${safeUrl}</div>
           <div class="actions">
             <button onclick="google.script.host.close()">Close</button>
-            <a href="${safeUrl}">Open Web App</a>
+            <a href="${safeUrl}" onclick="setTimeout(() => google.script.host.close(), 250)">Open Web App</a>
           </div>
         </body>
       </html>
@@ -96,6 +98,44 @@ function openPersonnelWebApp() {
     .setHeight(260);
 
   SpreadsheetApp.getUi().showModalDialog(html, "Personnel Web App");
+}
+
+function getPersonnelWebAppUrl_() {
+  const configuredUrl = String(
+    PropertiesService.getScriptProperties().getProperty(
+      PERSONNEL_WEB_APP_URL_PROPERTY
+    ) || ""
+  ).trim();
+
+  if (isValidPersonnelWebAppUrl_(configuredUrl)) {
+    return configuredUrl;
+  }
+
+  const serviceUrl = String(ScriptApp.getService().getUrl() || "").trim();
+  return isValidPersonnelWebAppUrl_(serviceUrl) ? serviceUrl : "";
+}
+
+function isValidPersonnelWebAppUrl_(value) {
+  return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(?:[?#].*)?$/i.test(
+    String(value || "").trim()
+  );
+}
+
+function checkWebAppUrl() {
+  const configured = PropertiesService
+    .getScriptProperties()
+    .getProperty(PERSONNEL_WEB_APP_URL_PROPERTY);
+
+  const resolved = getPersonnelWebAppUrl_();
+
+  console.log("Configured PERSONNEL_WEBAPP_URL:", configured || null);
+  console.log("Resolved Personnel Web App URL:", resolved || null);
+
+  return {
+    configured: configured || "",
+    resolved,
+    valid: Boolean(resolved),
+  };
 }
 
 function escapePersonnelMenuHtml_(value) {
