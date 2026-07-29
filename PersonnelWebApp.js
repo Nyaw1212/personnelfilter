@@ -59,11 +59,18 @@ function include(
       )
       .getContent();
 
-    // Loaded last to override the payload builder with robust
-    // source-office field detection and clearer validation.
+    // Loaded after the workspace modules to provide more robust
+    // source-office field detection.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentSourceOfficePatchJS"
+      )
+      .getContent();
+
+    // Adds a Clear Personnel button to the report details dialog.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentClearPatchJS"
       )
       .getContent();
   }
