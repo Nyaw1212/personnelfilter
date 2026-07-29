@@ -15,7 +15,8 @@ const PersonnelState = {
     ranks: new Set(),
   },
 
-  // Temporary AO/report selection cart.
+  // Temporary AO selection cart. Bucket names and destinations
+  // will be added in the next phase.
   aoCart: new Map(),
 
   syncTimer: null,
@@ -47,7 +48,6 @@ function initializeAoSelection_() {
   patchAoPreviewRenderers_();
   addAoToolbarControls_();
   injectAoSelectionStyles_();
-  initializeReportGenerator_();
   updateAoCartCount_();
 }
 
@@ -75,7 +75,7 @@ function patchAoPreviewRenderers_() {
     actionHeader.className =
       "ao-selection-column ao-selection-header";
 
-    actionHeader.textContent = "ADD";
+    actionHeader.textContent = "AO";
 
     header.prepend(actionHeader);
   };
@@ -154,9 +154,11 @@ function addAoToolbarControls_() {
 
   addAllButton.id =
     "addAllVisibleAoButton";
+
   addAllButton.type = "button";
   addAllButton.className =
     "button button-secondary ao-add-all-button";
+
   addAllButton.textContent =
     "+ Add All Visible";
 
@@ -165,23 +167,9 @@ function addAoToolbarControls_() {
     addAllVisiblePersonnelToAo_
   );
 
-  const reportButton =
-    document.createElement("button");
-
-  reportButton.id = "openReportGeneratorButton";
-  reportButton.type = "button";
-  reportButton.className =
-    "button button-primary report-generator-button";
-  reportButton.textContent = "Report Generator";
-  reportButton.addEventListener(
-    "click",
-    openReportTypeDialog_
-  );
-
   controls.append(
     count,
-    addAllButton,
-    reportButton
+    addAllButton
   );
 
   previewToolbar.appendChild(controls);
@@ -189,23 +177,38 @@ function addAoToolbarControls_() {
 
 function createAoAddButton_(record) {
   const key = getAoPersonnelKey_(record);
-  const button = document.createElement("button");
+
+  const button =
+    document.createElement("button");
 
   button.type = "button";
   button.className = "ao-row-add-button";
 
-  const isAdded = PersonnelState.aoCart.has(key);
+  const isAdded =
+    PersonnelState.aoCart.has(key);
 
-  button.classList.toggle("is-added", isAdded);
-  button.textContent = isAdded ? "✓ Added" : "+ Add";
-  button.title = isAdded
-    ? "Remove from report selection"
-    : "Add to report selection";
+  button.classList.toggle(
+    "is-added",
+    isAdded
+  );
 
-  button.addEventListener("click", () => {
-    togglePersonnelInAoCart_(record);
-    renderPreviewTable();
-  });
+  button.textContent =
+    isAdded
+      ? "✓ Added"
+      : "+ Add";
+
+  button.title =
+    isAdded
+      ? "Remove from AO selection"
+      : "Add to AO selection";
+
+  button.addEventListener(
+    "click",
+    () => {
+      togglePersonnelInAoCart_(record);
+      renderPreviewTable();
+    }
+  );
 
   return button;
 }
@@ -227,7 +230,8 @@ function togglePersonnelInAoCart_(record) {
 }
 
 function addAllVisiblePersonnelToAo_() {
-  const records = PersonnelState.filteredRecords;
+  const records =
+    PersonnelState.filteredRecords;
 
   records.forEach(record => {
     PersonnelState.aoCart.set(
@@ -243,19 +247,27 @@ function addAllVisiblePersonnelToAo_() {
 
 function normalizeAoPersonnel_(record) {
   return {
-    sourceRow: record.__sheetRow || "",
-    rank: String(record.Rank || "").trim(),
-    fullName: String(record["Full Name"] || "").trim(),
-    office: String(record.Office || "").trim(),
-    camp: String(record.Camp || "").trim(),
-    category: String(record.Category || "").trim(),
-    type: String(record.Type || "").trim(),
-    record: { ...record },
+    sourceRow:
+      record.__sheetRow || "",
+
+    rank:
+      String(record.Rank || "").trim(),
+
+    fullName:
+      String(record["Full Name"] || "").trim(),
+
+    office:
+      String(record.Office || "").trim(),
+
+    record: {
+      ...record,
+    },
   };
 }
 
 function getAoPersonnelKey_(record) {
-  const sourceRow = String(record.__sheetRow || "").trim();
+  const sourceRow =
+    String(record.__sheetRow || "").trim();
 
   if (sourceRow) {
     return `row:${sourceRow}`;
@@ -275,22 +287,15 @@ function getAoPersonnelKey_(record) {
 }
 
 function updateAoCartCount_() {
-  const count = document.getElementById("aoCartCount");
-  const reportButton = document.getElementById(
-    "openReportGeneratorButton"
-  );
+  const count =
+    document.getElementById("aoCartCount");
 
-  if (count) {
-    count.textContent =
-      `${PersonnelState.aoCart.size.toLocaleString()} selected`;
+  if (!count) {
+    return;
   }
 
-  if (reportButton) {
-    reportButton.disabled = PersonnelState.aoCart.size === 0;
-    reportButton.title = PersonnelState.aoCart.size
-      ? "Choose a report type"
-      : "Select at least one personnel first";
-  }
+  count.textContent =
+    `${PersonnelState.aoCart.size.toLocaleString()} selected`;
 }
 
 function saveAoCart_() {
@@ -302,706 +307,135 @@ function saveAoCart_() {
       ])
     );
   } catch (error) {
-    console.warn("Unable to save report selection:", error);
+    console.warn(
+      "Unable to save AO selection:",
+      error
+    );
   }
 }
 
 function loadAoCart_() {
   try {
-    const stored = JSON.parse(
-      localStorage.getItem(AO_CART_STORAGE_KEY) || "[]"
-    );
+    const stored =
+      JSON.parse(
+        localStorage.getItem(
+          AO_CART_STORAGE_KEY
+        ) || "[]"
+      );
 
     if (Array.isArray(stored)) {
-      PersonnelState.aoCart = new Map(stored);
+      PersonnelState.aoCart =
+        new Map(stored);
     }
   } catch (error) {
     PersonnelState.aoCart = new Map();
-    console.warn("Unable to load report selection:", error);
-  }
-}
 
-//----------------------------------
-// Report Generator — Reassignment V1
-//----------------------------------
-
-const REASSIGNMENT_STORAGE_KEY =
-  "personnelFilterReassignmentV1";
-
-const ReassignmentState = {
-  activeDestination: "",
-  selectedKeys: new Set(),
-  assignments: new Map(),
-  filters: {
-    search: "",
-    rank: "",
-    office: "",
-    camp: "",
-  },
-};
-
-function initializeReportGenerator_() {
-  loadReassignmentState_();
-  buildReportTypeDialog_();
-  buildReassignmentWorkspace_();
-  injectReassignmentStyles_();
-}
-
-function buildReportTypeDialog_() {
-  if (document.getElementById("reportTypeDialog")) return;
-
-  const backdrop = document.createElement("div");
-  backdrop.id = "reportTypeBackdrop";
-  backdrop.className = "report-type-backdrop";
-  backdrop.hidden = true;
-
-  const dialog = document.createElement("section");
-  dialog.id = "reportTypeDialog";
-  dialog.className = "report-type-dialog";
-  dialog.hidden = true;
-  dialog.innerHTML = `
-    <div class="report-type-header">
-      <div>
-        <span>REPORT GENERATOR</span>
-        <h2>Choose Report Type</h2>
-      </div>
-      <button id="closeReportTypeButton" type="button">×</button>
-    </div>
-    <div class="report-type-grid">
-      <button class="report-type-card" type="button" data-report-type="REASSIGNMENT">
-        <strong>Reassignment</strong>
-        <small>Assign selected personnel to their new offices.</small>
-      </button>
-      <button class="report-type-card" type="button" disabled>
-        <strong>Administrative Order</strong>
-        <small>Coming next</small>
-      </button>
-      <button class="report-type-card" type="button" disabled>
-        <strong>Special Order</strong>
-        <small>Coming next</small>
-      </button>
-      <button class="report-type-card" type="button" disabled>
-        <strong>Other Report</strong>
-        <small>Coming next</small>
-      </button>
-    </div>
-  `;
-
-  document.body.append(backdrop, dialog);
-
-  document
-    .getElementById("closeReportTypeButton")
-    .addEventListener("click", closeReportTypeDialog_);
-
-  backdrop.addEventListener("click", closeReportTypeDialog_);
-
-  dialog
-    .querySelector('[data-report-type="REASSIGNMENT"]')
-    .addEventListener("click", () => {
-      closeReportTypeDialog_();
-      openReassignmentWorkspace_();
-    });
-}
-
-function openReportTypeDialog_() {
-  if (!PersonnelState.aoCart.size) {
-    alert("Select at least one personnel first.");
-    return;
-  }
-
-  document.getElementById("reportTypeBackdrop").hidden = false;
-  document.getElementById("reportTypeDialog").hidden = false;
-}
-
-function closeReportTypeDialog_() {
-  document.getElementById("reportTypeBackdrop").hidden = true;
-  document.getElementById("reportTypeDialog").hidden = true;
-}
-
-function buildReassignmentWorkspace_() {
-  if (document.getElementById("reassignmentWorkspace")) return;
-
-  const workspace = document.createElement("section");
-  workspace.id = "reassignmentWorkspace";
-  workspace.className = "reassignment-workspace";
-  workspace.hidden = true;
-  workspace.innerHTML = `
-    <header class="reassignment-header">
-      <div>
-        <span>REPORT GENERATOR</span>
-        <h1>Reassignment Workspace</h1>
-        <p>Filter selected personnel, choose a destination office, then assign individually or in bulk.</p>
-      </div>
-      <div class="reassignment-header-actions">
-        <span id="reassignmentProgress">0 assigned</span>
-        <button id="closeReassignmentButton" type="button">Back to Personnel Filter</button>
-      </div>
-    </header>
-
-    <main class="reassignment-layout">
-      <section class="reassignment-source-panel">
-        <div class="reassignment-panel-heading">
-          <div>
-            <span>STEP 1</span>
-            <h2>To Be Assigned</h2>
-          </div>
-          <strong id="unassignedCount">0</strong>
-        </div>
-
-        <input id="reassignmentSearch" class="reassignment-search" type="search" placeholder="Search selected personnel...">
-
-        <div class="source-filter-block">
-          <label>Rank</label>
-          <div id="sourceRankChips" class="reassignment-chip-wrap"></div>
-        </div>
-        <div class="source-filter-block">
-          <label>Current Office</label>
-          <div id="sourceOfficeChips" class="reassignment-chip-wrap"></div>
-        </div>
-        <div class="source-filter-block">
-          <label>Camp</label>
-          <div id="sourceCampChips" class="reassignment-chip-wrap"></div>
-        </div>
-
-        <div class="source-actions">
-          <span id="visibleUnassignedCount">0 visible</span>
-          <button id="selectAllVisibleReassignment" type="button">Select All Visible</button>
-        </div>
-
-        <div id="unassignedPersonnelList" class="unassigned-personnel-list"></div>
-      </section>
-
-      <aside class="destination-panel">
-        <div class="reassignment-panel-heading compact">
-          <div>
-            <span>STEP 2</span>
-            <h2>Destination Office</h2>
-          </div>
-        </div>
-        <p class="destination-help">Choose where the selected personnel will go.</p>
-        <div id="destinationOfficeChips" class="destination-chip-list"></div>
-        <button id="assignSelectedButton" class="assign-selected-button" type="button" disabled>
-          Assign Selected
-        </button>
-        <button id="assignAllVisibleButton" class="assign-all-button" type="button" disabled>
-          Add All Visible
-        </button>
-      </aside>
-
-      <section class="assigned-panel">
-        <div class="reassignment-panel-heading">
-          <div>
-            <span>STEP 3</span>
-            <h2>Assigned Personnel</h2>
-          </div>
-          <button id="clearReassignmentButton" type="button">Clear Assignments</button>
-        </div>
-        <div id="assignedOfficeCards" class="assigned-office-grid"></div>
-        <div class="reassignment-footer-actions">
-          <button id="generateReassignmentButton" type="button">Generate Reassignment Report</button>
-        </div>
-      </section>
-    </main>
-  `;
-
-  document.body.appendChild(workspace);
-
-  document
-    .getElementById("closeReassignmentButton")
-    .addEventListener("click", closeReassignmentWorkspace_);
-
-  document
-    .getElementById("reassignmentSearch")
-    .addEventListener("input", event => {
-      ReassignmentState.filters.search = event.target.value;
-      ReassignmentState.selectedKeys.clear();
-      renderReassignmentWorkspace_();
-    });
-
-  document
-    .getElementById("selectAllVisibleReassignment")
-    .addEventListener("click", selectAllVisibleUnassigned_);
-
-  document
-    .getElementById("assignSelectedButton")
-    .addEventListener("click", assignSelectedPersonnel_);
-
-  document
-    .getElementById("assignAllVisibleButton")
-    .addEventListener("click", assignAllVisiblePersonnel_);
-
-  document
-    .getElementById("clearReassignmentButton")
-    .addEventListener("click", clearReassignmentAssignments_);
-
-  document
-    .getElementById("generateReassignmentButton")
-    .addEventListener("click", validateReassignmentReport_);
-}
-
-function openReassignmentWorkspace_() {
-  if (!PersonnelState.aoCart.size) {
-    alert("Your report selection is empty.");
-    return;
-  }
-
-  document.getElementById("reassignmentWorkspace").hidden = false;
-  document.body.classList.add("reassignment-open");
-  renderReassignmentWorkspace_();
-}
-
-function closeReassignmentWorkspace_() {
-  document.getElementById("reassignmentWorkspace").hidden = true;
-  document.body.classList.remove("reassignment-open");
-}
-
-function renderReassignmentWorkspace_() {
-  pruneAssignments_();
-  renderSourceFilterChips_();
-  renderDestinationChips_();
-  renderUnassignedPersonnel_();
-  renderAssignedOfficeCards_();
-  updateReassignmentControls_();
-  saveReassignmentState_();
-}
-
-function getReassignmentCartEntries_() {
-  return [...PersonnelState.aoCart.entries()].map(([key, person]) => ({
-    key,
-    ...person,
-  }));
-}
-
-function getAssignedKeySet_() {
-  const keys = new Set();
-  ReassignmentState.assignments.forEach(personKeys => {
-    personKeys.forEach(key => keys.add(key));
-  });
-  return keys;
-}
-
-function getUnassignedPersonnel_() {
-  const assigned = getAssignedKeySet_();
-  return getReassignmentCartEntries_().filter(person => !assigned.has(person.key));
-}
-
-function getVisibleUnassignedPersonnel_() {
-  const search = ReassignmentState.filters.search.trim().toLowerCase();
-
-  return getUnassignedPersonnel_().filter(person => {
-    const record = person.record || {};
-    const matchesSearch = !search || [
-      person.fullName,
-      person.rank,
-      person.office,
-      person.camp,
-    ].some(value => String(value || "").toLowerCase().includes(search));
-
-    const matchesRank = !ReassignmentState.filters.rank ||
-      person.rank === ReassignmentState.filters.rank;
-    const matchesOffice = !ReassignmentState.filters.office ||
-      person.office === ReassignmentState.filters.office;
-    const matchesCamp = !ReassignmentState.filters.camp ||
-      (person.camp || record.Camp || "") === ReassignmentState.filters.camp;
-
-    return matchesSearch && matchesRank && matchesOffice && matchesCamp;
-  });
-}
-
-function renderSourceFilterChips_() {
-  const unassigned = getUnassignedPersonnel_();
-
-  renderChipGroup_(
-    "sourceRankChips",
-    uniqueSorted_(unassigned.map(person => person.rank)),
-    ReassignmentState.filters.rank,
-    value => {
-      ReassignmentState.filters.rank =
-        ReassignmentState.filters.rank === value ? "" : value;
-      ReassignmentState.selectedKeys.clear();
-      renderReassignmentWorkspace_();
-    }
-  );
-
-  renderChipGroup_(
-    "sourceOfficeChips",
-    uniqueSorted_(unassigned.map(person => person.office)),
-    ReassignmentState.filters.office,
-    value => {
-      ReassignmentState.filters.office =
-        ReassignmentState.filters.office === value ? "" : value;
-      ReassignmentState.selectedKeys.clear();
-      renderReassignmentWorkspace_();
-    }
-  );
-
-  renderChipGroup_(
-    "sourceCampChips",
-    uniqueSorted_(unassigned.map(person => person.camp)),
-    ReassignmentState.filters.camp,
-    value => {
-      ReassignmentState.filters.camp =
-        ReassignmentState.filters.camp === value ? "" : value;
-      ReassignmentState.selectedKeys.clear();
-      renderReassignmentWorkspace_();
-    }
-  );
-}
-
-function renderChipGroup_(containerId, values, activeValue, onClick) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = "";
-
-  if (!values.length) {
-    container.innerHTML = '<span class="chip-empty">No values</span>';
-    return;
-  }
-
-  values.forEach(value => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `reassignment-filter-chip${activeValue === value ? " is-active" : ""}`;
-    button.textContent = value;
-    button.addEventListener("click", () => onClick(value));
-    container.appendChild(button);
-  });
-}
-
-function renderDestinationChips_() {
-  const container = document.getElementById("destinationOfficeChips");
-  const offices = uniqueSorted_(
-    PersonnelState.records.map(record => String(record.Office || "").trim())
-  );
-
-  container.innerHTML = "";
-
-  offices.forEach(office => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `destination-office-chip${ReassignmentState.activeDestination === office ? " is-active" : ""}`;
-    button.textContent = office;
-    button.addEventListener("click", () => {
-      ReassignmentState.activeDestination = office;
-      renderReassignmentWorkspace_();
-    });
-    container.appendChild(button);
-  });
-}
-
-function renderUnassignedPersonnel_() {
-  const container = document.getElementById("unassignedPersonnelList");
-  const visible = getVisibleUnassignedPersonnel_();
-  container.innerHTML = "";
-
-  if (!visible.length) {
-    container.innerHTML = '<div class="reassignment-empty">No unassigned personnel match these filters.</div>';
-    return;
-  }
-
-  visible.forEach(person => {
-    const row = document.createElement("label");
-    row.className = `unassigned-person${ReassignmentState.selectedKeys.has(person.key) ? " is-selected" : ""}`;
-    row.innerHTML = `
-      <input type="checkbox" ${ReassignmentState.selectedKeys.has(person.key) ? "checked" : ""}>
-      <span>
-        <strong>${escapeReassignmentHtml_([person.rank, person.fullName].filter(Boolean).join(" "))}</strong>
-        <small>${escapeReassignmentHtml_(person.office || "No current office")} · ${escapeReassignmentHtml_(person.camp || "No camp")}</small>
-      </span>
-    `;
-
-    row.querySelector("input").addEventListener("change", event => {
-      if (event.target.checked) {
-        ReassignmentState.selectedKeys.add(person.key);
-      } else {
-        ReassignmentState.selectedKeys.delete(person.key);
-      }
-      updateReassignmentControls_();
-      row.classList.toggle("is-selected", event.target.checked);
-    });
-
-    container.appendChild(row);
-  });
-}
-
-function selectAllVisibleUnassigned_() {
-  getVisibleUnassignedPersonnel_().forEach(person => {
-    ReassignmentState.selectedKeys.add(person.key);
-  });
-  renderReassignmentWorkspace_();
-}
-
-function assignSelectedPersonnel_() {
-  if (!ReassignmentState.activeDestination) return;
-  assignKeysToDestination_([...ReassignmentState.selectedKeys]);
-}
-
-function assignAllVisiblePersonnel_() {
-  if (!ReassignmentState.activeDestination) return;
-  assignKeysToDestination_(
-    getVisibleUnassignedPersonnel_().map(person => person.key)
-  );
-}
-
-function assignKeysToDestination_(keys) {
-  if (!keys.length || !ReassignmentState.activeDestination) return;
-
-  const validKeys = new Set(getUnassignedPersonnel_().map(person => person.key));
-  const destination = ReassignmentState.activeDestination;
-  const destinationKeys = new Set(
-    ReassignmentState.assignments.get(destination) || []
-  );
-
-  keys.forEach(key => {
-    if (validKeys.has(key)) destinationKeys.add(key);
-  });
-
-  ReassignmentState.assignments.set(destination, [...destinationKeys]);
-  ReassignmentState.selectedKeys.clear();
-  renderReassignmentWorkspace_();
-}
-
-function renderAssignedOfficeCards_() {
-  const container = document.getElementById("assignedOfficeCards");
-  const cartMap = new Map(getReassignmentCartEntries_().map(person => [person.key, person]));
-  container.innerHTML = "";
-
-  const entries = [...ReassignmentState.assignments.entries()]
-    .filter(([, keys]) => keys.length)
-    .sort((a, b) => a[0].localeCompare(b[0]));
-
-  if (!entries.length) {
-    container.innerHTML = '<div class="reassignment-empty assigned-empty">No personnel assigned yet.</div>';
-    return;
-  }
-
-  entries.forEach(([office, keys]) => {
-    const card = document.createElement("article");
-    card.className = "assigned-office-card";
-
-    const people = keys
-      .map(key => cartMap.get(key))
-      .filter(Boolean);
-
-    card.innerHTML = `
-      <div class="assigned-card-header">
-        <div>
-          <span>NEW OFFICE</span>
-          <h3>${escapeReassignmentHtml_(office)}</h3>
-        </div>
-        <strong>${people.length}</strong>
-      </div>
-      <div class="assigned-card-list"></div>
-    `;
-
-    const list = card.querySelector(".assigned-card-list");
-
-    people.forEach(person => {
-      const item = document.createElement("div");
-      item.className = "assigned-person-item";
-      item.innerHTML = `
-        <span>
-          <strong>${escapeReassignmentHtml_([person.rank, person.fullName].filter(Boolean).join(" "))}</strong>
-          <small>${escapeReassignmentHtml_(person.office || "No current office")} → ${escapeReassignmentHtml_(office)}</small>
-        </span>
-        <button type="button" title="Return to unassigned list">×</button>
-      `;
-
-      item.querySelector("button").addEventListener("click", () => {
-        removeAssignedPerson_(office, person.key);
-      });
-
-      list.appendChild(item);
-    });
-
-    container.appendChild(card);
-  });
-}
-
-function removeAssignedPerson_(office, key) {
-  const remaining = (ReassignmentState.assignments.get(office) || [])
-    .filter(itemKey => itemKey !== key);
-
-  if (remaining.length) {
-    ReassignmentState.assignments.set(office, remaining);
-  } else {
-    ReassignmentState.assignments.delete(office);
-  }
-
-  renderReassignmentWorkspace_();
-}
-
-function clearReassignmentAssignments_() {
-  if (!ReassignmentState.assignments.size) return;
-  if (!confirm("Return all assigned personnel to the unassigned list?")) return;
-
-  ReassignmentState.assignments.clear();
-  ReassignmentState.selectedKeys.clear();
-  renderReassignmentWorkspace_();
-}
-
-function updateReassignmentControls_() {
-  const total = PersonnelState.aoCart.size;
-  const assigned = getAssignedKeySet_().size;
-  const unassigned = Math.max(0, total - assigned);
-  const visible = getVisibleUnassignedPersonnel_().length;
-  const hasDestination = Boolean(ReassignmentState.activeDestination);
-
-  document.getElementById("reassignmentProgress").textContent =
-    `${assigned.toLocaleString()} of ${total.toLocaleString()} assigned`;
-  document.getElementById("unassignedCount").textContent =
-    unassigned.toLocaleString();
-  document.getElementById("visibleUnassignedCount").textContent =
-    `${visible.toLocaleString()} visible`;
-
-  const assignSelected = document.getElementById("assignSelectedButton");
-  assignSelected.disabled = !hasDestination || !ReassignmentState.selectedKeys.size;
-  assignSelected.textContent = ReassignmentState.selectedKeys.size
-    ? `Assign ${ReassignmentState.selectedKeys.size} Selected`
-    : "Assign Selected";
-
-  const assignAll = document.getElementById("assignAllVisibleButton");
-  assignAll.disabled = !hasDestination || !visible;
-  assignAll.textContent = visible
-    ? `Add All ${visible.toLocaleString()} Visible`
-    : "Add All Visible";
-
-  const generate = document.getElementById("generateReassignmentButton");
-  generate.disabled = !total || unassigned > 0;
-  generate.textContent = unassigned
-    ? `${unassigned.toLocaleString()} Still Unassigned`
-    : "Generate Reassignment Report";
-}
-
-function validateReassignmentReport_() {
-  const unassigned = getUnassignedPersonnel_();
-
-  if (unassigned.length) {
-    alert(`${unassigned.length} personnel still need a destination office.`);
-    return;
-  }
-
-  const total = getAssignedKeySet_().size;
-  const offices = [...ReassignmentState.assignments.keys()].length;
-
-  alert(
-    `Reassignment is ready.\n\n${total} personnel assigned to ${offices} office${offices === 1 ? "" : "s"}.\n\nDocument generation will be connected in the next step.`
-  );
-}
-
-function pruneAssignments_() {
-  const cartKeys = new Set(PersonnelState.aoCart.keys());
-
-  [...ReassignmentState.assignments.entries()].forEach(([office, keys]) => {
-    const valid = keys.filter(key => cartKeys.has(key));
-    if (valid.length) {
-      ReassignmentState.assignments.set(office, valid);
-    } else {
-      ReassignmentState.assignments.delete(office);
-    }
-  });
-
-  ReassignmentState.selectedKeys = new Set(
-    [...ReassignmentState.selectedKeys].filter(key => cartKeys.has(key))
-  );
-}
-
-function uniqueSorted_(values) {
-  return [...new Set(values.map(value => String(value || "").trim()).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-}
-
-function saveReassignmentState_() {
-  try {
-    localStorage.setItem(
-      REASSIGNMENT_STORAGE_KEY,
-      JSON.stringify({
-        activeDestination: ReassignmentState.activeDestination,
-        assignments: [...ReassignmentState.assignments.entries()],
-        filters: ReassignmentState.filters,
-      })
+    console.warn(
+      "Unable to load AO selection:",
+      error
     );
-  } catch (error) {
-    console.warn("Unable to save reassignment state:", error);
   }
 }
-
-function loadReassignmentState_() {
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(REASSIGNMENT_STORAGE_KEY) || "null"
-    );
-
-    if (!stored) return;
-
-    ReassignmentState.activeDestination = stored.activeDestination || "";
-    ReassignmentState.assignments = new Map(
-      Array.isArray(stored.assignments) ? stored.assignments : []
-    );
-    ReassignmentState.filters = {
-      ...ReassignmentState.filters,
-      ...(stored.filters || {}),
-    };
-  } catch (error) {
-    console.warn("Unable to load reassignment state:", error);
-  }
-}
-
-function escapeReassignmentHtml_(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-//----------------------------------
-// Styles
-//----------------------------------
 
 function injectAoSelectionStyles_() {
-  if (document.getElementById("aoSelectionStyles")) return;
+  if (
+    document.getElementById(
+      "aoSelectionStyles"
+    )
+  ) {
+    return;
+  }
 
-  const style = document.createElement("style");
+  const style =
+    document.createElement("style");
+
   style.id = "aoSelectionStyles";
-  style.textContent = `
-    .ao-selection-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;margin-left:auto}
-    .ao-cart-count{display:inline-flex;align-items:center;min-height:34px;padding:7px 11px;border:1px solid rgba(31,111,52,.18);border-radius:999px;color:var(--green-800,#185c2b);background:rgba(255,255,255,.7);font-size:12px;font-weight:800;white-space:nowrap}
-    .ao-add-all-button,.report-generator-button{white-space:nowrap}
-    .ao-selection-column{position:sticky;left:0;z-index:3;width:82px;min-width:82px;max-width:82px;text-align:center}
-    .ao-selection-header{z-index:6}
-    .ao-selection-cell{background:rgba(248,252,248,.96);box-shadow:1px 0 0 rgba(31,111,52,.1)}
-    .duplicate-row .ao-selection-cell{background:rgba(255,248,222,.97)}
-    .ao-row-add-button{width:66px;min-height:30px;padding:5px 8px;border:1px solid rgba(31,111,52,.28);border-radius:9px;color:#185c2b;background:rgba(255,255,255,.92);font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}
-    .ao-row-add-button:hover{border-color:#2d7d46;background:#f2fff4}
-    .ao-row-add-button.is-added{color:#173c1f;border-color:#e4d600;background:#fff200}
-    @media(max-width:760px){.ao-selection-toolbar{width:100%;justify-content:flex-start;margin-left:0}}
-  `;
-  document.head.appendChild(style);
-}
 
-function injectReassignmentStyles_() {
-  if (document.getElementById("reassignmentStyles")) return;
-
-  const style = document.createElement("style");
-  style.id = "reassignmentStyles";
   style.textContent = `
-    .report-type-backdrop{position:fixed;inset:0;z-index:20000;background:rgba(11,35,17,.48);backdrop-filter:blur(8px)}
-    .report-type-dialog{position:fixed;top:50%;left:50%;z-index:20001;width:min(720px,calc(100vw - 32px));padding:22px;border:1px solid rgba(31,111,52,.18);border-radius:24px;background:rgba(247,253,248,.96);box-shadow:0 30px 80px rgba(12,50,22,.25);transform:translate(-50%,-50%)}
-    .report-type-backdrop[hidden],.report-type-dialog[hidden]{display:none}
-    .report-type-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}.report-type-header span,.reassignment-header span,.reassignment-panel-heading span,.assigned-card-header span{color:#25713d;font-size:11px;font-weight:900;letter-spacing:.12em}.report-type-header h2{margin:4px 0 0;color:#123d1d}.report-type-header button{width:36px;height:36px;border:0;border-radius:10px;background:#e7f2e9;font-size:22px;cursor:pointer}
-    .report-type-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.report-type-card{display:grid;gap:7px;min-height:120px;padding:18px;border:1px solid rgba(31,111,52,.18);border-radius:18px;text-align:left;background:rgba(255,255,255,.78);cursor:pointer}.report-type-card:not(:disabled):hover{border-color:#278047;box-shadow:0 10px 24px rgba(31,111,52,.12)}.report-type-card strong{color:#123d1d;font-size:17px}.report-type-card small{color:#637a68}.report-type-card:disabled{opacity:.48;cursor:default}
-    body.reassignment-open{overflow:hidden}.reassignment-workspace{position:fixed;inset:0;z-index:19000;display:grid;grid-template-rows:auto 1fr;color:#173c1f;background:linear-gradient(135deg,#f8fcf8,#e7f3e9);overflow:hidden}.reassignment-workspace[hidden]{display:none}
-    .reassignment-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 22px;border-bottom:1px solid rgba(31,111,52,.15);background:rgba(255,255,255,.75);backdrop-filter:blur(16px)}.reassignment-header h1{margin:3px 0 2px;font-size:24px}.reassignment-header p{margin:0;color:#607366;font-size:12px}.reassignment-header-actions{display:flex;align-items:center;gap:12px}.reassignment-header-actions span{padding:8px 12px;border-radius:999px;background:#fff200;color:#173c1f;letter-spacing:0}.reassignment-header-actions button,.source-actions button,.reassignment-panel-heading button{min-height:36px;padding:8px 12px;border:1px solid rgba(31,111,52,.18);border-radius:11px;background:#fff;cursor:pointer;font-weight:800}
-    .reassignment-layout{display:grid;grid-template-columns:minmax(300px,24%) minmax(170px,13%) 1fr;gap:14px;min-height:0;padding:14px}.reassignment-source-panel,.destination-panel,.assigned-panel{min-height:0;padding:15px;border:1px solid rgba(31,111,52,.14);border-radius:20px;background:rgba(255,255,255,.68);box-shadow:0 12px 30px rgba(31,111,52,.08)}.reassignment-source-panel,.assigned-panel{display:flex;flex-direction:column}.destination-panel{overflow-y:auto}
-    .reassignment-panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.reassignment-panel-heading h2{margin:3px 0 0;font-size:18px}.reassignment-panel-heading>strong{display:grid;min-width:34px;height:34px;place-items:center;border-radius:999px;background:#fff200}.reassignment-panel-heading.compact{margin-bottom:4px}
-    .reassignment-search{width:100%;min-height:40px;padding:9px 12px;border:1px solid rgba(31,111,52,.18);border-radius:12px;outline:none;background:#fff;font:inherit}.source-filter-block{margin-top:10px}.source-filter-block label{display:block;margin-bottom:6px;font-size:10px;font-weight:900;letter-spacing:.09em;text-transform:uppercase}.reassignment-chip-wrap{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}.reassignment-filter-chip,.destination-office-chip{flex:0 0 auto;padding:7px 10px;border:1px solid rgba(31,111,52,.18);border-radius:999px;color:#214b2b;background:#fff;font:inherit;font-size:10px;font-weight:800;cursor:pointer}.reassignment-filter-chip.is-active,.destination-office-chip.is-active{border-color:#d9cd00;background:#fff200}.chip-empty{font-size:11px;color:#718176}
-    .source-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}.source-actions span{font-size:11px;font-weight:800}.unassigned-personnel-list{display:grid;gap:7px;overflow-y:auto;padding-right:3px}.unassigned-person{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid rgba(31,111,52,.12);border-radius:12px;background:rgba(255,255,255,.82);cursor:pointer}.unassigned-person.is-selected{border-color:#d9cd00;background:#fffde0}.unassigned-person input{width:17px;height:17px}.unassigned-person span{min-width:0}.unassigned-person strong,.unassigned-person small{display:block}.unassigned-person strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.unassigned-person small{margin-top:3px;color:#6a7c6e;font-size:9px}
-    .destination-help{margin:0 0 10px;color:#68796d;font-size:11px}.destination-chip-list{display:grid;gap:7px}.destination-office-chip{width:100%;border-radius:11px;text-align:left;white-space:normal}.assign-selected-button,.assign-all-button{width:100%;min-height:42px;margin-top:10px;border:0;border-radius:12px;font:inherit;font-size:11px;font-weight:900;cursor:pointer}.assign-selected-button{color:#fff;background:#1d6c35}.assign-all-button{color:#173c1f;background:#fff200}.assign-selected-button:disabled,.assign-all-button:disabled{opacity:.4;cursor:default}
-    .assigned-panel{overflow:hidden}.assigned-office-grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px;overflow-y:auto;padding-right:4px}.assigned-office-card{min-height:190px;padding:14px;border:1px solid rgba(31,111,52,.15);border-radius:16px;background:rgba(255,255,255,.86)}.assigned-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding-bottom:10px;border-bottom:1px solid rgba(31,111,52,.1)}.assigned-card-header h3{margin:3px 0 0;font-size:14px}.assigned-card-header>strong{display:grid;min-width:30px;height:30px;place-items:center;border-radius:999px;background:#fff200}.assigned-card-list{display:grid;gap:7px;margin-top:10px}.assigned-person-item{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:8px;border-radius:10px;background:#eef7ef}.assigned-person-item span{min-width:0}.assigned-person-item strong,.assigned-person-item small{display:block}.assigned-person-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.assigned-person-item small{margin-top:3px;color:#68796d;font-size:8px}.assigned-person-item button{flex:0 0 auto;width:25px;height:25px;border:0;border-radius:8px;background:#fff;color:#9d2d25;cursor:pointer;font-size:17px}
-    .reassignment-empty{padding:18px;border:1px dashed rgba(31,111,52,.22);border-radius:14px;color:#728078;text-align:center;font-size:11px}.assigned-empty{grid-column:1/-1}.reassignment-footer-actions{display:flex;justify-content:flex-end;margin-top:auto;padding-top:12px}.reassignment-footer-actions button{min-height:42px;padding:10px 16px;border:0;border-radius:12px;color:#173c1f;background:#fff200;font:inherit;font-size:11px;font-weight:900;cursor:pointer}.reassignment-footer-actions button:disabled{color:#68796d;background:#dfe7e0;cursor:default}
-    @media(max-width:1050px){.reassignment-layout{grid-template-columns:minmax(280px,34%) minmax(170px,20%) 1fr}.assigned-office-grid{grid-template-columns:repeat(2,minmax(180px,1fr))}}
-    @media(max-width:760px){.report-type-grid{grid-template-columns:1fr}.reassignment-workspace{overflow-y:auto}.reassignment-header{align-items:flex-start;flex-direction:column}.reassignment-layout{display:grid;grid-template-columns:1fr;overflow:visible}.reassignment-source-panel,.destination-panel,.assigned-panel{max-height:none}.unassigned-personnel-list,.assigned-office-grid{max-height:420px}.assigned-office-grid{grid-template-columns:1fr}}
+    .ao-selection-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+
+    .ao-cart-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid rgba(31, 111, 52, 0.18);
+      border-radius: 999px;
+      color: var(--green-800, #185c2b);
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .ao-add-all-button {
+      white-space: nowrap;
+    }
+
+    .ao-selection-column {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      width: 82px;
+      min-width: 82px;
+      max-width: 82px;
+      text-align: center;
+    }
+
+    .ao-selection-header {
+      z-index: 6;
+    }
+
+    .ao-selection-cell {
+      background: rgba(248, 252, 248, 0.96);
+      box-shadow: 1px 0 0 rgba(31, 111, 52, 0.1);
+    }
+
+    .duplicate-row .ao-selection-cell {
+      background: rgba(255, 248, 222, 0.97);
+    }
+
+    .ao-row-add-button {
+      width: 66px;
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 1px solid rgba(31, 111, 52, 0.28);
+      border-radius: 9px;
+      color: #185c2b;
+      background: rgba(255, 255, 255, 0.92);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .ao-row-add-button:hover {
+      border-color: #2d7d46;
+      background: #f2fff4;
+    }
+
+    .ao-row-add-button.is-added {
+      color: #173c1f;
+      border-color: #e4d600;
+      background: #fff200;
+    }
+
+    @media (max-width: 760px) {
+      .ao-selection-toolbar {
+        width: 100%;
+        justify-content: flex-start;
+        margin-left: 0;
+      }
+    }
   `;
+
   document.head.appendChild(style);
 }
