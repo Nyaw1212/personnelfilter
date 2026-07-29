@@ -1,0 +1,157 @@
+//----------------------------------
+// AO Selection Bulk Controls
+//----------------------------------
+
+document.addEventListener("DOMContentLoaded", initializeAoBulkControls_);
+
+function initializeAoBulkControls_() {
+  addAoBulkSelectionButtons_();
+  injectAoBulkSelectionStyles_();
+}
+
+function addAoBulkSelectionButtons_() {
+  const toolbar = document.querySelector(".ao-selection-toolbar");
+
+  if (!toolbar || document.getElementById("deselectAllAoButton")) {
+    return;
+  }
+
+  const addAllButton = document.getElementById("addAllVisibleAoButton");
+
+  const removeVisibleButton = document.createElement("button");
+  removeVisibleButton.id = "removeAllVisibleAoButton";
+  removeVisibleButton.type = "button";
+  removeVisibleButton.className =
+    "button button-secondary ao-remove-visible-button";
+  removeVisibleButton.textContent = "− Remove All Visible";
+  removeVisibleButton.title =
+    "Remove only personnel currently visible under the active filters";
+  removeVisibleButton.addEventListener(
+    "click",
+    removeAllVisiblePersonnelFromAo_
+  );
+
+  const deselectAllButton = document.createElement("button");
+  deselectAllButton.id = "deselectAllAoButton";
+  deselectAllButton.type = "button";
+  deselectAllButton.className =
+    "button button-secondary ao-deselect-all-button";
+  deselectAllButton.textContent = "× Deselect All";
+  deselectAllButton.title =
+    "Clear the entire AO selection while keeping filters intact";
+  deselectAllButton.addEventListener(
+    "click",
+    deselectAllPersonnelFromAo_
+  );
+
+  if (addAllButton) {
+    addAllButton.insertAdjacentElement("afterend", removeVisibleButton);
+    removeVisibleButton.insertAdjacentElement("afterend", deselectAllButton);
+  } else {
+    toolbar.append(removeVisibleButton, deselectAllButton);
+  }
+}
+
+function removeAllVisiblePersonnelFromAo_() {
+  const records = Array.isArray(PersonnelState.filteredRecords)
+    ? PersonnelState.filteredRecords
+    : [];
+
+  records.forEach(record => {
+    PersonnelState.aoCart.delete(getAoPersonnelKey_(record));
+  });
+
+  pruneReassignmentSelectionAfterAoChange_();
+  persistAndRefreshAoBulkChange_();
+}
+
+function deselectAllPersonnelFromAo_() {
+  if (!PersonnelState.aoCart.size) {
+    return;
+  }
+
+  PersonnelState.aoCart.clear();
+
+  if (typeof ReassignmentState !== "undefined") {
+    ReassignmentState.assignments?.clear?.();
+    ReassignmentState.selectedKeys?.clear?.();
+
+    if (typeof saveReassignmentState_ === "function") {
+      saveReassignmentState_();
+    }
+  }
+
+  persistAndRefreshAoBulkChange_();
+}
+
+function pruneReassignmentSelectionAfterAoChange_() {
+  if (typeof ReassignmentState === "undefined") {
+    return;
+  }
+
+  const validKeys = new Set(PersonnelState.aoCart.keys());
+
+  ReassignmentState.assignments?.forEach?.((value, key) => {
+    if (!validKeys.has(key)) {
+      ReassignmentState.assignments.delete(key);
+    }
+  });
+
+  ReassignmentState.selectedKeys?.forEach?.(key => {
+    if (!validKeys.has(key)) {
+      ReassignmentState.selectedKeys.delete(key);
+    }
+  });
+
+  if (typeof saveReassignmentState_ === "function") {
+    saveReassignmentState_();
+  }
+}
+
+function persistAndRefreshAoBulkChange_() {
+  saveAoCart_();
+  updateAoCartCount_();
+
+  if (typeof updateReportGeneratorButton_ === "function") {
+    updateReportGeneratorButton_();
+  }
+
+  renderPreviewTable();
+
+  if (typeof renderReassignmentWorkspace_ === "function") {
+    renderReassignmentWorkspace_();
+  }
+}
+
+function injectAoBulkSelectionStyles_() {
+  if (document.getElementById("aoBulkSelectionStyles")) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "aoBulkSelectionStyles";
+  style.textContent = `
+    #removeAllVisibleAoButton,
+    #deselectAllAoButton {
+      white-space: nowrap;
+    }
+
+    #removeAllVisibleAoButton {
+      border-color: rgba(31,111,52,.24);
+      background: rgba(255,255,255,.9);
+    }
+
+    #deselectAllAoButton {
+      border-color: rgba(169,44,44,.28);
+      color: #8d2525;
+      background: #fff8f8;
+    }
+
+    #deselectAllAoButton:hover {
+      border-color: rgba(169,44,44,.5);
+      background: #fff1f1;
+    }
+  `;
+
+  document.head.appendChild(style);
+}
