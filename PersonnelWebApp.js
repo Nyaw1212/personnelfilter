@@ -59,46 +59,44 @@ function include(
       )
       .getContent();
 
-    // Loaded after the workspace modules to provide more robust
-    // source-office field detection.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentSourceOfficePatchJS"
       )
       .getContent();
 
-    // Adds a Clear Personnel button to the report details dialog.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentClearPatchJS"
       )
       .getContent();
 
-    // Adds Clear All Selected directly to Step 1 of the workspace.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentWorkspaceClearJS"
       )
       .getContent();
 
-    // Saves order/signing details through refreshes and clears both
-    // the form and selected personnel after successful generation.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentFormPersistencePatchJS"
       )
       .getContent();
 
-    // Adds the live order preview, polishes workspace controls, and
-    // removes duplicated rank prefixes before sending.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "ReassignmentPreviewPolishJS"
       )
       .getContent();
 
-    // Loaded last so successful generation returns to Personnel Filter
-    // and generated reports can be reviewed from the main header.
+    // Loaded after the preview module to keep the preview table synced
+    // with the current personnel assignments and form values.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentLivePreviewFixJS"
+      )
+      .getContent();
+
     content += "\n" + HtmlService
       .createHtmlOutputFromFile(
         "GeneratedReportsJS"
