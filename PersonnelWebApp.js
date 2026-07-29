@@ -31,10 +31,22 @@ function include(
   filename
 ) {
 
-  return HtmlService
+  let content = HtmlService
     .createHtmlOutputFromFile(
       filename
     )
     .getContent();
+
+  // Keep the reassignment workspace in its own file while
+  // loading it inside the existing application script block.
+  if (filename === "AppJS") {
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentJS"
+      )
+      .getContent();
+  }
+
+  return content;
 
 }
