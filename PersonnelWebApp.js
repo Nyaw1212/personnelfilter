@@ -102,8 +102,15 @@ function include(
         "GeneratedReportsJS"
       )
       .getContent();
+
+    // Adds an in-app quick scan of generated report personnel rows
+    // without opening the Google Doc in a new tab.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "GeneratedReportPreviewJS"
+      )
+      .getContent();
   }
 
   return content;
-
 }
