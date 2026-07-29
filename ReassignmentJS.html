@@ -1,0 +1,960 @@
+//----------------------------------
+// Reassignment Report Workspace
+//----------------------------------
+
+const REASSIGNMENT_STORAGE_KEY =
+  "personnelFilterReassignmentV2";
+
+const ReassignmentState = {
+  activeOffice: "",
+  selectedKeys: new Set(),
+  assignments: new Map(),
+  filters: {
+    search: "",
+    rank: "",
+    office: "",
+    camp: "",
+  },
+};
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeReassignmentModule_
+);
+
+function initializeReassignmentModule_() {
+  loadReassignmentState_();
+  addReportGeneratorButton_();
+  buildReportTypeDialog_();
+  buildReassignmentWorkspace_();
+  injectReassignmentStyles_();
+  updateReportGeneratorButton_();
+}
+
+function addReportGeneratorButton_() {
+  const toolbar = document.querySelector(
+    ".ao-selection-toolbar"
+  );
+
+  if (
+    !toolbar ||
+    document.getElementById(
+      "openReportGeneratorButton"
+    )
+  ) {
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.id = "openReportGeneratorButton";
+  button.type = "button";
+  button.className =
+    "button button-primary report-generator-button";
+  button.textContent = "Report Generator";
+  button.addEventListener(
+    "click",
+    openReportTypeDialog_
+  );
+
+  toolbar.appendChild(button);
+
+  const originalUpdate = updateAoCartCount_;
+  updateAoCartCount_ = function () {
+    originalUpdate();
+    updateReportGeneratorButton_();
+  };
+}
+
+function updateReportGeneratorButton_() {
+  const button = document.getElementById(
+    "openReportGeneratorButton"
+  );
+
+  if (!button) return;
+
+  button.disabled = PersonnelState.aoCart.size === 0;
+  button.title = button.disabled
+    ? "Select at least one personnel first"
+    : "Choose a report type";
+}
+
+function buildReportTypeDialog_() {
+  if (document.getElementById("reportTypeDialog")) {
+    return;
+  }
+
+  const backdrop = makeElement_(
+    "div",
+    "report-type-backdrop"
+  );
+  backdrop.id = "reportTypeBackdrop";
+  backdrop.hidden = true;
+
+  const dialog = makeElement_(
+    "section",
+    "report-type-dialog"
+  );
+  dialog.id = "reportTypeDialog";
+  dialog.hidden = true;
+
+  const header = makeElement_(
+    "div",
+    "report-type-header"
+  );
+  const titleWrap = document.createElement("div");
+  titleWrap.append(
+    makeText_("span", "REPORT GENERATOR"),
+    makeText_("h2", "Choose Report Type")
+  );
+
+  const close = makeText_("button", "×");
+  close.type = "button";
+  close.addEventListener(
+    "click",
+    closeReportTypeDialog_
+  );
+  header.append(titleWrap, close);
+
+  const grid = makeElement_(
+    "div",
+    "report-type-grid"
+  );
+  grid.append(
+    makeReportTypeCard_(
+      "Reassignment",
+      "Assign selected personnel to new offices.",
+      false,
+      openReassignmentWorkspace_
+    ),
+    makeReportTypeCard_(
+      "Administrative Order",
+      "Coming next",
+      true
+    ),
+    makeReportTypeCard_(
+      "Special Order",
+      "Coming next",
+      true
+    ),
+    makeReportTypeCard_(
+      "Other Report",
+      "Coming next",
+      true
+    )
+  );
+
+  dialog.append(header, grid);
+  document.body.append(backdrop, dialog);
+
+  backdrop.addEventListener(
+    "click",
+    closeReportTypeDialog_
+  );
+}
+
+function makeReportTypeCard_(
+  title,
+  description,
+  disabled,
+  handler
+) {
+  const button = makeElement_(
+    "button",
+    "report-type-card"
+  );
+  button.type = "button";
+  button.disabled = disabled;
+  button.append(
+    makeText_("strong", title),
+    makeText_("small", description)
+  );
+
+  if (handler) {
+    button.addEventListener("click", handler);
+  }
+
+  return button;
+}
+
+function openReportTypeDialog_() {
+  if (!PersonnelState.aoCart.size) {
+    alert("Select at least one personnel first.");
+    return;
+  }
+
+  document.getElementById(
+    "reportTypeBackdrop"
+  ).hidden = false;
+  document.getElementById(
+    "reportTypeDialog"
+  ).hidden = false;
+}
+
+function closeReportTypeDialog_() {
+  document.getElementById(
+    "reportTypeBackdrop"
+  ).hidden = true;
+  document.getElementById(
+    "reportTypeDialog"
+  ).hidden = true;
+}
+
+function buildReassignmentWorkspace_() {
+  if (document.getElementById(
+    "reassignmentWorkspace"
+  )) {
+    return;
+  }
+
+  const workspace = makeElement_(
+    "section",
+    "reassignment-workspace"
+  );
+  workspace.id = "reassignmentWorkspace";
+  workspace.hidden = true;
+
+  const header = makeElement_(
+    "header",
+    "reassignment-header"
+  );
+  const title = document.createElement("div");
+  title.append(
+    makeText_("span", "REPORT GENERATOR"),
+    makeText_("h1", "Reassignment Workspace"),
+    makeText_(
+      "p",
+      "Filter personnel, choose a destination office, then assign individually or in bulk."
+    )
+  );
+
+  const headerActions = makeElement_(
+    "div",
+    "reassignment-header-actions"
+  );
+  const progress = makeText_("span", "0 assigned");
+  progress.id = "reassignmentProgress";
+  const back = makeText_(
+    "button",
+    "Back to Personnel Filter"
+  );
+  back.type = "button";
+  back.addEventListener(
+    "click",
+    closeReassignmentWorkspace_
+  );
+  headerActions.append(progress, back);
+  header.append(title, headerActions);
+
+  const layout = makeElement_(
+    "main",
+    "reassignment-layout"
+  );
+  layout.append(
+    buildSourcePanel_(),
+    buildDestinationPanel_(),
+    buildAssignmentsPanel_()
+  );
+
+  workspace.append(header, layout);
+  document.body.appendChild(workspace);
+}
+
+function buildSourcePanel_() {
+  const panel = makeElement_(
+    "section",
+    "reassignment-source-panel"
+  );
+  panel.appendChild(
+    makePanelHeading_(
+      "STEP 1",
+      "To Be Assigned",
+      "unassignedCount"
+    )
+  );
+
+  const search = document.createElement("input");
+  search.id = "reassignmentSearch";
+  search.type = "search";
+  search.className = "reassignment-search";
+  search.placeholder = "Search selected personnel...";
+  search.addEventListener("input", event => {
+    ReassignmentState.filters.search =
+      event.target.value;
+    renderReassignmentWorkspace_();
+  });
+  panel.appendChild(search);
+
+  panel.append(
+    buildFilterBlock_("Rank", "sourceRankChips"),
+    buildFilterBlock_(
+      "Current Office",
+      "sourceOfficeChips"
+    ),
+    buildFilterBlock_("Camp", "sourceCampChips")
+  );
+
+  const actions = makeElement_(
+    "div",
+    "source-actions"
+  );
+  const count = makeText_("span", "0 visible");
+  count.id = "visibleUnassignedCount";
+  const selectAll = makeText_(
+    "button",
+    "Select All Visible"
+  );
+  selectAll.type = "button";
+  selectAll.addEventListener(
+    "click",
+    selectAllVisibleUnassigned_
+  );
+  actions.append(count, selectAll);
+
+  const list = makeElement_(
+    "div",
+    "reassignment-person-list"
+  );
+  list.id = "reassignmentSourceList";
+
+  panel.append(actions, list);
+  return panel;
+}
+
+function buildDestinationPanel_() {
+  const panel = makeElement_(
+    "aside",
+    "reassignment-destination-panel"
+  );
+  panel.append(
+    makeText_("span", "STEP 2"),
+    makeText_("h2", "Destination Office"),
+    makeText_(
+      "p",
+      "Choose where the selected personnel will go."
+    )
+  );
+
+  const chips = makeElement_(
+    "div",
+    "destination-chip-list"
+  );
+  chips.id = "destinationOfficeChips";
+
+  const assignSelected = makeText_(
+    "button",
+    "Assign Selected"
+  );
+  assignSelected.id = "assignSelectedButton";
+  assignSelected.type = "button";
+  assignSelected.className =
+    "button button-primary";
+  assignSelected.addEventListener(
+    "click",
+    assignSelectedPersonnel_
+  );
+
+  const addVisible = makeText_(
+    "button",
+    "Add All Visible"
+  );
+  addVisible.id = "assignAllVisibleButton";
+  addVisible.type = "button";
+  addVisible.className =
+    "button button-secondary";
+  addVisible.addEventListener(
+    "click",
+    assignAllVisiblePersonnel_
+  );
+
+  panel.append(chips, assignSelected, addVisible);
+  return panel;
+}
+
+function buildAssignmentsPanel_() {
+  const panel = makeElement_(
+    "section",
+    "reassignment-results-panel"
+  );
+  const heading = makeElement_(
+    "div",
+    "reassignment-results-header"
+  );
+  const title = document.createElement("div");
+  title.append(
+    makeText_("span", "STEP 3"),
+    makeText_("h2", "Assigned Personnel")
+  );
+
+  const clear = makeText_("button", "Clear All");
+  clear.type = "button";
+  clear.addEventListener(
+    "click",
+    clearAllAssignments_
+  );
+  heading.append(title, clear);
+
+  const grid = makeElement_(
+    "div",
+    "assignment-card-grid"
+  );
+  grid.id = "assignmentCardGrid";
+
+  const footer = makeElement_(
+    "div",
+    "reassignment-footer-actions"
+  );
+  const generate = makeText_(
+    "button",
+    "Generate Reassignment Report"
+  );
+  generate.type = "button";
+  generate.className =
+    "button button-primary";
+  generate.addEventListener(
+    "click",
+    validateReassignment_
+  );
+  footer.appendChild(generate);
+
+  panel.append(heading, grid, footer);
+  return panel;
+}
+
+function makePanelHeading_(step, title, countId) {
+  const heading = makeElement_(
+    "div",
+    "reassignment-panel-heading"
+  );
+  const labels = document.createElement("div");
+  labels.append(
+    makeText_("span", step),
+    makeText_("h2", title)
+  );
+  const count = makeText_("strong", "0");
+  count.id = countId;
+  heading.append(labels, count);
+  return heading;
+}
+
+function buildFilterBlock_(label, containerId) {
+  const block = makeElement_(
+    "div",
+    "source-filter-block"
+  );
+  const chips = makeElement_(
+    "div",
+    "reassignment-chip-wrap"
+  );
+  chips.id = containerId;
+  block.append(makeText_("label", label), chips);
+  return block;
+}
+
+function openReassignmentWorkspace_() {
+  closeReportTypeDialog_();
+  document.getElementById(
+    "reassignmentWorkspace"
+  ).hidden = false;
+  document.body.classList.add(
+    "reassignment-is-open"
+  );
+  renderReassignmentWorkspace_();
+}
+
+function closeReassignmentWorkspace_() {
+  document.getElementById(
+    "reassignmentWorkspace"
+  ).hidden = true;
+  document.body.classList.remove(
+    "reassignment-is-open"
+  );
+}
+
+function renderReassignmentWorkspace_() {
+  const people = [...PersonnelState.aoCart.entries()];
+  const unassigned = people.filter(
+    ([key]) => !ReassignmentState.assignments.has(key)
+  );
+  const visible = filterUnassigned_(unassigned);
+
+  setText_("unassignedCount", unassigned.length);
+  setText_(
+    "visibleUnassignedCount",
+    `${visible.length} visible`
+  );
+
+  renderSourceFilterChips_(unassigned);
+  renderDestinationChips_(people);
+  renderSourcePersonnel_(visible);
+  renderAssignmentCards_(people);
+  updateReassignmentControls_(people.length);
+}
+
+function filterUnassigned_(entries) {
+  const search = ReassignmentState.filters.search
+    .trim()
+    .toLowerCase();
+
+  return entries.filter(([, person]) => {
+    const record = person.record || {};
+    const name = person.fullName || "";
+    const rank = person.rank || "";
+    const office = person.office || "";
+    const camp = record.Camp || "";
+
+    const matchesSearch = !search ||
+      [name, rank, office, camp]
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+
+    return matchesSearch &&
+      (!ReassignmentState.filters.rank ||
+        rank === ReassignmentState.filters.rank) &&
+      (!ReassignmentState.filters.office ||
+        office === ReassignmentState.filters.office) &&
+      (!ReassignmentState.filters.camp ||
+        camp === ReassignmentState.filters.camp);
+  });
+}
+
+function renderSourceFilterChips_(entries) {
+  renderFilterChipGroup_(
+    "sourceRankChips",
+    uniqueValues_(entries, person => person.rank),
+    "rank"
+  );
+  renderFilterChipGroup_(
+    "sourceOfficeChips",
+    uniqueValues_(entries, person => person.office),
+    "office"
+  );
+  renderFilterChipGroup_(
+    "sourceCampChips",
+    uniqueValues_(
+      entries,
+      person => person.record?.Camp || ""
+    ),
+    "camp"
+  );
+}
+
+function renderFilterChipGroup_(
+  containerId,
+  values,
+  filterKey
+) {
+  const container = document.getElementById(containerId);
+  container.replaceChildren();
+
+  const all = makeChip_(
+    "All",
+    !ReassignmentState.filters[filterKey],
+    () => {
+      ReassignmentState.filters[filterKey] = "";
+      renderReassignmentWorkspace_();
+    }
+  );
+  container.appendChild(all);
+
+  values.forEach(value => {
+    container.appendChild(
+      makeChip_(
+        value,
+        ReassignmentState.filters[filterKey] === value,
+        () => {
+          ReassignmentState.filters[filterKey] = value;
+          renderReassignmentWorkspace_();
+        }
+      )
+    );
+  });
+}
+
+function renderDestinationChips_(people) {
+  const container = document.getElementById(
+    "destinationOfficeChips"
+  );
+  container.replaceChildren();
+
+  uniqueValues_(
+    people,
+    person => person.office
+  ).forEach(office => {
+    container.appendChild(
+      makeChip_(
+        office,
+        ReassignmentState.activeOffice === office,
+        () => {
+          ReassignmentState.activeOffice = office;
+          saveReassignmentState_();
+          renderReassignmentWorkspace_();
+        }
+      )
+    );
+  });
+}
+
+function renderSourcePersonnel_(entries) {
+  const list = document.getElementById(
+    "reassignmentSourceList"
+  );
+  list.replaceChildren();
+
+  if (!entries.length) {
+    list.appendChild(
+      makeText_("div", "No personnel match the filters.")
+    );
+    return;
+  }
+
+  entries.forEach(([key, person]) => {
+    const row = makeElement_(
+      "label",
+      "reassignment-person-row"
+    );
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked =
+      ReassignmentState.selectedKeys.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        ReassignmentState.selectedKeys.add(key);
+      } else {
+        ReassignmentState.selectedKeys.delete(key);
+      }
+      updateReassignmentControls_(
+        PersonnelState.aoCart.size
+      );
+    });
+
+    const details = document.createElement("div");
+    details.append(
+      makeText_(
+        "strong",
+        [person.rank, person.fullName]
+          .filter(Boolean)
+          .join(" ")
+      ),
+      makeText_(
+        "small",
+        person.office || "No current office"
+      )
+    );
+    row.append(checkbox, details);
+    list.appendChild(row);
+  });
+}
+
+function renderAssignmentCards_(people) {
+  const grid = document.getElementById(
+    "assignmentCardGrid"
+  );
+  grid.replaceChildren();
+
+  const byOffice = new Map();
+  ReassignmentState.assignments.forEach(
+    (office, key) => {
+      if (!byOffice.has(office)) {
+        byOffice.set(office, []);
+      }
+      byOffice.get(office).push(key);
+    }
+  );
+
+  if (!byOffice.size) {
+    grid.appendChild(
+      makeText_(
+        "div",
+        "No personnel assigned yet."
+      )
+    );
+    return;
+  }
+
+  byOffice.forEach((keys, office) => {
+    const card = makeElement_(
+      "article",
+      "assignment-card"
+    );
+    const header = makeElement_(
+      "div",
+      "assignment-card-header"
+    );
+    header.append(
+      makeText_("strong", office),
+      makeText_("span", `${keys.length} personnel`)
+    );
+    card.appendChild(header);
+
+    keys.forEach(key => {
+      const person = PersonnelState.aoCart.get(key);
+      if (!person) return;
+
+      const row = makeElement_(
+        "div",
+        "assignment-person"
+      );
+      row.append(
+        makeText_(
+          "span",
+          [person.rank, person.fullName]
+            .filter(Boolean)
+            .join(" ")
+        ),
+        makeRemoveButton_(key)
+      );
+      card.appendChild(row);
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+function makeRemoveButton_(key) {
+  const button = makeText_("button", "×");
+  button.type = "button";
+  button.title = "Return to unassigned list";
+  button.addEventListener("click", () => {
+    ReassignmentState.assignments.delete(key);
+    ReassignmentState.selectedKeys.delete(key);
+    saveReassignmentState_();
+    renderReassignmentWorkspace_();
+  });
+  return button;
+}
+
+function assignSelectedPersonnel_() {
+  if (!requireDestination_()) return;
+
+  ReassignmentState.selectedKeys.forEach(key => {
+    if (PersonnelState.aoCart.has(key)) {
+      ReassignmentState.assignments.set(
+        key,
+        ReassignmentState.activeOffice
+      );
+    }
+  });
+
+  ReassignmentState.selectedKeys.clear();
+  saveReassignmentState_();
+  renderReassignmentWorkspace_();
+}
+
+function assignAllVisiblePersonnel_() {
+  if (!requireDestination_()) return;
+
+  const unassigned = [...PersonnelState.aoCart.entries()]
+    .filter(([key]) =>
+      !ReassignmentState.assignments.has(key)
+    );
+
+  filterUnassigned_(unassigned).forEach(([key]) => {
+    ReassignmentState.assignments.set(
+      key,
+      ReassignmentState.activeOffice
+    );
+  });
+
+  ReassignmentState.selectedKeys.clear();
+  saveReassignmentState_();
+  renderReassignmentWorkspace_();
+}
+
+function selectAllVisibleUnassigned_() {
+  const unassigned = [...PersonnelState.aoCart.entries()]
+    .filter(([key]) =>
+      !ReassignmentState.assignments.has(key)
+    );
+
+  filterUnassigned_(unassigned).forEach(([key]) => {
+    ReassignmentState.selectedKeys.add(key);
+  });
+
+  renderReassignmentWorkspace_();
+}
+
+function requireDestination_() {
+  if (ReassignmentState.activeOffice) return true;
+  alert("Choose a destination office first.");
+  return false;
+}
+
+function clearAllAssignments_() {
+  if (!confirm("Clear all reassignment entries?")) {
+    return;
+  }
+
+  ReassignmentState.assignments.clear();
+  ReassignmentState.selectedKeys.clear();
+  saveReassignmentState_();
+  renderReassignmentWorkspace_();
+}
+
+function validateReassignment_() {
+  const total = PersonnelState.aoCart.size;
+  const assigned = ReassignmentState.assignments.size;
+
+  if (!total) {
+    alert("No personnel selected.");
+    return;
+  }
+
+  if (assigned !== total) {
+    alert(
+      `${total - assigned} personnel still need a destination office.`
+    );
+    return;
+  }
+
+  alert(
+    "All personnel are assigned. Report output is ready for the next phase."
+  );
+}
+
+function updateReassignmentControls_(total) {
+  const assigned = ReassignmentState.assignments.size;
+  setText_(
+    "reassignmentProgress",
+    `${assigned} of ${total} assigned`
+  );
+
+  const assignSelected = document.getElementById(
+    "assignSelectedButton"
+  );
+  const assignVisible = document.getElementById(
+    "assignAllVisibleButton"
+  );
+
+  if (assignSelected) {
+    assignSelected.disabled =
+      !ReassignmentState.activeOffice ||
+      !ReassignmentState.selectedKeys.size;
+  }
+
+  if (assignVisible) {
+    assignVisible.disabled =
+      !ReassignmentState.activeOffice;
+  }
+}
+
+function uniqueValues_(entries, getter) {
+  return [...new Set(
+    entries
+      .map(([, person]) => getter(person))
+      .filter(Boolean)
+  )].sort((a, b) =>
+    a.localeCompare(b, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+}
+
+function makeChip_(label, active, handler) {
+  const button = makeText_("button", label);
+  button.type = "button";
+  button.className = "reassignment-chip";
+  button.classList.toggle("is-active", active);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function makeElement_(tag, className) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  return element;
+}
+
+function makeText_(tag, text) {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  return element;
+}
+
+function setText_(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = String(value);
+}
+
+function saveReassignmentState_() {
+  localStorage.setItem(
+    REASSIGNMENT_STORAGE_KEY,
+    JSON.stringify({
+      activeOffice: ReassignmentState.activeOffice,
+      assignments: [
+        ...ReassignmentState.assignments.entries(),
+      ],
+    })
+  );
+}
+
+function loadReassignmentState_() {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(
+        REASSIGNMENT_STORAGE_KEY
+      ) || "{}"
+    );
+
+    ReassignmentState.activeOffice =
+      saved.activeOffice || "";
+    ReassignmentState.assignments = new Map(
+      Array.isArray(saved.assignments)
+        ? saved.assignments
+        : []
+    );
+  } catch (error) {
+    console.warn(
+      "Unable to load reassignment state:",
+      error
+    );
+  }
+}
+
+function injectReassignmentStyles_() {
+  if (document.getElementById(
+    "reassignmentStyles"
+  )) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "reassignmentStyles";
+  style.textContent = `
+    .report-generator-button { white-space: nowrap; }
+    .report-type-backdrop { position: fixed; inset: 0; z-index: 14000; background: rgba(0,0,0,.45); backdrop-filter: blur(5px); }
+    .report-type-dialog { position: fixed; z-index: 14001; top: 50%; left: 50%; width: min(680px,92vw); transform: translate(-50%,-50%); padding: 20px; border: 1px solid rgba(31,111,52,.2); border-radius: 22px; background: rgba(245,252,246,.98); box-shadow: 0 26px 70px rgba(0,0,0,.25); }
+    .report-type-backdrop[hidden], .report-type-dialog[hidden], .reassignment-workspace[hidden] { display: none; }
+    .report-type-header, .reassignment-header, .reassignment-panel-heading, .reassignment-results-header, .assignment-card-header, .assignment-person, .source-actions, .reassignment-header-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .report-type-header button, .assignment-person button { border: 0; background: transparent; font-size: 20px; cursor: pointer; }
+    .report-type-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
+    .report-type-card { display: grid; gap: 6px; padding: 18px; border: 1px solid rgba(31,111,52,.18); border-radius: 16px; text-align: left; background: rgba(255,255,255,.8); cursor: pointer; }
+    .report-type-card:disabled { opacity: .5; cursor: default; }
+    .reassignment-workspace { position: fixed; inset: 0; z-index: 13000; overflow: auto; padding: 18px; background: linear-gradient(135deg,#eef8ef,#d7eedb); }
+    .reassignment-is-open { overflow: hidden; }
+    .reassignment-header { margin-bottom: 16px; padding: 16px 18px; border: 1px solid rgba(31,111,52,.18); border-radius: 20px; background: rgba(255,255,255,.72); }
+    .reassignment-header h1, .reassignment-header p, .reassignment-header span { margin: 0; }
+    .reassignment-layout { display: grid; grid-template-columns: minmax(280px,1.05fr) minmax(190px,.55fr) minmax(420px,2fr); gap: 16px; min-height: calc(100vh - 140px); }
+    .reassignment-source-panel, .reassignment-destination-panel, .reassignment-results-panel { overflow: auto; padding: 16px; border: 1px solid rgba(31,111,52,.18); border-radius: 20px; background: rgba(255,255,255,.7); }
+    .reassignment-search { width: 100%; min-height: 42px; margin: 12px 0; padding: 9px 12px; border: 1px solid rgba(31,111,52,.18); border-radius: 12px; }
+    .source-filter-block { display: grid; gap: 7px; margin: 12px 0; }
+    .reassignment-chip-wrap, .destination-chip-list { display: flex; flex-wrap: wrap; gap: 7px; }
+    .reassignment-chip { min-height: 32px; padding: 6px 10px; border: 1px solid rgba(31,111,52,.22); border-radius: 999px; background: rgba(255,255,255,.82); font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+    .reassignment-chip.is-active { border-color: #d9cb00; background: #fff200; }
+    .reassignment-person-list { display: grid; gap: 8px; margin-top: 12px; }
+    .reassignment-person-row { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,.72); cursor: pointer; }
+    .reassignment-person-row small { display: block; margin-top: 3px; opacity: .68; }
+    .reassignment-destination-panel { display: grid; align-content: start; gap: 12px; }
+    .destination-chip-list { display: grid; gap: 8px; }
+    .destination-chip-list .reassignment-chip { width: 100%; border-radius: 12px; text-align: left; }
+    .assignment-card-grid { display: grid; grid-template-columns: repeat(3,minmax(190px,1fr)); gap: 12px; }
+    .assignment-card { min-height: 180px; padding: 13px; border: 1px solid rgba(31,111,52,.16); border-radius: 16px; background: rgba(255,255,255,.76); }
+    .assignment-person { margin-top: 8px; padding: 8px; border-radius: 10px; background: rgba(232,246,235,.9); }
+    .reassignment-footer-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+    @media (max-width: 1100px) { .reassignment-layout { grid-template-columns: 1fr; } .assignment-card-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 680px) { .report-type-grid, .assignment-card-grid { grid-template-columns: 1fr; } .reassignment-header { align-items: flex-start; flex-direction: column; } }
+  `;
+
+  document.head.appendChild(style);
+}
