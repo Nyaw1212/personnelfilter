@@ -110,6 +110,13 @@ function include(
         "GeneratedReportPreviewJS"
       )
       .getContent();
+
+    // Adds Remove All Visible and Deselect All to the AO toolbar.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "AOSelectionBulkControlsJS"
+      )
+      .getContent();
   }
 
   return content;
