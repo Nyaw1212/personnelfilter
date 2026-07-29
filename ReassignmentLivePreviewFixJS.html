@@ -1,0 +1,197 @@
+//----------------------------------
+// Reassignment Live Preview Fix
+//----------------------------------
+
+// Loaded after the original preview module. It rebuilds the preview from the
+// current AO cart + assignment map and refreshes whenever the workspace changes.
+
+document.addEventListener("DOMContentLoaded", () => {
+  patchReassignmentLivePreview_();
+  observeReassignmentPreviewChanges_();
+});
+
+function patchReassignmentLivePreview_() {
+  renderReassignmentLivePreview_ = function () {
+    const body = document.getElementById("reassignmentPreviewTableBody");
+    if (!body) return;
+
+    const orderNumber = document.getElementById(
+      "reassignmentOrderNumber"
+    )?.value.trim() || "—";
+
+    const orderDate = typeof formatPreviewDate_ === "function"
+      ? formatPreviewDate_(
+          document.getElementById("reassignmentOrderDate")?.value
+        ) || "—"
+      : document.getElementById("reassignmentOrderDate")?.value || "—";
+
+    const fileReference = document.getElementById(
+      "reassignmentFileReference"
+    )?.value.trim() || "—";
+
+    const signingOfficer = document.getElementById(
+      "reassignmentSigningOfficerPreview"
+    )?.textContent.trim() || "—";
+
+    const signingPosition = document.getElementById(
+      "reassignmentSigningPositionPreview"
+    )?.textContent.trim() || "";
+
+    setReassignmentPreviewText_(
+      "reassignmentPreviewOrderNumber",
+      orderNumber
+    );
+    setReassignmentPreviewText_(
+      "reassignmentPreviewOrderDate",
+      orderDate
+    );
+    setReassignmentPreviewText_(
+      "reassignmentPreviewSigningOfficer",
+      signingOfficer
+    );
+    setReassignmentPreviewText_(
+      "reassignmentPreviewSigningPosition",
+      signingPosition
+    );
+    setReassignmentPreviewText_(
+      "reassignmentPreviewFileReference",
+      fileReference
+    );
+
+    const personnel = getCurrentReassignmentPreviewPersonnel_();
+
+    setReassignmentPreviewText_(
+      "reassignmentPreviewPersonnelCount",
+      `${personnel.length} personnel`
+    );
+
+    body.replaceChildren();
+
+    if (!personnel.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 4;
+      cell.className = "reassignment-preview-empty";
+      cell.textContent =
+        "Assign personnel to destination offices to preview the order.";
+      row.appendChild(cell);
+      body.appendChild(row);
+      return;
+    }
+
+    personnel.forEach((person, index) => {
+      const row = document.createElement("tr");
+      const displayName = [person.rank, person.fullName]
+        .filter(Boolean)
+        .join(" ");
+
+      [
+        String(index + 1),
+        displayName || "—",
+        person.from || "—",
+        person.to || "—",
+      ].forEach(value => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+
+      body.appendChild(row);
+    });
+  };
+
+  // Refresh after the generate dialog opens.
+  if (typeof openReassignmentGenerateDialog_ === "function") {
+    const originalOpen = openReassignmentGenerateDialog_;
+    openReassignmentGenerateDialog_ = function () {
+      const result = originalOpen.apply(this, arguments);
+      window.setTimeout(renderReassignmentLivePreview_, 0);
+      window.setTimeout(renderReassignmentLivePreview_, 150);
+      return result;
+    };
+  }
+}
+
+function getCurrentReassignmentPreviewPersonnel_() {
+  const rows = [];
+
+  if (
+    typeof ReassignmentState === "undefined" ||
+    typeof PersonnelState === "undefined" ||
+    !(ReassignmentState.assignments instanceof Map) ||
+    !(PersonnelState.aoCart instanceof Map)
+  ) {
+    return rows;
+  }
+
+  ReassignmentState.assignments.forEach((destinationOffice, key) => {
+    const person = PersonnelState.aoCart.get(key);
+    if (!person) return;
+
+    const record = person.record || {};
+    const rank = firstPreviewValue_(
+      person.rank,
+      record.Rank,
+      record.RANK
+    );
+
+    const rawName = firstPreviewValue_(
+      person.fullName,
+      record["Full Name"],
+      record["FULL NAME"]
+    );
+
+    const fullName = typeof removeLeadingRankFromName_ === "function"
+      ? removeLeadingRankFromName_(rawName, rank)
+      : rawName;
+
+    rows.push({
+      rank,
+      fullName,
+      from: firstPreviewValue_(
+        person.office,
+        record.Office,
+        record.OFFICE,
+        record["Current Office"]
+      ),
+      to: String(destinationOffice || "").trim(),
+    });
+  });
+
+  return rows;
+}
+
+function firstPreviewValue_() {
+  for (const value of arguments) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function setReassignmentPreviewText_(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
+}
+
+function observeReassignmentPreviewChanges_() {
+  const refresh = () => {
+    if (!document.getElementById("reassignmentGenerateDialog")?.hidden) {
+      window.setTimeout(renderReassignmentLivePreview_, 0);
+    }
+  };
+
+  document.addEventListener("click", refresh);
+  document.addEventListener("input", refresh);
+  document.addEventListener("change", refresh);
+
+  const assignmentGrid = document.getElementById("assignmentCardGrid");
+  if (assignmentGrid && typeof MutationObserver !== "undefined") {
+    const observer = new MutationObserver(refresh);
+    observer.observe(assignmentGrid, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+}
