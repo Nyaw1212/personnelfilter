@@ -73,6 +73,13 @@ function include(
         "ReassignmentClearPatchJS"
       )
       .getContent();
+
+    // Adds Clear All Selected directly to Step 1 of the workspace.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentWorkspaceClearJS"
+      )
+      .getContent();
   }
 
   return content;
