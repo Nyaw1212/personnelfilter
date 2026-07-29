@@ -1,0 +1,257 @@
+//----------------------------------
+// Generated Report Quick Preview UI
+//----------------------------------
+
+const GeneratedReportPreviewState = {
+  loading: false,
+  report: null,
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  buildGeneratedReportPreviewDialog_();
+  injectGeneratedReportPreviewStyles_();
+  patchGeneratedReportsCardsWithPreview_();
+});
+
+function buildGeneratedReportPreviewDialog_() {
+  if (document.getElementById("generatedReportPreviewDialog")) return;
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "generatedReportPreviewBackdrop";
+  backdrop.className = "generated-report-preview-backdrop";
+  backdrop.hidden = true;
+
+  const dialog = document.createElement("section");
+  dialog.id = "generatedReportPreviewDialog";
+  dialog.className = "generated-report-preview-dialog";
+  dialog.hidden = true;
+  dialog.innerHTML = `
+    <header class="generated-report-preview-header">
+      <div>
+        <span>QUICK SCAN</span>
+        <h2 id="generatedReportPreviewTitle">Report Preview</h2>
+        <p id="generatedReportPreviewSubtitle">Loading report details...</p>
+      </div>
+      <button id="closeGeneratedReportPreviewButton" type="button" title="Close">×</button>
+    </header>
+
+    <section class="generated-report-preview-meta" id="generatedReportPreviewMeta"></section>
+
+    <div id="generatedReportPreviewMessage" class="generated-report-preview-message">
+      Loading preview...
+    </div>
+
+    <div class="generated-report-preview-table-wrap" id="generatedReportPreviewTableWrap" hidden>
+      <table class="generated-report-preview-table">
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>Rank / Name</th>
+            <th>From</th>
+            <th>To</th>
+          </tr>
+        </thead>
+        <tbody id="generatedReportPreviewTableBody"></tbody>
+      </table>
+    </div>
+
+    <footer class="generated-report-preview-actions">
+      <button id="closeGeneratedReportPreviewFooterButton" class="button button-secondary" type="button">Close</button>
+      <a id="openGeneratedReportPreviewDocument" class="button button-primary" target="_blank" rel="noopener noreferrer" hidden>Open Full Report</a>
+    </footer>
+  `;
+
+  document.body.append(backdrop, dialog);
+
+  backdrop.addEventListener("click", closeGeneratedReportPreview_);
+  dialog.querySelector("#closeGeneratedReportPreviewButton")
+    .addEventListener("click", closeGeneratedReportPreview_);
+  dialog.querySelector("#closeGeneratedReportPreviewFooterButton")
+    .addEventListener("click", closeGeneratedReportPreview_);
+}
+
+function patchGeneratedReportsCardsWithPreview_() {
+  if (typeof renderGeneratedReports_ !== "function") return;
+
+  const originalRender = renderGeneratedReports_;
+
+  renderGeneratedReports_ = function () {
+    originalRender.apply(this, arguments);
+
+    const list = document.getElementById("generatedReportsList");
+    if (!list) return;
+
+    const query = String(GeneratedReportsState.search || "").trim().toLowerCase();
+    const reports = GeneratedReportsState.reports.filter(report => {
+      if (!query) return true;
+      return [
+        report.reportType,
+        report.orderNumber,
+        report.orderDate,
+        report.signingOfficer,
+        report.signingPosition,
+        report.outputName,
+        report.fileReference,
+      ].some(value => String(value || "").toLowerCase().includes(query));
+    });
+
+    const cards = [...list.querySelectorAll(".generated-report-card")];
+
+    cards.forEach((card, index) => {
+      const report = reports[index];
+      const actions = card.querySelector(".generated-report-actions");
+
+      if (!report || !actions || actions.querySelector(".generated-report-preview-button")) {
+        return;
+      }
+
+      const preview = document.createElement("button");
+      preview.type = "button";
+      preview.className = "button button-secondary generated-report-preview-button";
+      preview.textContent = "Preview";
+      preview.disabled = !report.documentId;
+      preview.title = report.documentId
+        ? "Quickly preview the personnel included in this report"
+        : "This report has no Document ID";
+      preview.addEventListener("click", () => openGeneratedReportPreview_(report));
+
+      actions.insertBefore(preview, actions.firstChild);
+    });
+  };
+}
+
+function openGeneratedReportPreview_(report) {
+  if (!report || !report.documentId || GeneratedReportPreviewState.loading) return;
+
+  GeneratedReportPreviewState.loading = true;
+  GeneratedReportPreviewState.report = report;
+
+  const backdrop = document.getElementById("generatedReportPreviewBackdrop");
+  const dialog = document.getElementById("generatedReportPreviewDialog");
+  const message = document.getElementById("generatedReportPreviewMessage");
+  const tableWrap = document.getElementById("generatedReportPreviewTableWrap");
+  const body = document.getElementById("generatedReportPreviewTableBody");
+  const openLink = document.getElementById("openGeneratedReportPreviewDocument");
+
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  tableWrap.hidden = true;
+  message.hidden = false;
+  message.textContent = "Loading report preview...";
+  body.replaceChildren();
+
+  document.getElementById("generatedReportPreviewTitle").textContent =
+    `Order No. ${report.orderNumber || "—"}`;
+  document.getElementById("generatedReportPreviewSubtitle").textContent =
+    `${report.reportType || "REPORT"} · ${report.orderDate || "No order date"}`;
+
+  renderGeneratedReportPreviewMeta_(report);
+
+  if (report.url) {
+    openLink.href = report.url;
+    openLink.hidden = false;
+  } else {
+    openLink.hidden = true;
+  }
+
+  google.script.run
+    .withSuccessHandler(response => {
+      GeneratedReportPreviewState.loading = false;
+
+      if (!response || response.success !== true) {
+        message.hidden = false;
+        message.textContent = response?.message || "Preview could not be loaded.";
+        return;
+      }
+
+      renderGeneratedReportPreviewRows_(response.rows || []);
+      message.hidden = Boolean(response.rows?.length);
+      message.textContent = response.message || "No personnel rows found.";
+      tableWrap.hidden = !response.rows?.length;
+    })
+    .withFailureHandler(error => {
+      GeneratedReportPreviewState.loading = false;
+      message.hidden = false;
+      message.textContent = error?.message || "Preview could not be loaded.";
+    })
+    .getGeneratedReportPreview(report.documentId);
+}
+
+function closeGeneratedReportPreview_() {
+  if (GeneratedReportPreviewState.loading) return;
+  document.getElementById("generatedReportPreviewBackdrop").hidden = true;
+  document.getElementById("generatedReportPreviewDialog").hidden = true;
+}
+
+function renderGeneratedReportPreviewMeta_(report) {
+  const meta = document.getElementById("generatedReportPreviewMeta");
+  meta.replaceChildren();
+
+  [
+    ["Generated", report.generatedAt || "—"],
+    ["Signing Officer", report.signingOfficer || "—"],
+    ["Position", report.signingPosition || "—"],
+    ["Personnel", Number(report.personnelCount || 0).toLocaleString()],
+    ["File Reference", report.fileReference || "—"],
+  ].forEach(([label, value]) => {
+    const item = document.createElement("article");
+    const small = document.createElement("span");
+    const strong = document.createElement("strong");
+    small.textContent = label;
+    strong.textContent = value;
+    item.append(small, strong);
+    meta.appendChild(item);
+  });
+}
+
+function renderGeneratedReportPreviewRows_(rows) {
+  const body = document.getElementById("generatedReportPreviewTableBody");
+  body.replaceChildren();
+
+  rows.forEach(row => {
+    const tr = document.createElement("tr");
+    [row.number, row.rankName, row.from, row.to].forEach(value => {
+      const td = document.createElement("td");
+      td.textContent = String(value || "—");
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function injectGeneratedReportPreviewStyles_() {
+  if (document.getElementById("generatedReportPreviewStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "generatedReportPreviewStyles";
+  style.textContent = `
+    .generated-report-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .generated-report-preview-button { min-width:82px; }
+    .generated-report-preview-backdrop { position:fixed; inset:0; z-index:17500; background:rgba(5,24,11,.55); backdrop-filter:blur(8px); }
+    .generated-report-preview-dialog { position:fixed; z-index:17501; top:50%; left:50%; width:min(1040px,95vw); max-height:90vh; overflow:auto; transform:translate(-50%,-50%); padding:22px; border:1px solid rgba(31,111,52,.2); border-radius:22px; background:#f5fbf6; box-shadow:0 30px 90px rgba(0,0,0,.38); }
+    .generated-report-preview-backdrop[hidden], .generated-report-preview-dialog[hidden] { display:none; }
+    .generated-report-preview-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    .generated-report-preview-header span { font-size:10px; font-weight:900; letter-spacing:.12em; color:#26723d; }
+    .generated-report-preview-header h2 { margin:3px 0; font-size:24px; }
+    .generated-report-preview-header p { margin:0; opacity:.72; }
+    .generated-report-preview-header > button { border:0; background:transparent; font-size:26px; cursor:pointer; }
+    .generated-report-preview-meta { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:18px 0; }
+    .generated-report-preview-meta article { display:grid; gap:5px; min-height:72px; padding:12px; border:1px solid rgba(31,111,52,.15); border-radius:13px; background:#fff; }
+    .generated-report-preview-meta span { font-size:10px; font-weight:850; color:#2a663b; text-transform:uppercase; }
+    .generated-report-preview-meta strong { font-size:12px; overflow-wrap:anywhere; }
+    .generated-report-preview-message { padding:18px; border:1px dashed rgba(31,111,52,.25); border-radius:14px; text-align:center; opacity:.78; }
+    .generated-report-preview-table-wrap { max-height:430px; overflow:auto; border:1px solid rgba(31,111,52,.18); border-radius:14px; background:#fff; }
+    .generated-report-preview-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .generated-report-preview-table th { position:sticky; top:0; z-index:1; padding:10px; background:#f0a97e; color:#1a2f20; text-align:left; }
+    .generated-report-preview-table td { padding:10px; border-top:1px solid rgba(31,111,52,.13); vertical-align:top; }
+    .generated-report-preview-table th:first-child, .generated-report-preview-table td:first-child { width:64px; text-align:center; }
+    .generated-report-preview-table th:nth-child(3), .generated-report-preview-table th:nth-child(4), .generated-report-preview-table td:nth-child(3), .generated-report-preview-table td:nth-child(4) { width:22%; text-align:center; }
+    .generated-report-preview-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+    @media (max-width:760px) {
+      .generated-report-preview-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .generated-report-preview-dialog { padding:16px; }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
