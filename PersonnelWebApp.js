@@ -51,6 +51,12 @@ function include(
         "ReassignmentPatchJS"
       )
       .getContent();
+
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentGenerateJS"
+      )
+      .getContent();
   }
 
   return content;
