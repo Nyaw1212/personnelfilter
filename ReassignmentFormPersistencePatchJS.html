@@ -1,0 +1,178 @@
+//----------------------------------
+// Reassignment Form Persistence Patch
+//----------------------------------
+
+const REASSIGNMENT_FORM_STORAGE_KEY =
+  "personnelFilterReassignmentFormV1";
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeReassignmentFormPersistence_
+);
+
+function initializeReassignmentFormPersistence_() {
+  const fieldIds = [
+    "reassignmentOrderNumber",
+    "reassignmentOrderDate",
+    "reassignmentSigningOffice",
+    "reassignmentSigningRole",
+    "reassignmentFileReference",
+  ];
+
+  fieldIds.forEach(id => {
+    const field = document.getElementById(id);
+    if (!field) return;
+
+    field.addEventListener(
+      field.tagName === "SELECT" ? "change" : "input",
+      saveReassignmentFormDetails_
+    );
+  });
+
+  restoreReassignmentFormDetails_();
+
+  const originalSuccessHandler =
+    handleReassignmentGenerateSuccess_;
+
+  handleReassignmentGenerateSuccess_ = function(response) {
+    originalSuccessHandler(response);
+
+    if (!response || response.success !== true) {
+      return;
+    }
+
+    clearReassignmentAfterSuccessfulGeneration_();
+  };
+}
+
+function saveReassignmentFormDetails_() {
+  try {
+    const details = {
+      orderNumber: getReassignmentFieldValue_(
+        "reassignmentOrderNumber"
+      ),
+      orderDate: getReassignmentFieldValue_(
+        "reassignmentOrderDate"
+      ),
+      signingOffice: getReassignmentFieldValue_(
+        "reassignmentSigningOffice"
+      ),
+      signingRole: getReassignmentFieldValue_(
+        "reassignmentSigningRole"
+      ) || "CHIEF",
+      fileReference: getReassignmentFieldValue_(
+        "reassignmentFileReference"
+      ),
+    };
+
+    localStorage.setItem(
+      REASSIGNMENT_FORM_STORAGE_KEY,
+      JSON.stringify(details)
+    );
+  } catch (error) {
+    console.warn(
+      "Unable to save reassignment form details:",
+      error
+    );
+  }
+}
+
+function restoreReassignmentFormDetails_() {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(
+        REASSIGNMENT_FORM_STORAGE_KEY
+      ) || "{}"
+    );
+
+    setReassignmentFieldValue_(
+      "reassignmentOrderNumber",
+      saved.orderNumber
+    );
+    setReassignmentFieldValue_(
+      "reassignmentOrderDate",
+      saved.orderDate
+    );
+    setReassignmentFieldValue_(
+      "reassignmentSigningOffice",
+      saved.signingOffice
+    );
+    setReassignmentFieldValue_(
+      "reassignmentSigningRole",
+      saved.signingRole || "CHIEF"
+    );
+    setReassignmentFieldValue_(
+      "reassignmentFileReference",
+      saved.fileReference
+    );
+
+    ReassignmentGenerateState.selectedOffice =
+      String(saved.signingOffice || "").trim();
+    ReassignmentGenerateState.selectedRole =
+      String(saved.signingRole || "CHIEF");
+
+    updateSigningOfficerPreview_();
+  } catch (error) {
+    console.warn(
+      "Unable to restore reassignment form details:",
+      error
+    );
+  }
+}
+
+function clearReassignmentAfterSuccessfulGeneration_() {
+  PersonnelState.aoCart.clear();
+  ReassignmentState.assignments.clear();
+  ReassignmentState.selectedKeys.clear();
+
+  saveAoCart_();
+  saveReassignmentState_();
+  updateAoCartCount_();
+  updateReportGeneratorButton_();
+
+  localStorage.removeItem(
+    REASSIGNMENT_FORM_STORAGE_KEY
+  );
+
+  [
+    "reassignmentOrderNumber",
+    "reassignmentOrderDate",
+    "reassignmentSigningOffice",
+    "reassignmentFileReference",
+  ].forEach(id => setReassignmentFieldValue_(id, ""));
+
+  setReassignmentFieldValue_(
+    "reassignmentSigningRole",
+    "CHIEF"
+  );
+
+  ReassignmentGenerateState.selectedOffice = "";
+  ReassignmentGenerateState.selectedRole = "CHIEF";
+
+  updateSigningOfficerPreview_();
+
+  const count = document.getElementById(
+    "reassignmentGeneratePersonnelCount"
+  );
+  if (count) count.textContent = "0 personnel";
+
+  renderReassignmentWorkspace_();
+
+  if (typeof renderPreviewTable === "function") {
+    renderPreviewTable();
+  }
+}
+
+function getReassignmentFieldValue_(id) {
+  const field = document.getElementById(id);
+  return field ? String(field.value || "") : "";
+}
+
+function setReassignmentFieldValue_(id, value) {
+  const field = document.getElementById(id);
+  if (!field || value === undefined || value === null) {
+    return;
+  }
+
+  field.value = String(value);
+}
