@@ -80,6 +80,14 @@ function include(
         "ReassignmentWorkspaceClearJS"
       )
       .getContent();
+
+    // Saves order/signing details through refreshes and clears both
+    // the form and selected personnel after successful generation.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentFormPersistencePatchJS"
+      )
+      .getContent();
   }
 
   return content;
