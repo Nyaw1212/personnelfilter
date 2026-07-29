@@ -88,6 +88,14 @@ function include(
         "ReassignmentFormPersistencePatchJS"
       )
       .getContent();
+
+    // Loaded last to add the live order preview, polish workspace
+    // controls, and remove duplicated rank prefixes before sending.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(
+        "ReassignmentPreviewPolishJS"
+      )
+      .getContent();
   }
 
   return content;
