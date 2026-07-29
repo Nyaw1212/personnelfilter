@@ -1,0 +1,333 @@
+//----------------------------------
+// Generated Reports History UI
+//----------------------------------
+
+const GeneratedReportsState = {
+  reports: [],
+  search: "",
+  loading: false,
+};
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initializeGeneratedReportsModule_
+);
+
+function initializeGeneratedReportsModule_() {
+  addGeneratedReportsButton_();
+  buildGeneratedReportsDialog_();
+  injectGeneratedReportsStyles_();
+  refreshGeneratedReportsBadge_();
+
+  // After a successful report, return to the main Personnel Filter and
+  // keep access to the document through the success toast/history button.
+  const originalSuccessHandler = handleReassignmentGenerateSuccess_;
+  handleReassignmentGenerateSuccess_ = function(response) {
+    originalSuccessHandler(response);
+
+    if (!response || response.success !== true) return;
+
+    closeReassignmentGenerateDialog_();
+    closeReassignmentWorkspace_();
+    showGeneratedReportSuccessToast_(response);
+    refreshGeneratedReportsBadge_();
+  };
+}
+
+function addGeneratedReportsButton_() {
+  const actions = document.querySelector(".window-actions");
+  if (!actions || document.getElementById("openGeneratedReportsButton")) {
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.id = "openGeneratedReportsButton";
+  button.type = "button";
+  button.className = "generated-reports-button";
+  button.innerHTML = `
+    <span>Generated Reports</span>
+    <strong id="generatedReportsBadge">0</strong>
+  `;
+  button.addEventListener("click", openGeneratedReportsDialog_);
+
+  actions.insertBefore(button, actions.firstChild);
+}
+
+function buildGeneratedReportsDialog_() {
+  if (document.getElementById("generatedReportsDialog")) return;
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "generatedReportsBackdrop";
+  backdrop.className = "generated-reports-backdrop";
+  backdrop.hidden = true;
+
+  const dialog = document.createElement("section");
+  dialog.id = "generatedReportsDialog";
+  dialog.className = "generated-reports-dialog";
+  dialog.hidden = true;
+  dialog.innerHTML = `
+    <header class="generated-reports-header">
+      <div>
+        <span>REPORT HISTORY</span>
+        <h2>Generated Reports</h2>
+        <p>Review and reopen reports created from Personnel Filter.</p>
+      </div>
+      <button id="closeGeneratedReportsButton" type="button" title="Close">×</button>
+    </header>
+
+    <section class="generated-reports-summary">
+      <article><span>Total Reports</span><strong id="generatedReportsTotal">0</strong></article>
+      <article><span>Personnel Included</span><strong id="generatedReportsPersonnelTotal">0</strong></article>
+      <article><span>Latest Order</span><strong id="generatedReportsLatestOrder">—</strong></article>
+    </section>
+
+    <div class="generated-reports-toolbar">
+      <input id="generatedReportsSearch" type="search" placeholder="Search order number, officer, or report..." autocomplete="off">
+      <button id="refreshGeneratedReportsButton" class="button button-secondary" type="button">Refresh</button>
+    </div>
+
+    <div id="generatedReportsMessage" class="generated-reports-message">Loading reports...</div>
+    <div id="generatedReportsList" class="generated-reports-list"></div>
+  `;
+
+  document.body.append(backdrop, dialog);
+
+  backdrop.addEventListener("click", closeGeneratedReportsDialog_);
+  dialog
+    .querySelector("#closeGeneratedReportsButton")
+    .addEventListener("click", closeGeneratedReportsDialog_);
+  dialog
+    .querySelector("#refreshGeneratedReportsButton")
+    .addEventListener("click", loadGeneratedReports_);
+  dialog
+    .querySelector("#generatedReportsSearch")
+    .addEventListener("input", event => {
+      GeneratedReportsState.search = event.target.value.trim().toLowerCase();
+      renderGeneratedReports_();
+    });
+}
+
+function openGeneratedReportsDialog_() {
+  document.getElementById("generatedReportsBackdrop").hidden = false;
+  document.getElementById("generatedReportsDialog").hidden = false;
+  loadGeneratedReports_();
+}
+
+function closeGeneratedReportsDialog_() {
+  document.getElementById("generatedReportsBackdrop").hidden = true;
+  document.getElementById("generatedReportsDialog").hidden = true;
+}
+
+function loadGeneratedReports_() {
+  if (GeneratedReportsState.loading) return;
+  GeneratedReportsState.loading = true;
+
+  const message = document.getElementById("generatedReportsMessage");
+  message.hidden = false;
+  message.textContent = "Loading generated reports...";
+
+  google.script.run
+    .withSuccessHandler(response => {
+      GeneratedReportsState.loading = false;
+
+      if (!response || response.success !== true) {
+        message.textContent = response?.message || "Reports could not be loaded.";
+        return;
+      }
+
+      GeneratedReportsState.reports = Array.isArray(response.reports)
+        ? response.reports
+        : [];
+      updateGeneratedReportsSummary_(response.total);
+      renderGeneratedReports_();
+    })
+    .withFailureHandler(error => {
+      GeneratedReportsState.loading = false;
+      message.textContent = error?.message || "Reports could not be loaded.";
+    })
+    .getGeneratedReportSummaries(200);
+}
+
+function renderGeneratedReports_() {
+  const list = document.getElementById("generatedReportsList");
+  const message = document.getElementById("generatedReportsMessage");
+  if (!list || !message) return;
+
+  const query = GeneratedReportsState.search;
+  const reports = GeneratedReportsState.reports.filter(report => {
+    if (!query) return true;
+    return [
+      report.reportType,
+      report.orderNumber,
+      report.orderDate,
+      report.signingOfficer,
+      report.signingPosition,
+      report.outputName,
+      report.fileReference,
+    ].some(value => String(value || "").toLowerCase().includes(query));
+  });
+
+  list.replaceChildren();
+
+  if (!reports.length) {
+    message.hidden = false;
+    message.textContent = query
+      ? "No generated reports match your search."
+      : "No reports have been generated yet.";
+    return;
+  }
+
+  message.hidden = true;
+
+  reports.forEach(report => {
+    const card = document.createElement("article");
+    card.className = "generated-report-card";
+
+    const type = String(report.reportType || "REPORT").replaceAll("_", " ");
+    card.innerHTML = `
+      <div class="generated-report-main">
+        <div class="generated-report-title">
+          <span>${escapeGeneratedReportHtml_(type)}</span>
+          <h3>Order No. ${escapeGeneratedReportHtml_(report.orderNumber || "—")}</h3>
+        </div>
+        <div class="generated-report-meta">
+          <span><b>Order Date:</b> ${escapeGeneratedReportHtml_(report.orderDate || "—")}</span>
+          <span><b>Generated:</b> ${escapeGeneratedReportHtml_(report.generatedAt || "—")}</span>
+          <span><b>Personnel:</b> ${Number(report.personnelCount || 0).toLocaleString()}</span>
+        </div>
+        <div class="generated-report-officer">
+          <strong>${escapeGeneratedReportHtml_(report.signingOfficer || "No signing officer")}</strong>
+          <small>${escapeGeneratedReportHtml_(report.signingPosition || "")}</small>
+        </div>
+      </div>
+      <div class="generated-report-actions"></div>
+    `;
+
+    const actions = card.querySelector(".generated-report-actions");
+    if (report.url) {
+      const open = document.createElement("a");
+      open.className = "button button-primary generated-report-open";
+      open.href = report.url;
+      open.target = "_blank";
+      open.rel = "noopener noreferrer";
+      open.textContent = "Open Report";
+      actions.appendChild(open);
+    }
+
+    list.appendChild(card);
+  });
+}
+
+function updateGeneratedReportsSummary_(total) {
+  const reports = GeneratedReportsState.reports;
+  const personnelTotal = reports.reduce(
+    (sum, report) => sum + Number(report.personnelCount || 0),
+    0
+  );
+
+  document.getElementById("generatedReportsTotal").textContent =
+    Number(total || reports.length).toLocaleString();
+  document.getElementById("generatedReportsPersonnelTotal").textContent =
+    personnelTotal.toLocaleString();
+  document.getElementById("generatedReportsLatestOrder").textContent =
+    reports[0]?.orderNumber || "—";
+
+  const badge = document.getElementById("generatedReportsBadge");
+  if (badge) badge.textContent = Number(total || reports.length).toLocaleString();
+}
+
+function refreshGeneratedReportsBadge_() {
+  google.script.run
+    .withSuccessHandler(response => {
+      if (!response || response.success !== true) return;
+      const badge = document.getElementById("generatedReportsBadge");
+      if (badge) badge.textContent = Number(response.total || 0).toLocaleString();
+    })
+    .getGeneratedReportSummaries(1);
+}
+
+function showGeneratedReportSuccessToast_(response) {
+  document.getElementById("generatedReportSuccessToast")?.remove();
+
+  const toast = document.createElement("div");
+  toast.id = "generatedReportSuccessToast";
+  toast.className = "generated-report-success-toast";
+
+  const text = document.createElement("div");
+  text.innerHTML = `
+    <strong>Report generated successfully</strong>
+    <span>Order ${escapeGeneratedReportHtml_(response.outputName || "created")}</span>
+  `;
+  toast.appendChild(text);
+
+  if (response.url) {
+    const link = document.createElement("a");
+    link.href = response.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Open Report";
+    toast.appendChild(link);
+  }
+
+  const history = document.createElement("button");
+  history.type = "button";
+  history.textContent = "View Reports";
+  history.addEventListener("click", () => {
+    toast.remove();
+    openGeneratedReportsDialog_();
+  });
+  toast.appendChild(history);
+
+  document.body.appendChild(toast);
+  window.setTimeout(() => toast.remove(), 12000);
+}
+
+function escapeGeneratedReportHtml_(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function injectGeneratedReportsStyles_() {
+  if (document.getElementById("generatedReportsStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "generatedReportsStyles";
+  style.textContent = `
+    .generated-reports-button { display:inline-flex; align-items:center; gap:8px; min-height:36px; padding:7px 11px; border:1px solid rgba(31,111,52,.2); border-radius:999px; background:rgba(255,255,255,.78); color:#174d28; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+    .generated-reports-button strong { display:inline-grid; place-items:center; min-width:23px; height:23px; padding:0 6px; border-radius:999px; background:#ffe500; color:#183d23; font-size:10px; }
+    .generated-reports-backdrop { position:fixed; inset:0; z-index:17000; background:rgba(5,24,11,.5); backdrop-filter:blur(7px); }
+    .generated-reports-dialog { position:fixed; z-index:17001; top:50%; left:50%; width:min(1080px,95vw); max-height:90vh; overflow:auto; transform:translate(-50%,-50%); padding:22px; border:1px solid rgba(31,111,52,.2); border-radius:22px; background:#f5fbf6; box-shadow:0 30px 90px rgba(0,0,0,.34); }
+    .generated-reports-backdrop[hidden], .generated-reports-dialog[hidden] { display:none; }
+    .generated-reports-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    .generated-reports-header span { font-size:11px; font-weight:900; letter-spacing:.12em; color:#26723d; }
+    .generated-reports-header h2 { margin:3px 0; font-size:24px; }
+    .generated-reports-header p { margin:0; opacity:.72; }
+    .generated-reports-header > button { border:0; background:transparent; font-size:26px; cursor:pointer; }
+    .generated-reports-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:18px 0; }
+    .generated-reports-summary article { display:grid; gap:5px; padding:14px; border:1px solid rgba(31,111,52,.15); border-radius:14px; background:#fff; }
+    .generated-reports-summary span { font-size:11px; font-weight:800; color:#2a663b; }
+    .generated-reports-summary strong { font-size:22px; }
+    .generated-reports-toolbar { display:flex; gap:10px; margin-bottom:14px; }
+    .generated-reports-toolbar input { flex:1; min-height:42px; padding:9px 12px; border:1px solid rgba(31,111,52,.2); border-radius:12px; background:#fff; font:inherit; }
+    .generated-reports-message { padding:18px; border:1px dashed rgba(31,111,52,.25); border-radius:14px; text-align:center; opacity:.75; }
+    .generated-reports-list { display:grid; gap:10px; }
+    .generated-report-card { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px; border:1px solid rgba(31,111,52,.14); border-radius:15px; background:#fff; }
+    .generated-report-main { display:grid; grid-template-columns:minmax(180px,1fr) minmax(280px,1.5fr) minmax(220px,1fr); align-items:center; gap:18px; flex:1; }
+    .generated-report-title span { font-size:10px; font-weight:900; letter-spacing:.1em; color:#26723d; }
+    .generated-report-title h3 { margin:4px 0 0; }
+    .generated-report-meta, .generated-report-officer { display:grid; gap:4px; font-size:12px; }
+    .generated-report-officer small { opacity:.7; }
+    .generated-report-open { text-decoration:none; white-space:nowrap; }
+    .generated-report-success-toast { position:fixed; z-index:18000; right:22px; bottom:22px; display:flex; align-items:center; gap:12px; max-width:min(620px,calc(100vw - 32px)); padding:14px 16px; border:1px solid rgba(31,111,52,.22); border-radius:16px; background:#f4fff6; box-shadow:0 18px 55px rgba(0,0,0,.24); }
+    .generated-report-success-toast > div { display:grid; gap:2px; margin-right:auto; }
+    .generated-report-success-toast span { font-size:11px; opacity:.72; }
+    .generated-report-success-toast a, .generated-report-success-toast button { padding:8px 10px; border:1px solid rgba(31,111,52,.22); border-radius:10px; background:#fff; color:#185c2b; font:inherit; font-size:11px; font-weight:850; text-decoration:none; cursor:pointer; white-space:nowrap; }
+    @media (max-width:800px) { .generated-reports-summary { grid-template-columns:1fr; } .generated-report-card { align-items:stretch; flex-direction:column; } .generated-report-main { grid-template-columns:1fr; } .generated-report-actions { align-self:stretch; } .generated-report-open { display:block; text-align:center; } }
+    @media (max-width:600px) { .generated-reports-button span { display:none; } .generated-report-success-toast { left:16px; right:16px; flex-wrap:wrap; } }
+  `;
+  document.head.appendChild(style);
+}
