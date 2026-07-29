@@ -105,14 +105,15 @@ function patchGeneratedReportsCardsWithPreview_() {
         return;
       }
 
+      const reference = report.documentId || report.url || "";
       const preview = document.createElement("button");
       preview.type = "button";
       preview.className = "button button-secondary generated-report-preview-button";
       preview.textContent = "Preview";
-      preview.disabled = !report.documentId;
-      preview.title = report.documentId
+      preview.disabled = !reference;
+      preview.title = reference
         ? "Quickly preview the personnel included in this report"
-        : "This report has no Document ID";
+        : "This report has no Document ID or Google Docs URL";
       preview.addEventListener("click", () => openGeneratedReportPreview_(report));
 
       actions.insertBefore(preview, actions.firstChild);
@@ -121,7 +122,8 @@ function patchGeneratedReportsCardsWithPreview_() {
 }
 
 function openGeneratedReportPreview_(report) {
-  if (!report || !report.documentId || GeneratedReportPreviewState.loading) return;
+  const documentReference = report?.documentId || report?.url || "";
+  if (!report || !documentReference || GeneratedReportPreviewState.loading) return;
 
   GeneratedReportPreviewState.loading = true;
   GeneratedReportPreviewState.report = report;
@@ -174,7 +176,7 @@ function openGeneratedReportPreview_(report) {
       message.hidden = false;
       message.textContent = error?.message || "Preview could not be loaded.";
     })
-    .getGeneratedReportPreview(report.documentId);
+    .getGeneratedReportPreview(documentReference);
 }
 
 function closeGeneratedReportPreview_() {
