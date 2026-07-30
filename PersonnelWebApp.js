@@ -160,6 +160,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentSourceSubtitleFixJS")
       .getContent();
+
+    // New Report must discard the edited report and restore the current selection.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentNewReportResetFixJS")
+      .getContent();
   }
 
   return content;
