@@ -161,6 +161,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentWorkflowRenderHotfixJS")
       .getContent();
+
+    // Restore destination-group columns with compact draggable personnel rows.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentGroupedStep3JS")
+      .getContent();
   }
 
   return content;
