@@ -1,0 +1,218 @@
+//----------------------------------
+// Flexible destination + LIST sequence sorting
+//----------------------------------
+
+(function () {
+  const CAMP_PREFIX = "__CAMP_ONLY__:";
+
+  function selectedDestination_() {
+    const office = String(ReassignmentState.activeOffice || "").trim();
+    const camp = String(ReassignmentState.activeCamp || "").trim();
+
+    if (office) {
+      return { office, camp: camp || "", mode: camp ? "OFFICE_AND_CAMP" : "OFFICE_ONLY" };
+    }
+    if (camp) {
+      return { office: "", camp, mode: "CAMP_ONLY" };
+    }
+    return null;
+  }
+
+  function normalizeAssignment_(value) {
+    if (value && typeof value === "object") {
+      return {
+        office: String(value.office || "").trim(),
+        camp: String(value.camp || "").trim(),
+        mode: String(value.mode || "").trim() || "OFFICE_ONLY",
+      };
+    }
+
+    const text = String(value || "").trim();
+    if (text.indexOf(CAMP_PREFIX) === 0) {
+      return { office: "", camp: text.slice(CAMP_PREFIX.length), mode: "CAMP_ONLY" };
+    }
+    return { office: text, camp: "", mode: "OFFICE_ONLY" };
+  }
+
+  function assignKeys_(keys) {
+    const destination = selectedDestination_();
+    if (!destination) {
+      alert("Choose either a destination Camp or Office first.");
+      return;
+    }
+
+    keys.forEach(key => {
+      if (PersonnelState.aoCart.has(key)) {
+        ReassignmentState.assignments.set(key, { ...destination });
+      }
+    });
+
+    ReassignmentState.selectedKeys.clear();
+    if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+    if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+  }
+
+  function installAssignmentButtons_() {
+    document.addEventListener("click", event => {
+      const selectedButton = event.target.closest("#assignSelectedButton");
+      const visibleButton = event.target.closest("#assignAllVisibleButton");
+      if (!selectedButton && !visibleButton) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (selectedButton) {
+        assignKeys_([...ReassignmentState.selectedKeys]);
+        return;
+      }
+
+      const entries = [...PersonnelState.aoCart.entries()].filter(
+        ([key]) => !ReassignmentState.assignments.has(key)
+      );
+      const visible = typeof filterUnassigned_ === "function"
+        ? filterUnassigned_(entries)
+        : entries;
+      assignKeys_(visible.map(([key]) => key));
+    }, true);
+  }
+
+  function patchControls_() {
+    if (typeof window.updateReassignmentControls_ !== "function") return;
+    const original = window.updateReassignmentControls_;
+    window.updateReassignmentControls_ = function (total) {
+      original.apply(this, arguments);
+      const hasDestination = Boolean(
+        String(ReassignmentState.activeOffice || "").trim() ||
+        String(ReassignmentState.activeCamp || "").trim()
+      );
+      const selected = document.getElementById("assignSelectedButton");
+      const visible = document.getElementById("assignAllVisibleButton");
+      if (selected) {
+        selected.disabled = !hasDestination || !ReassignmentState.selectedKeys.size;
+      }
+      if (visible) visible.disabled = !hasDestination;
+    };
+  }
+
+  function listSequence_(person, key) {
+    const records = Array.isArray(PersonnelState.records) ? PersonnelState.records : [];
+    const normalize = value => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const name = normalize(person.fullName || person.record?.["FULL NAME"] || "");
+    const rank = normalize(person.rank || person.record?.RANK || "");
+    const office = normalize(person.office || person.record?.Office || "");
+
+    const index = records.findIndex(record => {
+      const recordName = normalize(record["FULL NAME"] || record.fullName || "");
+      const recordRank = normalize(record.RANK || record.rank || "");
+      const recordOffice = normalize(record.Office || record.office || "");
+      return recordName === name && (!rank || recordRank === rank) && (!office || recordOffice === office);
+    });
+
+    if (index >= 0) return index;
+    const numeric = Number(String(key || "").match(/\d+/)?.[0]);
+    return Number.isFinite(numeric) ? numeric : Number.MAX_SAFE_INTEGER;
+  }
+
+  function patchPayload_() {
+    if (
+      typeof window.buildReassignmentGeneratePayload_ !== "function" ||
+      window.buildReassignmentGeneratePayload_.flexibleDestinationPatched
+    ) return false;
+
+    const original = window.buildReassignmentGeneratePayload_;
+    function patched() {
+      const payload = original.apply(this, arguments);
+      const personnel = [...ReassignmentState.assignments.entries()]
+        .map(([key, rawDestination]) => {
+          const person = PersonnelState.aoCart.get(key);
+          if (!person) return null;
+          const destination = normalizeAssignment_(rawDestination);
+          const currentOffice = String(person.office || person.record?.Office || "").trim();
+          const currentCamp = String(person.camp || person.record?.CAMP || "").trim();
+          const destinationLabel = destination.office || destination.camp;
+
+          return {
+            key,
+            sequence: listSequence_(person, key),
+            rank: person.rank || person.record?.RANK || "",
+            fullName: person.fullName || person.record?.["FULL NAME"] || "",
+            from: currentOffice || currentCamp,
+            fromOffice: currentOffice,
+            fromCamp: currentCamp,
+            to: destinationLabel,
+            toOffice: destination.office,
+            toCamp: destination.camp,
+            transferMode: destination.mode,
+            notes: "",
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.sequence - b.sequence)
+        .map(({ key, sequence, ...person }) => person);
+
+      payload.personnel = personnel;
+      return payload;
+    }
+    patched.flexibleDestinationPatched = true;
+    window.buildReassignmentGeneratePayload_ = patched;
+    return true;
+  }
+
+  function patchAssignmentCards_() {
+    if (typeof window.renderAssignmentCards_ !== "function") return;
+    window.renderAssignmentCards_ = function (people) {
+      const grid = document.getElementById("assignmentCardGrid");
+      if (!grid) return;
+      grid.replaceChildren();
+      const groups = new Map();
+
+      ReassignmentState.assignments.forEach((raw, key) => {
+        const destination = normalizeAssignment_(raw);
+        const label = destination.office
+          ? `${destination.office}${destination.camp ? ` · ${destination.camp}` : ""}`
+          : `CAMP: ${destination.camp}`;
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(key);
+      });
+
+      if (!groups.size) {
+        grid.appendChild(makeText_("div", "No personnel assigned yet."));
+        return;
+      }
+
+      groups.forEach((keys, label) => {
+        const card = makeElement_("article", "assignment-card");
+        const header = makeElement_("div", "assignment-card-header");
+        header.append(makeText_("strong", label), makeText_("span", `${keys.length} personnel`));
+        card.appendChild(header);
+        keys.forEach(key => {
+          const person = PersonnelState.aoCart.get(key);
+          if (!person) return;
+          const row = makeElement_("div", "assignment-person");
+          row.append(
+            makeText_("span", [person.rank, person.fullName].filter(Boolean).join(" ")),
+            makeRemoveButton_(key)
+          );
+          card.appendChild(row);
+        });
+        grid.appendChild(card);
+      });
+    };
+  }
+
+  function install_() {
+    installAssignmentButtons_();
+    patchControls_();
+    patchAssignmentCards_();
+    patchPayload_();
+
+    const observer = new MutationObserver(() => patchPayload_());
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
