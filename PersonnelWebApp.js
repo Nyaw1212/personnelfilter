@@ -131,9 +131,14 @@ function include(
       .createHtmlOutputFromFile("ReassignmentTodayDatePatchJS")
       .getContent();
 
-    // Step 2 destination chips show both Office and Camp.
+    // Legacy Office + Camp labels.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("DestinationCampChipsJS")
+      .getContent();
+
+    // Final Step 2 layout: Camp selector first, then the existing Office list.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentDestinationCampFilterJS")
       .getContent();
   }
 
