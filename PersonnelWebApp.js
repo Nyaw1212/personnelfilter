@@ -83,6 +83,10 @@ function include(
       .getContent();
 
     content += "\n" + HtmlService
+      .createHtmlOutputFromFile("Stage1GeneratedReportEditorJS")
+      .getContent();
+
+    content += "\n" + HtmlService
       .createHtmlOutputFromFile("AOSelectionBulkControlsJS")
       .getContent();
 
