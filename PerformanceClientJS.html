@@ -10,12 +10,11 @@ window.addEventListener("DOMContentLoaded", () => {
   PersonnelState.autoApply = false;
 
   const autoApplyToggle = document.getElementById("autoApplyToggle");
-  if (autoApplyToggle) {
-    autoApplyToggle.checked = false;
-  }
+  if (autoApplyToggle) autoApplyToggle.checked = false;
 
   installDebouncedPersonnelSearch_();
   patchPersonnelFiltering_();
+  patchPersonnelSummaryCounting_();
   patchAoRowButtonsForFastUpdates_();
 
   setSyncStatus("Preview only", "ready");
@@ -47,7 +46,6 @@ function patchPersonnelFiltering_() {
     const searchTerm = String(PersonnelState.filters.search || "")
       .trim()
       .toLowerCase();
-
     const groups = PERSONNEL_APP_CONFIG.filterGroups;
     const selectedRanks = PersonnelState.filters.ranks;
 
@@ -86,6 +84,43 @@ function patchPersonnelFiltering_() {
       scheduled = false;
       originalFilterAndRender();
     });
+  };
+}
+
+function patchPersonnelSummaryCounting_() {
+  renderCountingReports_ = function (records) {
+    const fields = [
+      ["Gender", "genderReport"],
+      ["Category", "categoryReport"],
+      ["Camp", "campReport"],
+      ["Office", "officeReport"],
+      ["Rank", "rankReport"],
+    ];
+    const maps = new Map(fields.map(([field]) => [field, new Map()]));
+
+    records.forEach(record => {
+      fields.forEach(([field]) => {
+        const value = String(record[field] || "").trim();
+        if (!value) return;
+        const counts = maps.get(field);
+        counts.set(value, (counts.get(value) || 0) + 1);
+      });
+    });
+
+    fields.forEach(([field, containerId]) => {
+      const items = [...maps.get(field).entries()]
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) =>
+          b.count - a.count ||
+          a.label.localeCompare(b.label, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          })
+        );
+      renderReportList_(containerId, items);
+    });
+
+    renderTypeBreakdown_(records);
   };
 }
 
