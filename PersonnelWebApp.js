@@ -161,6 +161,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentWorkflowRenderHotfixJS")
       .getContent();
+
+    // Step 2 uses static Camp and Office destination choices.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentStaticDestinationOptionsJS")
+      .getContent();
   }
 
   return content;
