@@ -98,9 +98,13 @@ function include(
       .createHtmlOutputFromFile("PerformanceClientJS")
       .getContent();
 
-    // Runtime hook loaded last so no later patch can replace its controls.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("Stage1WorkflowRuntimeFixJS")
+      .getContent();
+
+    // Loaded absolutely last and directly owns the Generate Report button.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("Stage1GenerateChoiceHardFixJS")
       .getContent();
   }
 
