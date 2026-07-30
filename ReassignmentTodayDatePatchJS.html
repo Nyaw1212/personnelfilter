@@ -1,0 +1,80 @@
+//----------------------------------
+// Default new report date to today
+//----------------------------------
+
+(function () {
+  function todayLocal_() {
+    const now = new Date();
+    return new Date(
+      now.getTime() - now.getTimezoneOffset() * 60000
+    )
+      .toISOString()
+      .slice(0, 10);
+  }
+
+  function isEditingExistingReport_() {
+    return Boolean(
+      typeof Stage1ReportEditorState !== "undefined" &&
+      Stage1ReportEditorState.sourceReport
+    );
+  }
+
+  function applyTodayToNewReport_() {
+    if (isEditingExistingReport_()) return;
+
+    const field = document.getElementById(
+      "reassignmentOrderDate"
+    );
+
+    if (field && !field.value) {
+      field.value = todayLocal_();
+      field.dispatchEvent(
+        new Event("change", { bubbles: true })
+      );
+    }
+  }
+
+  function patchOpenDialog_() {
+    if (
+      typeof window.openReassignmentGenerateDialog_ !== "function" ||
+      window.openReassignmentGenerateDialog_.todayDatePatched
+    ) {
+      return false;
+    }
+
+    const original = window.openReassignmentGenerateDialog_;
+
+    function patchedOpenReassignmentGenerateDialog_() {
+      const result = original.apply(this, arguments);
+      window.setTimeout(applyTodayToNewReport_, 0);
+      return result;
+    }
+
+    patchedOpenReassignmentGenerateDialog_.todayDatePatched = true;
+    window.openReassignmentGenerateDialog_ =
+      patchedOpenReassignmentGenerateDialog_;
+
+    return true;
+  }
+
+  function install_() {
+    patchOpenDialog_();
+
+    const observer = new MutationObserver(function () {
+      patchOpenDialog_();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, {
+      once: true,
+    });
+  } else {
+    install_();
+  }
+})();
