@@ -102,9 +102,13 @@ function include(
       .createHtmlOutputFromFile("Stage1WorkflowRuntimeFixJS")
       .getContent();
 
-    // Loaded absolutely last and directly owns the Generate Report button.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("Stage1GenerateChoiceHardFixJS")
+      .getContent();
+
+    // Main toolbar launcher and global Escape handling load absolutely last.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("Stage1ReportLauncherAndEscapeJS")
       .getContent();
   }
 
