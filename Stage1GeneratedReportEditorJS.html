@@ -1,0 +1,260 @@
+//----------------------------------
+// Stage 1 Upgrade: Generated Report Editor
+//----------------------------------
+
+const Stage1ReportEditorState = {
+  loading: false,
+  sourceReport: null,
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  patchGeneratedReportsWithEditor_();
+  injectStage1ReportEditorStyles_();
+});
+
+function patchGeneratedReportsWithEditor_() {
+  if (typeof renderGeneratedReports_ !== "function") return;
+
+  const originalRender = renderGeneratedReports_;
+
+  renderGeneratedReports_ = function () {
+    originalRender.apply(this, arguments);
+
+    const list = document.getElementById("generatedReportsList");
+    if (!list) return;
+
+    const query = String(GeneratedReportsState.search || "").trim().toLowerCase();
+    const reports = GeneratedReportsState.reports.filter(report => {
+      if (!query) return true;
+      return [
+        report.reportType,
+        report.orderNumber,
+        report.orderDate,
+        report.signingOfficer,
+        report.signingPosition,
+        report.outputName,
+        report.fileReference,
+      ].some(value => String(value || "").toLowerCase().includes(query));
+    });
+
+    [...list.querySelectorAll(".generated-report-card")].forEach((card, index) => {
+      const report = reports[index];
+      const actions = card.querySelector(".generated-report-actions");
+
+      if (!report || !actions || actions.querySelector(".stage1-edit-report-button")) {
+        return;
+      }
+
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "button button-secondary stage1-edit-report-button";
+      edit.textContent = "Edit / Revise";
+      edit.title = "Load this report into the Reassignment Workspace and create a revised document";
+      edit.disabled = !report.documentId && !report.url;
+      edit.addEventListener("click", () => loadGeneratedReportForRevision_(report));
+
+      actions.insertBefore(edit, actions.firstChild);
+    });
+  };
+}
+
+function loadGeneratedReportForRevision_(report) {
+  if (Stage1ReportEditorState.loading || !report) return;
+
+  Stage1ReportEditorState.loading = true;
+  Stage1ReportEditorState.sourceReport = report;
+
+  const source = report.documentId || report.url || "";
+  const message = document.getElementById("generatedReportsMessage");
+  if (message) {
+    message.hidden = false;
+    message.textContent = `Loading Order No. ${report.orderNumber || "—"} for editing...`;
+  }
+
+  google.script.run
+    .withSuccessHandler(response => {
+      Stage1ReportEditorState.loading = false;
+
+      if (!response || response.success !== true) {
+        if (message) message.textContent = response?.message || "The report could not be loaded for editing.";
+        return;
+      }
+
+      hydrateReassignmentFromGeneratedReport_(report, response.rows || []);
+      closeGeneratedReportsDialog_();
+      openReassignmentWorkspace_();
+      showStage1RevisionBanner_(report);
+      populateRevisionOrderDetails_(report);
+    })
+    .withFailureHandler(error => {
+      Stage1ReportEditorState.loading = false;
+      if (message) message.textContent = error?.message || "The report could not be loaded for editing.";
+    })
+    .getGeneratedReportPreview(source);
+}
+
+function hydrateReassignmentFromGeneratedReport_(report, rows) {
+  PersonnelState.aoCart = new Map();
+  ReassignmentState.assignments = new Map();
+  ReassignmentState.selectedKeys = new Set();
+  ReassignmentState.activeOffice = "";
+
+  rows.forEach((row, index) => {
+    const parsed = splitGeneratedRankName_(row.rankName);
+    const key = `revision:${report.documentId || report.orderNumber || "report"}:${index + 1}`;
+
+    PersonnelState.aoCart.set(key, {
+      sourceRow: "",
+      rank: parsed.rank,
+      fullName: parsed.fullName,
+      office: String(row.from || "N/A").trim() || "N/A",
+      record: {
+        Rank: parsed.rank,
+        "Full Name": parsed.fullName,
+        Office: String(row.from || "N/A").trim() || "N/A",
+        Camp: "",
+      },
+    });
+
+    ReassignmentState.assignments.set(
+      key,
+      String(row.to || "").trim()
+    );
+  });
+
+  saveAoCart_();
+  if (typeof saveReassignmentState_ === "function") {
+    saveReassignmentState_();
+  }
+  updateAoCartCount_();
+}
+
+function splitGeneratedRankName_(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return { rank: "", fullName: "" };
+
+  const parts = text.split(" ");
+  const rank = parts.shift() || "";
+  const fullName = parts.join(" ").trim();
+
+  return {
+    rank,
+    fullName: fullName || text,
+  };
+}
+
+function populateRevisionOrderDetails_(report) {
+  const orderNumber = document.getElementById("reassignmentOrderNumber");
+  const orderDate = document.getElementById("reassignmentOrderDate");
+  const fileReference = document.getElementById("reassignmentFileReference");
+
+  if (orderNumber) {
+    orderNumber.value = buildNextRevisionNumber_(report.orderNumber);
+  }
+  if (orderDate) {
+    orderDate.value = normalizeRevisionDateForInput_(report.orderDate);
+  }
+  if (fileReference) {
+    fileReference.value = report.fileReference || fileReference.value || "";
+  }
+
+  const originalLoadDirectory = loadOfficeSigningDirectory_;
+  loadOfficeSigningDirectory_ = function () {
+    originalLoadDirectory();
+
+    window.setTimeout(() => {
+      matchRevisionSigningOfficer_(report);
+    }, 800);
+  };
+}
+
+function matchRevisionSigningOfficer_(report) {
+  const officer = String(report.signingOfficer || "").trim().toLowerCase();
+  if (!officer || !Array.isArray(ReassignmentGenerateState.directory)) return;
+
+  const match = ReassignmentGenerateState.directory.find(record =>
+    String(record.chiefName || "").trim().toLowerCase() === officer ||
+    String(record.deputyName || "").trim().toLowerCase() === officer
+  );
+
+  if (!match) return;
+
+  const role = String(match.deputyName || "").trim().toLowerCase() === officer
+    ? "DEPUTY"
+    : "CHIEF";
+
+  ReassignmentGenerateState.selectedOffice = match.office || "";
+  ReassignmentGenerateState.selectedRole = role;
+
+  const officeInput = document.getElementById("reassignmentSigningOffice");
+  const roleInput = document.getElementById("reassignmentSigningRole");
+  if (officeInput) officeInput.value = match.office || "";
+  if (roleInput) roleInput.value = role;
+  updateSigningOfficerPreview_();
+}
+
+function buildNextRevisionNumber_(orderNumber) {
+  const value = String(orderNumber || "").trim();
+  if (!value) return "REV 1";
+
+  const match = value.match(/\s+REV\s+(\d+)$/i);
+  if (match) {
+    return value.replace(/\s+REV\s+\d+$/i, ` REV ${Number(match[1]) + 1}`);
+  }
+
+  return `${value} REV 1`;
+}
+
+function normalizeRevisionDateForInput_(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function showStage1RevisionBanner_(report) {
+  document.getElementById("stage1RevisionBanner")?.remove();
+
+  const workspace = document.getElementById("reassignmentWorkspace");
+  const header = workspace?.querySelector(".reassignment-header");
+  if (!workspace || !header) return;
+
+  const banner = document.createElement("div");
+  banner.id = "stage1RevisionBanner";
+  banner.className = "stage1-revision-banner";
+  banner.innerHTML = `
+    <div>
+      <strong>Editing generated report</strong>
+      <span>Order No. ${escapeGeneratedReportHtml_(report.orderNumber || "—")} · Saving will create a new revision document.</span>
+    </div>
+    <button type="button">Exit edit mode</button>
+  `;
+
+  banner.querySelector("button").addEventListener("click", () => {
+    Stage1ReportEditorState.sourceReport = null;
+    banner.remove();
+    closeReassignmentWorkspace_();
+  });
+
+  header.insertAdjacentElement("afterend", banner);
+}
+
+function injectStage1ReportEditorStyles_() {
+  if (document.getElementById("stage1ReportEditorStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "stage1ReportEditorStyles";
+  style.textContent = `
+    .stage1-edit-report-button { white-space:nowrap; }
+    .stage1-revision-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:12px 18px 0; padding:12px 14px; border:1px solid rgba(142,105,0,.25); border-radius:14px; background:#fff9cf; color:#423600; }
+    .stage1-revision-banner div { display:grid; gap:3px; }
+    .stage1-revision-banner strong { font-size:13px; }
+    .stage1-revision-banner span { font-size:11px; opacity:.8; }
+    .stage1-revision-banner button { min-height:34px; padding:7px 11px; border:1px solid rgba(66,54,0,.2); border-radius:10px; background:#fff; color:inherit; font:inherit; font-weight:800; cursor:pointer; white-space:nowrap; }
+  `;
+  document.head.appendChild(style);
+}
