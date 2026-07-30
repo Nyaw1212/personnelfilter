@@ -1,5 +1,5 @@
 //----------------------------------
-// Reassignment Workspace Clear Control
+// Reassignment Workspace Remove Controls
 //----------------------------------
 
 document.addEventListener(
@@ -17,53 +17,54 @@ function initializeReassignmentWorkspaceClear_() {
       return false;
     }
 
-    if (document.getElementById(
+    let button = document.getElementById(
       "clearAllSelectedPersonnelButton"
-    )) {
-      return true;
-    }
-
-    const button = document.createElement("button");
-    button.id = "clearAllSelectedPersonnelButton";
-    button.type = "button";
-    button.className = "button button-secondary";
-    button.textContent = "Clear All Selected";
-    button.title = "Remove all personnel from this reassignment report";
-
-    button.addEventListener(
-      "click",
-      clearAllSelectedPersonnel_
     );
 
-    const clearFiltersButton = [
-      ...actions.querySelectorAll("button"),
-    ].find(item =>
-      item.textContent.trim().toLowerCase() === "clear filters"
-    );
+    if (!button) {
+      button = document.createElement("button");
+      button.id = "clearAllSelectedPersonnelButton";
+      button.type = "button";
+      button.className = "button button-secondary reassignment-remove-all-button";
+      button.addEventListener(
+        "click",
+        clearAllSelectedPersonnel_
+      );
 
-    if (clearFiltersButton) {
-      actions.insertBefore(button, clearFiltersButton);
-    } else {
-      actions.appendChild(button);
+      const clearFiltersButton = [
+        ...actions.querySelectorAll("button"),
+      ].find(item =>
+        item.textContent.trim().toLowerCase() === "clear filters"
+      );
+
+      if (clearFiltersButton) {
+        actions.insertBefore(button, clearFiltersButton);
+      } else {
+        actions.appendChild(button);
+      }
     }
+
+    button.textContent = "Remove All";
+    button.title = "Remove every personnel from this reassignment report";
 
     return true;
   };
 
-  if (attach()) {
-    return;
+  if (!attach()) {
+    const observer = new MutationObserver(() => {
+      if (attach()) {
+        observer.disconnect();
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
   }
 
-  const observer = new MutationObserver(() => {
-    if (attach()) {
-      observer.disconnect();
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  patchReassignmentSourcePersonnelRemoval_();
+  injectReassignmentRemovalStyles_();
 }
 
 function clearAllSelectedPersonnel_() {
@@ -74,7 +75,7 @@ function clearAllSelectedPersonnel_() {
   }
 
   if (!confirm(
-    `Remove all ${total} selected personnel from this reassignment report?`
+    `Remove all ${total} personnel from this reassignment report?`
   )) {
     return;
   }
@@ -83,6 +84,22 @@ function clearAllSelectedPersonnel_() {
   ReassignmentState.assignments.clear();
   ReassignmentState.selectedKeys.clear();
 
+  persistReassignmentRemovalChanges_();
+}
+
+function removePersonnelFromReassignment_(key) {
+  if (!PersonnelState.aoCart.has(key)) {
+    return;
+  }
+
+  PersonnelState.aoCart.delete(key);
+  ReassignmentState.assignments.delete(key);
+  ReassignmentState.selectedKeys.delete(key);
+
+  persistReassignmentRemovalChanges_();
+}
+
+function persistReassignmentRemovalChanges_() {
   if (typeof saveAoCart_ === "function") {
     saveAoCart_();
   }
@@ -106,4 +123,125 @@ function clearAllSelectedPersonnel_() {
   if (typeof renderReassignmentWorkspace_ === "function") {
     renderReassignmentWorkspace_();
   }
+}
+
+function patchReassignmentSourcePersonnelRemoval_() {
+  renderSourcePersonnel_ = function(entries) {
+    const list = document.getElementById(
+      "reassignmentSourceList"
+    );
+
+    list.replaceChildren();
+
+    if (!entries.length) {
+      list.appendChild(
+        makeText_("div", "No personnel match the filters.")
+      );
+      return;
+    }
+
+    entries.forEach(([key, person]) => {
+      const row = makeElement_(
+        "div",
+        "reassignment-person-row"
+      );
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked =
+        ReassignmentState.selectedKeys.has(key);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          ReassignmentState.selectedKeys.add(key);
+        } else {
+          ReassignmentState.selectedKeys.delete(key);
+        }
+
+        updateReassignmentControls_(
+          PersonnelState.aoCart.size
+        );
+      });
+
+      const details = document.createElement("div");
+      details.className = "reassignment-person-details";
+      details.append(
+        makeText_(
+          "strong",
+          [person.rank, person.fullName]
+            .filter(Boolean)
+            .join(" ")
+        ),
+        makeText_(
+          "small",
+          person.office || "No current office"
+        )
+      );
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "reassignment-source-remove-button";
+      remove.textContent = "×";
+      remove.title = "Remove this personnel from the report";
+      remove.setAttribute(
+        "aria-label",
+        `Remove ${person.fullName || "personnel"}`
+      );
+      remove.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        removePersonnelFromReassignment_(key);
+      });
+
+      row.append(checkbox, details, remove);
+      list.appendChild(row);
+    });
+  };
+}
+
+function injectReassignmentRemovalStyles_() {
+  if (document.getElementById("reassignmentRemovalStyles")) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "reassignmentRemovalStyles";
+  style.textContent = `
+    .reassignment-person-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .reassignment-person-details {
+      min-width: 0;
+      display: grid;
+    }
+
+    .reassignment-source-remove-button {
+      width: 30px;
+      height: 30px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid rgba(153, 39, 39, .2);
+      border-radius: 999px;
+      background: #fff5f5;
+      color: #a32626;
+      font: inherit;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .reassignment-source-remove-button:hover {
+      border-color: #a32626;
+      background: #ffe4e4;
+    }
+
+    .reassignment-remove-all-button {
+      color: #8b2020;
+    }
+  `;
+
+  document.head.appendChild(style);
 }
