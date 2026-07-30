@@ -1,0 +1,12 @@
+{
+  "name": "personnelfilter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local development and tests for the Personnel Filter Apps Script web app",
+  "scripts": {
+    "test": "node tests/report-generator.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
