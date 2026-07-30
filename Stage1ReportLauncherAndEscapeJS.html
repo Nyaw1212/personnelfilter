@@ -11,6 +11,15 @@
   const DRAFT_STORAGE_KEY =
     "personnelFilterReassignmentWorkspaceDraftV1";
 
+  function makeButton_(label, action, className) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.dataset.action = action;
+    button.className = className;
+    return button;
+  }
+
   function ensureLauncherDialog_() {
     if (document.getElementById(ids.dialog)) return;
 
@@ -41,15 +50,51 @@
     const backdrop = document.getElementById(ids.backdrop);
     const hasDraft = Boolean(readWorkspaceDraft_());
 
-    dialog.innerHTML = `
-      <span>REPORT GENERATOR</span>
-      <h2 id="stage1MainReportChoiceTitle">Choose Report Session</h2>
-      <p>Start clean with the personnel currently selected, or continue the reassignment workspace you closed earlier.</p>
-      <button type="button" data-action="NEW" class="button button-primary">New Report</button>
-      <button type="button" data-action="EXISTING" class="button button-secondary" ${hasDraft ? "" : "disabled"}>Continue Existing Report</button>
-      <button type="button" data-action="CANCEL" class="button button-ghost">Cancel</button>
-      <small class="stage1-launcher-hint">Esc closes the current window</small>
-    `;
+    dialog.replaceChildren();
+
+    const eyebrow = document.createElement("span");
+    eyebrow.textContent = "REPORT GENERATOR";
+
+    const title = document.createElement("h2");
+    title.id = "stage1MainReportChoiceTitle";
+    title.textContent = "Choose Report Session";
+
+    const description = document.createElement("p");
+    description.textContent =
+      "Start clean with the personnel currently selected, or continue the reassignment workspace you closed earlier.";
+
+    const newButton = makeButton_(
+      "New Report",
+      "NEW",
+      "button button-primary"
+    );
+
+    const existingButton = makeButton_(
+      "Continue Existing Report",
+      "EXISTING",
+      "button button-secondary"
+    );
+    existingButton.disabled = !hasDraft;
+
+    const cancelButton = makeButton_(
+      "Cancel",
+      "CANCEL",
+      "button button-ghost"
+    );
+
+    const hint = document.createElement("small");
+    hint.className = "stage1-launcher-hint";
+    hint.textContent = "Esc closes the current window";
+
+    dialog.append(
+      eyebrow,
+      title,
+      description,
+      newButton,
+      existingButton,
+      cancelButton,
+      hint
+    );
 
     dialog.querySelectorAll("button[data-action]").forEach(button => {
       button.addEventListener("click", () => {
@@ -58,10 +103,7 @@
 
         if (action === "NEW") {
           startCleanReportSession_();
-          return;
-        }
-
-        if (action === "EXISTING") {
+        } else if (action === "EXISTING") {
           continueExistingReportSession_();
         }
       });
@@ -69,10 +111,7 @@
 
     backdrop.hidden = false;
     dialog.hidden = false;
-    window.setTimeout(
-      () => dialog.querySelector('[data-action="NEW"]')?.focus(),
-      0
-    );
+    window.setTimeout(() => newButton.focus(), 0);
   }
 
   function closeLauncherDialog_() {
@@ -83,8 +122,6 @@
   }
 
   function startCleanReportSession_() {
-    // Keep the AO cart because it is the personnel currently selected
-    // in the main Personnel Table. Clear only prior workspace progress.
     ReassignmentState.activeOffice = "";
     ReassignmentState.assignments = new Map();
     ReassignmentState.selectedKeys = new Set();
@@ -129,8 +166,7 @@
     ReassignmentState.selectedKeys = new Set(
       draft.selectedKeys || []
     );
-    ReassignmentState.activeOffice =
-      draft.activeOffice || "";
+    ReassignmentState.activeOffice = draft.activeOffice || "";
     ReassignmentState.filters = {
       search: "",
       rank: "",
@@ -183,7 +219,8 @@
 
   function saveWorkspaceDraft_() {
     try {
-      if (!PersonnelState || !ReassignmentState) return;
+      if (typeof PersonnelState === "undefined" ||
+          typeof ReassignmentState === "undefined") return;
 
       const draft = {
         aoCart: [...PersonnelState.aoCart.entries()],
@@ -212,7 +249,9 @@
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
       if (!raw) return null;
       const draft = JSON.parse(raw);
-      return Array.isArray(draft?.aoCart) ? draft : null;
+      return draft && Array.isArray(draft.aoCart)
+        ? draft
+        : null;
     } catch (error) {
       console.warn("Unable to read workspace draft:", error);
       return null;
@@ -222,6 +261,11 @@
   function isOpen_(element) {
     if (!element || element.hidden) return false;
     return window.getComputedStyle(element).display !== "none";
+  }
+
+  function hideElement_(id) {
+    const element = document.getElementById(id);
+    if (element) element.hidden = true;
   }
 
   function closeTopmostDialog_() {
@@ -238,10 +282,8 @@
       if (typeof closeGeneratedReportPreview_ === "function") {
         closeGeneratedReportPreview_();
       } else {
-        quickPreview.hidden = true;
-        document.getElementById(
-          "generatedReportPreviewBackdrop"
-        )?.setAttribute("hidden", "");
+        hideElement_("generatedReportPreviewDialog");
+        hideElement_("generatedReportPreviewBackdrop");
       }
       return true;
     }
@@ -253,10 +295,8 @@
       if (typeof closeGeneratedReportsDialog_ === "function") {
         closeGeneratedReportsDialog_();
       } else {
-        generatedReports.hidden = true;
-        document.getElementById(
-          "generatedReportsBackdrop"
-        )?.setAttribute("hidden", "");
+        hideElement_("generatedReportsDialog");
+        hideElement_("generatedReportsBackdrop");
       }
       return true;
     }
@@ -268,7 +308,8 @@
       if (typeof closeReassignmentGenerateDialog_ === "function") {
         closeReassignmentGenerateDialog_();
       } else {
-        generateDialog.hidden = true;
+        hideElement_("reassignmentGenerateDialog");
+        hideElement_("reassignmentGenerateBackdrop");
       }
       return true;
     }
@@ -280,11 +321,8 @@
       if (typeof closeReportTypeDialog_ === "function") {
         closeReportTypeDialog_();
       } else {
-        reportType.hidden = true;
-        const backdrop = document.getElementById(
-          "reportTypeBackdrop"
-        );
-        if (backdrop) backdrop.hidden = true;
+        hideElement_("reportTypeDialog");
+        hideElement_("reportTypeBackdrop");
       }
       return true;
     }
@@ -297,7 +335,7 @@
       if (typeof closeReassignmentWorkspace_ === "function") {
         closeReassignmentWorkspace_();
       } else {
-        workspace.hidden = true;
+        hideElement_("reassignmentWorkspace");
       }
       return true;
     }
@@ -343,15 +381,10 @@
   }
 
   const style = document.createElement("style");
-  style.textContent = `
-    .stage1-launcher-hint {
-      display:block;
-      margin-top:2px;
-      text-align:center;
-      opacity:.62;
-      font-size:11px;
-    }
-  `;
+  style.textContent =
+    ".stage1-launcher-hint{" +
+    "display:block;margin-top:2px;text-align:center;" +
+    "opacity:.62;font-size:11px;}";
   document.head.appendChild(style);
 
   if (document.readyState === "loading") {
