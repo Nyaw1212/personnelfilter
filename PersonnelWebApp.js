@@ -116,9 +116,19 @@ function include(
       .createHtmlOutputFromFile("ReassignmentLayoutChoiceJS")
       .getContent();
 
-    // Transfer Queue loads last so it captures the final report payload.
+    // Transfer Queue captures the final report payload.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("TransferQueueJS")
+      .getContent();
+
+    // Queue cancellation extends the Transfer Queue controls.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("TransferQueueCancelPatchJS")
+      .getContent();
+
+    // New reports receive today's date; edited reports retain their date.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentTodayDatePatchJS")
       .getContent();
   }
 
