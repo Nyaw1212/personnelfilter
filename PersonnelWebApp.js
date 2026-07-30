@@ -90,6 +90,10 @@ function include(
       .createHtmlOutputFromFile("AOSelectionBulkControlsJS")
       .getContent();
 
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("Stage1WorkflowUXJS")
+      .getContent();
+
     // Loaded last so performance overrides apply after all feature patches.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("PerformanceClientJS")
