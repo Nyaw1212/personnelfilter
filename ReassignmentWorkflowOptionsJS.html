@@ -1,0 +1,459 @@
+//----------------------------------
+// Reassignment workflow options
+//----------------------------------
+
+(function () {
+  const STORAGE_KEY = "personnelFilterReassignmentWorkflowOptionsV1";
+  const CAMP_VALUES = ["NBP", "MAXIMUM", "MEDIUM", "MINIMUM", "RDC"];
+
+  const WorkflowState = {
+    transferType: "OFFICE_TO_OFFICE",
+    sortMode: "LIST",
+    manualOrder: [],
+  };
+
+  function normalize_(value) {
+    return String(value || "").trim();
+  }
+
+  function key_(value) {
+    return normalize_(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function recordValue_(record, names) {
+    for (const name of names) {
+      const value = record?.[name];
+      if (value !== undefined && value !== null && normalize_(value)) {
+        return normalize_(value);
+      }
+    }
+    return "";
+  }
+
+  function completeName_(person) {
+    const record = person?.record || person || {};
+    const rank = recordValue_(record, ["RANK", "Rank", "rank"]) || normalize_(person?.rank);
+    const first = recordValue_(record, ["FIRST NAME", "FIRST_NAME", "First Name", "firstName"]);
+    const middle = recordValue_(record, ["MIDDLE NAME", "MIDDLE_NAME", "Middle Name", "middleName"]);
+    const last = recordValue_(record, ["LAST NAME", "LAST_NAME", "Last Name", "lastName"]);
+    const suffix = recordValue_(record, ["SUFFIX", "Suffix", "suffix"]);
+
+    // LIST columns: G = Rank, I = First Name, J = Middle Name, H = Last Name.
+    const composed = [first, middle, last, suffix].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    const fallback = normalize_(person?.fullName) || recordValue_(record, ["FULL NAME", "Full Name", "fullName"]);
+
+    return {
+      rank,
+      fullName: composed || fallback,
+      lastName: last || (fallback.split(/\s+/).pop() || ""),
+    };
+  }
+
+  function loadState_() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      WorkflowState.transferType = saved.transferType || WorkflowState.transferType;
+      WorkflowState.sortMode = saved.sortMode || WorkflowState.sortMode;
+      WorkflowState.manualOrder = Array.isArray(saved.manualOrder) ? saved.manualOrder : [];
+    } catch (error) {
+      console.warn("Unable to load reassignment workflow options:", error);
+    }
+  }
+
+  function saveState_() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(WorkflowState));
+  }
+
+  function allOffices_() {
+    const values = new Set();
+    (Array.isArray(PersonnelState?.records) ? PersonnelState.records : []).forEach(record => {
+      const office = recordValue_(record, ["Office", "OFFICE", "office"]);
+      if (office) values.add(office);
+    });
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function ensureControls_() {
+    const panel = document.querySelector(".reassignment-destination-panel");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    if (!panel || !officeContainer) return false;
+
+    if (!document.getElementById("reassignmentTransferType")) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "reassignment-workflow-option-block";
+      wrapper.innerHTML = `
+        <label>Transfer Type</label>
+        <div class="reassignment-segmented" id="reassignmentTransferType">
+          <button type="button" data-transfer-type="CAMP_TO_CAMP">Camp to Camp</button>
+          <button type="button" data-transfer-type="OFFICE_TO_OFFICE">Office to Office</button>
+        </div>
+      `;
+      panel.insertBefore(wrapper, panel.querySelector(".destination-group-label") || officeContainer);
+      wrapper.addEventListener("click", event => {
+        const button = event.target.closest("[data-transfer-type]");
+        if (!button) return;
+        WorkflowState.transferType = button.dataset.transferType;
+        ReassignmentState.activeOffice = "";
+        ReassignmentState.activeCamp = "";
+        saveState_();
+        if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+        renderDestinationOptions_();
+        if (typeof updateReassignmentControls_ === "function") updateReassignmentControls_(PersonnelState.aoCart.size);
+      });
+    }
+
+    const resultsHeader = document.querySelector(".reassignment-results-header");
+    if (resultsHeader && !document.getElementById("reassignmentSortMode")) {
+      const sort = document.createElement("select");
+      sort.id = "reassignmentSortMode";
+      sort.className = "reassignment-sort-select";
+      sort.innerHTML = `
+        <option value="LIST">Sort by LIST sequence</option>
+        <option value="RANK">Sort by Rank</option>
+        <option value="RANK_LAST_NAME">Sort by Rank and Last Name</option>
+        <option value="SELECTED">As Selected</option>
+        <option value="MANUAL">Freehand / Dragged Order</option>
+      `;
+      sort.value = WorkflowState.sortMode;
+      sort.addEventListener("change", () => {
+        WorkflowState.sortMode = sort.value;
+        saveState_();
+        if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+      });
+      resultsHeader.appendChild(sort);
+    }
+
+    return true;
+  }
+
+  function renderDestinationOptions_() {
+    ensureControls_();
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    const campLabel = campContainer?.previousElementSibling;
+    const officeLabel = officeContainer?.previousElementSibling;
+    const transferButtons = document.querySelectorAll("#reassignmentTransferType [data-transfer-type]");
+
+    transferButtons.forEach(button => {
+      button.classList.toggle("is-active", button.dataset.transferType === WorkflowState.transferType);
+    });
+
+    if (campContainer) {
+      campContainer.hidden = WorkflowState.transferType !== "CAMP_TO_CAMP";
+      if (campLabel?.classList.contains("destination-group-label")) campLabel.hidden = campContainer.hidden;
+      campContainer.replaceChildren();
+      if (!campContainer.hidden) {
+        CAMP_VALUES.forEach(camp => {
+          campContainer.appendChild(makeChip_(camp, normalize_(ReassignmentState.activeCamp) === camp, () => {
+            ReassignmentState.activeCamp = camp;
+            ReassignmentState.activeOffice = "";
+            if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+            renderDestinationOptions_();
+          }));
+        });
+      }
+    }
+
+    if (officeContainer) {
+      officeContainer.hidden = WorkflowState.transferType !== "OFFICE_TO_OFFICE";
+      if (officeLabel?.classList.contains("destination-group-label")) officeLabel.hidden = officeContainer.hidden;
+      officeContainer.replaceChildren();
+      if (!officeContainer.hidden) {
+        allOffices_().forEach(office => {
+          officeContainer.appendChild(makeChip_(office, normalize_(ReassignmentState.activeOffice) === office, () => {
+            ReassignmentState.activeOffice = office;
+            ReassignmentState.activeCamp = "";
+            if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+            renderDestinationOptions_();
+          }));
+        });
+      }
+    }
+  }
+
+  function normalizeAssignment_(raw) {
+    if (raw && typeof raw === "object") {
+      return {
+        office: normalize_(raw.office),
+        camp: normalize_(raw.camp),
+        mode: normalize_(raw.mode),
+      };
+    }
+    return WorkflowState.transferType === "CAMP_TO_CAMP"
+      ? { office: "", camp: normalize_(raw), mode: "CAMP_TO_CAMP" }
+      : { office: normalize_(raw), camp: "", mode: "OFFICE_TO_OFFICE" };
+  }
+
+  function selectedDestination_() {
+    if (WorkflowState.transferType === "CAMP_TO_CAMP") {
+      const camp = normalize_(ReassignmentState.activeCamp);
+      return camp ? { office: "", camp, mode: "CAMP_TO_CAMP" } : null;
+    }
+    const office = normalize_(ReassignmentState.activeOffice);
+    return office ? { office, camp: "", mode: "OFFICE_TO_OFFICE" } : null;
+  }
+
+  function patchAssignmentButtons_() {
+    document.addEventListener("click", event => {
+      const selectedButton = event.target.closest("#assignSelectedButton");
+      const visibleButton = event.target.closest("#assignAllVisibleButton");
+      if (!selectedButton && !visibleButton) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const destination = selectedDestination_();
+      if (!destination) {
+        alert(WorkflowState.transferType === "CAMP_TO_CAMP"
+          ? "Choose a destination Camp first."
+          : "Choose a destination Office first.");
+        return;
+      }
+
+      let keys = [...ReassignmentState.selectedKeys];
+      if (visibleButton) {
+        const entries = [...PersonnelState.aoCart.entries()].filter(([key]) => !ReassignmentState.assignments.has(key));
+        const visible = typeof filterUnassigned_ === "function" ? filterUnassigned_(entries) : entries;
+        keys = visible.map(([key]) => key);
+      }
+
+      keys.forEach(key => {
+        if (PersonnelState.aoCart.has(key)) {
+          ReassignmentState.assignments.set(key, { ...destination });
+          if (!WorkflowState.manualOrder.includes(key)) WorkflowState.manualOrder.push(key);
+        }
+      });
+      ReassignmentState.selectedKeys.clear();
+      saveState_();
+      if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+      if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+    }, true);
+  }
+
+  function orderedKeys_() {
+    const assignedKeys = [...ReassignmentState.assignments.keys()];
+    const selectedOrder = [...PersonnelState.aoCart.keys()].filter(key => assignedKeys.includes(key));
+    const listRecords = Array.isArray(PersonnelState.records) ? PersonnelState.records : [];
+
+    const listIndex = key => {
+      const person = PersonnelState.aoCart.get(key);
+      if (!person) return Number.MAX_SAFE_INTEGER;
+      const name = completeName_(person);
+      const office = normalize_(person.office || person.record?.Office || person.record?.OFFICE);
+      const index = listRecords.findIndex(record => {
+        const candidate = completeName_({ record, fullName: record["FULL NAME"], rank: record.RANK });
+        const candidateOffice = recordValue_(record, ["Office", "OFFICE", "office"]);
+        return key_(candidate.fullName) === key_(name.fullName) && (!office || key_(candidateOffice) === key_(office));
+      });
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
+
+    const rankValue = key => completeName_(PersonnelState.aoCart.get(key)).rank;
+    const lastNameValue = key => completeName_(PersonnelState.aoCart.get(key)).lastName;
+
+    if (WorkflowState.sortMode === "SELECTED") return selectedOrder;
+    if (WorkflowState.sortMode === "MANUAL") {
+      const order = WorkflowState.manualOrder.filter(key => assignedKeys.includes(key));
+      assignedKeys.forEach(key => { if (!order.includes(key)) order.push(key); });
+      return order;
+    }
+
+    return assignedKeys.sort((a, b) => {
+      if (WorkflowState.sortMode === "LIST") return listIndex(a) - listIndex(b);
+      const rankCompare = rankValue(a).localeCompare(rankValue(b), undefined, { numeric: true, sensitivity: "base" });
+      if (rankCompare) return rankCompare;
+      if (WorkflowState.sortMode === "RANK_LAST_NAME") {
+        return lastNameValue(a).localeCompare(lastNameValue(b), undefined, { sensitivity: "base" });
+      }
+      return 0;
+    });
+  }
+
+  function editAssignment_(key) {
+    const person = PersonnelState.aoCart.get(key);
+    if (!person) return;
+    const raw = ReassignmentState.assignments.get(key);
+    const current = normalizeAssignment_(raw);
+    const isCamp = current.mode === "CAMP_TO_CAMP" || Boolean(current.camp && !current.office);
+    const options = isCamp ? CAMP_VALUES : allOffices_();
+    const currentValue = isCamp ? current.camp : current.office;
+    const chosen = window.prompt(
+      `Change destination for ${completeName_(person).fullName}\n\nAvailable ${isCamp ? "camps" : "offices"}:\n${options.join(", ")}`,
+      currentValue
+    );
+    if (chosen === null) return;
+    const clean = normalize_(chosen);
+    if (!clean) return;
+    ReassignmentState.assignments.set(key, isCamp
+      ? { office: "", camp: clean, mode: "CAMP_TO_CAMP" }
+      : { office: clean, camp: "", mode: "OFFICE_TO_OFFICE" });
+    if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+    if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+  }
+
+  function renderAssignmentCardsPatched_() {
+    const grid = document.getElementById("assignmentCardGrid");
+    if (!grid) return;
+    grid.replaceChildren();
+    const keys = orderedKeys_();
+    if (!keys.length) {
+      grid.appendChild(makeText_("div", "No personnel assigned yet."));
+      return;
+    }
+
+    keys.forEach(key => {
+      const person = PersonnelState.aoCart.get(key);
+      if (!person) return;
+      const destination = normalizeAssignment_(ReassignmentState.assignments.get(key));
+      const name = completeName_(person);
+      const card = document.createElement("article");
+      card.className = "assignment-card assignment-card-draggable";
+      card.draggable = true;
+      card.dataset.personKey = key;
+      card.innerHTML = `
+        <div class="assignment-drag-handle" title="Drag to reorder">⋮⋮</div>
+        <div class="assignment-edit-details">
+          <strong></strong>
+          <small></small>
+        </div>
+        <button type="button" data-edit title="Change destination">Change</button>
+        <button type="button" data-remove title="Return to unassigned list">×</button>
+      `;
+      card.querySelector("strong").textContent = [name.rank, name.fullName].filter(Boolean).join(" ");
+      card.querySelector("small").textContent = destination.office
+        ? `Office to Office → ${destination.office}`
+        : `Camp to Camp → ${destination.camp}`;
+      card.querySelector("[data-edit]").addEventListener("click", () => editAssignment_(key));
+      card.querySelector("[data-remove]").addEventListener("click", () => {
+        ReassignmentState.assignments.delete(key);
+        WorkflowState.manualOrder = WorkflowState.manualOrder.filter(item => item !== key);
+        saveState_();
+        if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+        if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+      });
+
+      card.addEventListener("dragstart", event => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", key);
+        card.classList.add("is-dragging");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("is-dragging"));
+      card.addEventListener("dragover", event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      });
+      card.addEventListener("drop", event => {
+        event.preventDefault();
+        const draggedKey = event.dataTransfer.getData("text/plain");
+        if (!draggedKey || draggedKey === key) return;
+        const order = orderedKeys_().filter(item => item !== draggedKey);
+        const targetIndex = order.indexOf(key);
+        order.splice(targetIndex, 0, draggedKey);
+        WorkflowState.manualOrder = order;
+        WorkflowState.sortMode = "MANUAL";
+        const sort = document.getElementById("reassignmentSortMode");
+        if (sort) sort.value = "MANUAL";
+        saveState_();
+        renderAssignmentCardsPatched_();
+      });
+      grid.appendChild(card);
+    });
+  }
+
+  function patchRendering_() {
+    window.renderDestinationChips_ = function () {
+      renderDestinationOptions_();
+    };
+    window.renderAssignmentCards_ = function () {
+      renderAssignmentCardsPatched_();
+    };
+  }
+
+  function patchControls_() {
+    if (typeof window.updateReassignmentControls_ !== "function" || window.updateReassignmentControls_.workflowOptionsPatched) return;
+    const original = window.updateReassignmentControls_;
+    function patched(total) {
+      original.apply(this, arguments);
+      const validDestination = WorkflowState.transferType === "CAMP_TO_CAMP"
+        ? Boolean(normalize_(ReassignmentState.activeCamp))
+        : Boolean(normalize_(ReassignmentState.activeOffice));
+      const selected = document.getElementById("assignSelectedButton");
+      const visible = document.getElementById("assignAllVisibleButton");
+      if (selected) selected.disabled = !validDestination || !ReassignmentState.selectedKeys.size;
+      if (visible) visible.disabled = !validDestination;
+    }
+    patched.workflowOptionsPatched = true;
+    window.updateReassignmentControls_ = patched;
+  }
+
+  function patchPayload_() {
+    if (typeof window.buildReassignmentGeneratePayload_ !== "function" || window.buildReassignmentGeneratePayload_.workflowOptionsPatched) return false;
+    const original = window.buildReassignmentGeneratePayload_;
+    function patched() {
+      const payload = original.apply(this, arguments);
+      payload.transferType = WorkflowState.transferType;
+      payload.sortMode = WorkflowState.sortMode;
+      payload.personnel = orderedKeys_().map(key => {
+        const person = PersonnelState.aoCart.get(key);
+        const destination = normalizeAssignment_(ReassignmentState.assignments.get(key));
+        const name = completeName_(person);
+        const currentOffice = normalize_(person?.office || person?.record?.Office || person?.record?.OFFICE);
+        const currentCamp = normalize_(person?.camp || person?.record?.CAMP || person?.record?.Camp);
+        const campMode = destination.mode === "CAMP_TO_CAMP" || Boolean(destination.camp && !destination.office);
+        return {
+          rank: name.rank,
+          fullName: name.fullName,
+          lastName: name.lastName,
+          from: campMode ? currentCamp : currentOffice,
+          to: campMode ? destination.camp : destination.office,
+          fromOffice: currentOffice,
+          fromCamp: currentCamp,
+          toOffice: destination.office,
+          toCamp: destination.camp,
+          transferMode: campMode ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE",
+          notes: "",
+        };
+      });
+      return payload;
+    }
+    patched.workflowOptionsPatched = true;
+    window.buildReassignmentGeneratePayload_ = patched;
+    return true;
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("reassignmentWorkflowOptionsStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentWorkflowOptionsStyles";
+    style.textContent = `
+      .reassignment-workflow-option-block{margin:12px 0}.reassignment-workflow-option-block>label{display:block;margin-bottom:6px;color:#235b31;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+      .reassignment-segmented{display:grid;grid-template-columns:1fr 1fr;gap:7px}.reassignment-segmented button{padding:9px;border:1px solid rgba(31,111,52,.24);border-radius:10px;background:#fff;cursor:pointer}.reassignment-segmented button.is-active{background:#245f34;color:#fff;border-color:#245f34}
+      .reassignment-sort-select{min-height:38px;padding:7px 10px;border:1px solid rgba(31,111,52,.24);border-radius:10px;background:#fff}
+      .assignment-card-draggable{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:10px;cursor:grab}.assignment-card-draggable.is-dragging{opacity:.45}.assignment-drag-handle{font-weight:900;color:#62806a;cursor:grab;user-select:none}.assignment-edit-details{min-width:0}.assignment-edit-details strong,.assignment-edit-details small{display:block}.assignment-edit-details small{margin-top:3px;color:#617065}.assignment-card-draggable button{min-height:34px;padding:5px 9px;border:1px solid rgba(31,111,52,.2);border-radius:9px;background:#fff;cursor:pointer}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function install_() {
+    loadState_();
+    if (!("activeCamp" in ReassignmentState)) ReassignmentState.activeCamp = "";
+    ensureControls_();
+    patchRendering_();
+    patchControls_();
+    patchAssignmentButtons_();
+    patchPayload_();
+    injectStyles_();
+    if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+
+    const observer = new MutationObserver(() => {
+      ensureControls_();
+      patchPayload_();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
