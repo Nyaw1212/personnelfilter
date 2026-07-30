@@ -1,0 +1,257 @@
+//----------------------------------
+// Stage 1 Runtime Fix
+//----------------------------------
+
+(function () {
+  const history = {
+    undo: [],
+    redo: [],
+    limit: 20,
+    restoring: false,
+  };
+
+  function isWorkspaceOpen() {
+    const workspace = document.getElementById("reassignmentWorkspace");
+    return Boolean(workspace && !workspace.hidden);
+  }
+
+  function snapshot() {
+    return {
+      aoCart: [...PersonnelState.aoCart.entries()],
+      assignments: [...ReassignmentState.assignments.entries()],
+      selectedKeys: [...ReassignmentState.selectedKeys],
+      activeOffice: ReassignmentState.activeOffice || "",
+      filters: { ...(ReassignmentState.filters || {}) },
+    };
+  }
+
+  function record() {
+    if (history.restoring) return;
+    history.undo.push(snapshot());
+    if (history.undo.length > history.limit) history.undo.shift();
+    history.redo.length = 0;
+    updateButtons();
+  }
+
+  function restore(state) {
+    if (!state) return;
+    history.restoring = true;
+
+    PersonnelState.aoCart = new Map(state.aoCart || []);
+    ReassignmentState.assignments = new Map(state.assignments || []);
+    ReassignmentState.selectedKeys = new Set(state.selectedKeys || []);
+    ReassignmentState.activeOffice = state.activeOffice || "";
+    ReassignmentState.filters = {
+      search: "",
+      rank: "",
+      office: "",
+      camp: "",
+      ...(state.filters || {}),
+    };
+
+    if (typeof saveAoCart_ === "function") saveAoCart_();
+    if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+    if (typeof updateAoCartCount_ === "function") updateAoCartCount_();
+    if (typeof updateReportGeneratorButton_ === "function") updateReportGeneratorButton_();
+    if (typeof renderPreviewTable === "function") renderPreviewTable();
+    if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+
+    history.restoring = false;
+    updateButtons();
+  }
+
+  function undo() {
+    if (!history.undo.length) return;
+    history.redo.push(snapshot());
+    restore(history.undo.pop());
+  }
+
+  function redo() {
+    if (!history.redo.length) return;
+    history.undo.push(snapshot());
+    restore(history.redo.pop());
+  }
+
+  function updateButtons() {
+    const undoButton = document.getElementById("stage1RuntimeUndoButton");
+    const redoButton = document.getElementById("stage1RuntimeRedoButton");
+    if (undoButton) undoButton.disabled = history.undo.length === 0;
+    if (redoButton) redoButton.disabled = history.redo.length === 0;
+  }
+
+  function ensureHistoryButtons() {
+    const actions = document.querySelector(".reassignment-header-actions");
+    if (!actions || document.getElementById("stage1RuntimeUndoButton")) return;
+
+    // Remove older non-working controls when present.
+    document.getElementById("stage1UndoButton")?.remove();
+    document.getElementById("stage1RedoButton")?.remove();
+
+    const undoButton = document.createElement("button");
+    undoButton.id = "stage1RuntimeUndoButton";
+    undoButton.type = "button";
+    undoButton.className = "stage1-history-button";
+    undoButton.textContent = "↶ Undo";
+    undoButton.title = "Undo last workspace action (Ctrl+Z)";
+    undoButton.addEventListener("click", undo);
+
+    const redoButton = document.createElement("button");
+    redoButton.id = "stage1RuntimeRedoButton";
+    redoButton.type = "button";
+    redoButton.className = "stage1-history-button";
+    redoButton.textContent = "↷ Redo";
+    redoButton.title = "Redo last undone action (Ctrl+U)";
+    redoButton.addEventListener("click", redo);
+
+    const backButton = actions.lastElementChild;
+    actions.insertBefore(undoButton, backButton || null);
+    actions.insertBefore(redoButton, backButton || null);
+    updateButtons();
+  }
+
+  function isEditableTarget(target) {
+    if (!target) return false;
+    const tag = String(target.tagName || "").toLowerCase();
+    return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+  }
+
+  function isMutatingWorkspaceClick(target) {
+    return Boolean(target.closest(
+      "#assignSelectedButton," +
+      "#assignAllVisibleButton," +
+      "#clearAllSelectedPersonnelButton," +
+      ".reassignment-source-remove-button," +
+      ".assignment-person button," +
+      ".reassignment-results-header button"
+    ));
+  }
+
+  function ensureChoiceDialog() {
+    if (document.getElementById("stage1RuntimeChoiceDialog")) return;
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "stage1RuntimeChoiceBackdrop";
+    backdrop.className = "stage1-save-backdrop";
+    backdrop.hidden = true;
+
+    const dialog = document.createElement("section");
+    dialog.id = "stage1RuntimeChoiceDialog";
+    dialog.className = "stage1-save-dialog";
+    dialog.hidden = true;
+
+    backdrop.addEventListener("click", closeChoiceDialog);
+    document.body.append(backdrop, dialog);
+  }
+
+  function closeChoiceDialog() {
+    const backdrop = document.getElementById("stage1RuntimeChoiceBackdrop");
+    const dialog = document.getElementById("stage1RuntimeChoiceDialog");
+    if (backdrop) backdrop.hidden = true;
+    if (dialog) dialog.hidden = true;
+  }
+
+  function openChoiceDialog() {
+    ensureChoiceDialog();
+
+    const dialog = document.getElementById("stage1RuntimeChoiceDialog");
+    const backdrop = document.getElementById("stage1RuntimeChoiceBackdrop");
+    const sourceReport = typeof Stage1ReportEditorState !== "undefined"
+      ? Stage1ReportEditorState.sourceReport
+      : null;
+    const editing = Boolean(sourceReport);
+
+    dialog.innerHTML = editing
+      ? `
+        <span>REPORT SAVE OPTION</span>
+        <h2>Edit Existing Report</h2>
+        <p>Keep the official order number unchanged. Revisions remain internal.</p>
+        <button type="button" data-action="UPDATE_EXISTING" class="button button-primary">Update Existing Report</button>
+        <button type="button" data-action="NEW_REVISION" class="button button-secondary">Save New Internal Revision</button>
+        <button type="button" data-action="CANCEL" class="button button-ghost">Cancel</button>
+      `
+      : `
+        <span>REPORT ACTION</span>
+        <h2>Generate Report</h2>
+        <p>Choose whether to create a new report or edit a generated report.</p>
+        <button type="button" data-action="NEW" class="button button-primary">New Report</button>
+        <button type="button" data-action="EDIT_EXISTING" class="button button-secondary">Edit Existing Report</button>
+        <button type="button" data-action="CANCEL" class="button button-ghost">Cancel</button>
+      `;
+
+    dialog.querySelectorAll("button[data-action]").forEach(button => {
+      button.addEventListener("click", () => handleChoice(button.dataset.action));
+    });
+
+    backdrop.hidden = false;
+    dialog.hidden = false;
+  }
+
+  function handleChoice(action) {
+    closeChoiceDialog();
+    if (!action || action === "CANCEL") return;
+
+    if (action === "EDIT_EXISTING") {
+      if (typeof closeReassignmentWorkspace_ === "function") closeReassignmentWorkspace_();
+      if (typeof openGeneratedReportsDialog_ === "function") openGeneratedReportsDialog_();
+      return;
+    }
+
+    if (typeof Stage1SaveState !== "undefined") {
+      Stage1SaveState.mode = action;
+    }
+
+    if (typeof openReassignmentGenerateDialog_ === "function") {
+      openReassignmentGenerateDialog_();
+    }
+  }
+
+  function install() {
+    ensureHistoryButtons();
+    ensureChoiceDialog();
+
+    // Capture phase records the state before existing click handlers mutate it.
+    document.addEventListener("click", event => {
+      if (!isWorkspaceOpen()) return;
+
+      const generateButton = event.target.closest(
+        ".reassignment-footer-actions .button-primary"
+      );
+
+      if (generateButton) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openChoiceDialog();
+        return;
+      }
+
+      if (isMutatingWorkspaceClick(event.target)) {
+        record();
+      }
+    }, true);
+
+    document.addEventListener("keydown", event => {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      if (!isWorkspaceOpen() || isEditableTarget(event.target)) return;
+
+      const key = String(event.key || "").toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        undo();
+      } else if (key === "u") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        redo();
+      }
+    }, true);
+
+    const observer = new MutationObserver(ensureHistoryButtons);
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => window.setTimeout(install, 0));
+  } else {
+    window.setTimeout(install, 0);
+  }
+})();
