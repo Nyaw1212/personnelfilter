@@ -156,6 +156,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentWorkflowOptionsJS")
       .getContent();
+
+    // Runtime safety fix for Step 3 sorting/rendering.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentWorkflowRenderHotfixJS")
+      .getContent();
   }
 
   return content;
