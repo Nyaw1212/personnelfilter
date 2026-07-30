@@ -1,0 +1,87 @@
+//----------------------------------
+// Step 1: Add More Personnel
+//----------------------------------
+
+(function () {
+  const BUTTON_ID = "reassignmentAddMorePersonnelButton";
+
+  function ensureButton_() {
+    if (document.getElementById(BUTTON_ID)) return;
+
+    const actions = document.querySelector(
+      "#reassignmentWorkspace .source-actions"
+    );
+    if (!actions) return;
+
+    const button = document.createElement("button");
+    button.id = BUTTON_ID;
+    button.type = "button";
+    button.className = "button button-secondary reassignment-add-personnel-button";
+    button.textContent = "+ Add More Personnel";
+    button.title = "Return to Personnel Filter and add more people to this report";
+
+    button.addEventListener("click", function () {
+      if (typeof saveAoCart_ === "function") {
+        try { saveAoCart_(); } catch (ignored) {}
+      }
+      if (typeof saveReassignmentState_ === "function") {
+        try { saveReassignmentState_(); } catch (ignored) {}
+      }
+
+      // Use the existing Back button so the workspace-draft handler also runs.
+      const backButton = Array.from(
+        document.querySelectorAll(
+          "#reassignmentWorkspace .reassignment-header-actions button"
+        )
+      ).find(function (candidate) {
+        return /back to personnel filter/i.test(
+          candidate.textContent || ""
+        );
+      });
+
+      if (backButton) {
+        backButton.click();
+      } else if (typeof closeReassignmentWorkspace_ === "function") {
+        closeReassignmentWorkspace_();
+      }
+    });
+
+    actions.appendChild(button);
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("reassignmentAddPersonnelStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "reassignmentAddPersonnelStyles";
+    style.textContent =
+      ".reassignment-add-personnel-button{" +
+      "min-height:38px;padding:8px 12px;white-space:nowrap;" +
+      "border:1px solid rgba(31,111,52,.25);" +
+      "border-radius:12px;background:#fff;color:#1f6f34;" +
+      "font-weight:800;cursor:pointer;}" +
+      ".reassignment-add-personnel-button:hover{" +
+      "background:#eef8ef;transform:translateY(-1px);}" +
+      "@media(max-width:900px){.source-actions{" +
+      "grid-template-columns:1fr!important;}" +
+      ".reassignment-add-personnel-button{width:100%;}}";
+    document.head.appendChild(style);
+  }
+
+  function install_() {
+    injectStyles_();
+    ensureButton_();
+
+    const observer = new MutationObserver(ensureButton_);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
