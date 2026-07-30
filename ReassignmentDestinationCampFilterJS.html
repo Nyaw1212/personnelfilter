@@ -1,5 +1,5 @@
 //----------------------------------
-// Step 2 Camp + Office destination filters
+// Step 2 independent Camp + Office destination options
 //----------------------------------
 
 (function () {
@@ -31,15 +31,6 @@
     return true;
   }
 
-  function getPersonCamp_(person) {
-    return String(
-      person?.camp ||
-      person?.record?.Camp ||
-      person?.record?.CAMP ||
-      ""
-    ).trim().toUpperCase();
-  }
-
   function renderCampChips_() {
     const container = document.getElementById("destinationCampChips");
     if (!container) return;
@@ -52,8 +43,8 @@
           camp,
           ReassignmentState.activeCamp === camp,
           () => {
-            ReassignmentState.activeCamp = camp;
-            ReassignmentState.activeOffice = "";
+            ReassignmentState.activeCamp =
+              ReassignmentState.activeCamp === camp ? "" : camp;
             saveReassignmentState_();
             renderReassignmentWorkspace_();
           }
@@ -62,63 +53,74 @@
     });
   }
 
-  function renderOfficeChips_(people) {
+  function allOfficeOptions_() {
+    const officeMap = new Map();
+    const records = Array.isArray(PersonnelState.records)
+      ? PersonnelState.records
+      : [];
+
+    records.forEach(record => {
+      const office = String(
+        record.Office ||
+        record.office ||
+        record["OFFICE"] ||
+        ""
+      ).trim();
+
+      if (!office || office.toUpperCase() === "N/A") return;
+      const key = office.toUpperCase();
+      if (!officeMap.has(key)) officeMap.set(key, office);
+    });
+
+    return [...officeMap.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    );
+  }
+
+  function renderOfficeChips_() {
     const container = document.getElementById("destinationOfficeChips");
     if (!container) return;
 
     container.replaceChildren();
+    const offices = allOfficeOptions_();
 
-    const activeCamp = String(ReassignmentState.activeCamp || "").toUpperCase();
-    const officeMap = new Map();
-
-    people.forEach(([, person]) => {
-      const office = String(person?.office || "").trim();
-      const camp = getPersonCamp_(person);
-      if (!office) return;
-      if (activeCamp && camp !== activeCamp) return;
-      if (!officeMap.has(office)) officeMap.set(office, camp);
+    offices.forEach(office => {
+      container.appendChild(
+        makeChip_(
+          office,
+          ReassignmentState.activeOffice === office,
+          () => {
+            ReassignmentState.activeOffice =
+              ReassignmentState.activeOffice === office ? "" : office;
+            saveReassignmentState_();
+            renderReassignmentWorkspace_();
+          }
+        )
+      );
     });
 
-    [...officeMap.keys()]
-      .sort((a, b) => a.localeCompare(b, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }))
-      .forEach(office => {
-        container.appendChild(
-          makeChip_(
-            office,
-            ReassignmentState.activeOffice === office,
-            () => {
-              ReassignmentState.activeOffice = office;
-              saveReassignmentState_();
-              renderReassignmentWorkspace_();
-            }
-          )
-        );
-      });
-
-    if (!officeMap.size) {
+    if (!offices.length) {
       const empty = document.createElement("small");
       empty.className = "destination-office-empty";
-      empty.textContent = activeCamp
-        ? `No office found under ${activeCamp}.`
-        : "Choose a camp to view offices.";
+      empty.textContent = "No office options are available.";
       container.appendChild(empty);
     }
   }
 
   function patchRender_() {
     if (typeof window.renderDestinationChips_ !== "function") return false;
-    if (window.renderDestinationChips_.campFilterPatched) return true;
+    if (window.renderDestinationChips_.independentOptionsPatched) return true;
 
-    function patchedRenderDestinationChips_(people) {
+    function patchedRenderDestinationChips_() {
       ensureDestinationGroups_();
       renderCampChips_();
-      renderOfficeChips_(people || []);
+      renderOfficeChips_();
     }
 
-    patchedRenderDestinationChips_.campFilterPatched = true;
+    patchedRenderDestinationChips_.independentOptionsPatched = true;
     window.renderDestinationChips_ = patchedRenderDestinationChips_;
     return true;
   }
