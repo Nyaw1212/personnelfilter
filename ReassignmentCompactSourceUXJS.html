@@ -1,0 +1,265 @@
+//----------------------------------
+// Compact Step 1 filters and larger selection hit area
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function transferType_() {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("personnelFilterReassignmentWorkflowOptionsV1") || "{}"
+      );
+      return saved.transferType || "OFFICE_TO_OFFICE";
+    } catch (error) {
+      return "OFFICE_TO_OFFICE";
+    }
+  }
+
+  function currentCamp_(person) {
+    const record = person?.record || {};
+    return text_(
+      person?.camp ||
+      record.CAMP ||
+      record.Camp ||
+      record.camp
+    );
+  }
+
+  function currentOffice_(person) {
+    const record = person?.record || {};
+    return text_(
+      person?.office ||
+      record.OFFICE ||
+      record.Office ||
+      record.office
+    );
+  }
+
+  function sourceSubtitle_(person) {
+    return transferType_() === "CAMP_TO_CAMP"
+      ? currentCamp_(person) || "N/A"
+      : currentOffice_(person) || "N/A";
+  }
+
+  function toggleSelection_(key, checkbox) {
+    checkbox.checked = !checkbox.checked;
+
+    if (checkbox.checked) {
+      ReassignmentState.selectedKeys.add(key);
+    } else {
+      ReassignmentState.selectedKeys.delete(key);
+    }
+
+    if (typeof updateReassignmentControls_ === "function") {
+      updateReassignmentControls_(PersonnelState.aoCart.size);
+    }
+  }
+
+  function patchSourceRenderer_() {
+    window.renderSourcePersonnel_ = function (entries) {
+      const list = document.getElementById("reassignmentSourceList");
+      if (!list) return;
+
+      list.replaceChildren();
+
+      if (!entries.length) {
+        list.appendChild(makeText_("div", "No personnel match the filters."));
+        return;
+      }
+
+      entries.forEach(([key, person]) => {
+        const row = makeElement_("div", "reassignment-person-row");
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = ReassignmentState.selectedKeys.has(key);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) {
+            ReassignmentState.selectedKeys.add(key);
+          } else {
+            ReassignmentState.selectedKeys.delete(key);
+          }
+          updateReassignmentControls_(PersonnelState.aoCart.size);
+        });
+
+        const details = document.createElement("div");
+        details.className = "reassignment-person-details reassignment-person-toggle-area";
+        details.tabIndex = 0;
+        details.setAttribute("role", "checkbox");
+        details.setAttribute("aria-checked", String(checkbox.checked));
+        details.append(
+          makeText_(
+            "strong",
+            [person.rank, person.fullName].filter(Boolean).join(" ")
+          ),
+          makeText_("small", sourceSubtitle_(person))
+        );
+
+        const toggle = event => {
+          event.preventDefault();
+          toggleSelection_(key, checkbox);
+          details.setAttribute("aria-checked", String(checkbox.checked));
+        };
+
+        details.addEventListener("click", toggle);
+        details.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") toggle(event);
+        });
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "reassignment-source-remove-button";
+        remove.textContent = "×";
+        remove.title = "Remove this personnel from To Be Assigned";
+        remove.setAttribute(
+          "aria-label",
+          `Remove ${person.fullName || "personnel"}`
+        );
+        remove.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof removePersonnelFromReassignment_ === "function") {
+            removePersonnelFromReassignment_(key);
+          }
+        });
+
+        row.append(checkbox, details, remove);
+        list.appendChild(row);
+      });
+    };
+  }
+
+  function compactSourcePanel_() {
+    const panel = document.querySelector(".reassignment-source-panel");
+    if (!panel || panel.dataset.compactSourceUx === "true") return;
+
+    const blocks = [...panel.querySelectorAll(":scope > .source-filter-block")];
+    if (blocks.length) {
+      const grid = document.createElement("div");
+      grid.className = "source-filter-grid";
+      panel.insertBefore(grid, blocks[0]);
+      blocks.forEach(block => grid.appendChild(block));
+    }
+
+    const actions = panel.querySelector(".source-actions");
+    if (actions) {
+      const selectAll = [...actions.querySelectorAll("button")].find(button =>
+        /select all visible/i.test(button.textContent)
+      );
+      const removeAll = document.getElementById("clearAllSelectedPersonnelButton");
+      const clear = document.getElementById("clearReassignmentFiltersButton");
+
+      if (selectAll) selectAll.textContent = "Select All";
+      if (removeAll) removeAll.textContent = "Remove";
+      if (clear) clear.textContent = "Clear";
+    }
+
+    panel.dataset.compactSourceUx = "true";
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("reassignmentCompactSourceUxStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "reassignmentCompactSourceUxStyles";
+    style.textContent = `
+      .reassignment-source-panel .source-filter-grid{
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:8px;
+        align-items:start;
+        margin:8px 0 6px;
+      }
+      .reassignment-source-panel .source-filter-block{
+        margin:0!important;
+        min-width:0;
+      }
+      .reassignment-source-panel .source-filter-block>label{
+        display:block;
+        margin-bottom:4px;
+        font-size:11px;
+      }
+      .reassignment-source-panel .reassignment-chip-wrap{
+        display:flex;
+        flex-wrap:wrap;
+        gap:4px;
+        max-height:64px;
+        overflow:auto;
+        align-content:flex-start;
+      }
+      .reassignment-source-panel .source-actions{
+        display:grid!important;
+        grid-template-columns:minmax(70px,1fr) repeat(3,auto);
+        align-items:center;
+        gap:6px!important;
+        margin:6px 0!important;
+      }
+      .reassignment-source-panel .source-actions button{
+        min-height:32px!important;
+        padding:5px 10px!important;
+        white-space:nowrap;
+        font-size:11px;
+      }
+      .reassignment-source-panel .reassignment-person-row{
+        min-height:42px;
+        padding:5px 7px!important;
+        gap:7px!important;
+      }
+      .reassignment-person-toggle-area{
+        cursor:pointer;
+        border-radius:7px;
+        padding:2px 4px;
+        margin:-2px -4px;
+      }
+      .reassignment-person-toggle-area:hover{
+        background:rgba(31,111,52,.055);
+      }
+      .reassignment-person-toggle-area:focus-visible{
+        outline:2px solid rgba(31,111,52,.45);
+        outline-offset:1px;
+      }
+      .reassignment-person-toggle-area strong,
+      .reassignment-person-toggle-area small{
+        display:block;
+      }
+      .reassignment-source-panel .reassignment-source-remove-button{
+        width:27px!important;
+        height:27px!important;
+        font-size:17px!important;
+      }
+      @media (max-width:1100px){
+        .reassignment-source-panel .source-filter-grid{
+          grid-template-columns:1fr;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function install_() {
+    patchSourceRenderer_();
+    compactSourcePanel_();
+    injectStyles_();
+
+    const originalRender = window.renderReassignmentWorkspace_;
+    if (typeof originalRender === "function" && !originalRender.compactSourceUxPatched) {
+      function patchedRender() {
+        originalRender.apply(this, arguments);
+        compactSourcePanel_();
+      }
+      patchedRender.compactSourceUxPatched = true;
+      window.renderReassignmentWorkspace_ = patchedRender;
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
