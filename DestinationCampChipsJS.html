@@ -1,0 +1,119 @@
+//----------------------------------
+// Step 2 destination chips: Office + Camp
+//----------------------------------
+
+(function () {
+  function readCamp_(person) {
+    return String(
+      person?.camp ||
+      person?.Camp ||
+      person?.CAMP ||
+      person?.record?.Camp ||
+      person?.record?.CAMP ||
+      person?.record?.["Camp"] ||
+      ""
+    ).trim();
+  }
+
+  function renderDestinationChipsWithCamp_(people) {
+    const container = document.getElementById("destinationOfficeChips");
+    if (!container) return;
+
+    container.replaceChildren();
+
+    const officeMap = new Map();
+    (Array.isArray(people) ? people : []).forEach(entry => {
+      const person = Array.isArray(entry) ? entry[1] : entry;
+      if (!person) return;
+
+      const office = String(person.office || person.record?.Office || "").trim();
+      if (!office) return;
+
+      const camp = readCamp_(person);
+      if (!officeMap.has(office)) officeMap.set(office, camp);
+      else if (!officeMap.get(office) && camp) officeMap.set(office, camp);
+    });
+
+    [...officeMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }))
+      .forEach(([office, camp]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "reassignment-chip destination-office-chip";
+        button.classList.toggle(
+          "is-active",
+          ReassignmentState.activeOffice === office
+        );
+
+        const officeLabel = document.createElement("strong");
+        officeLabel.textContent = office;
+
+        const campLabel = document.createElement("small");
+        campLabel.textContent = camp || "Camp not set";
+
+        button.append(officeLabel, campLabel);
+        button.title = camp
+          ? `${office} · ${camp}`
+          : `${office} · Camp not set`;
+
+        button.addEventListener("click", () => {
+          ReassignmentState.activeOffice = office;
+          if (typeof saveReassignmentState_ === "function") {
+            saveReassignmentState_();
+          }
+          if (typeof renderReassignmentWorkspace_ === "function") {
+            renderReassignmentWorkspace_();
+          }
+        });
+
+        container.appendChild(button);
+      });
+  }
+
+  function install_() {
+    window.renderDestinationChips_ = renderDestinationChipsWithCamp_;
+
+    const style = document.createElement("style");
+    style.id = "destinationCampChipStyles";
+    style.textContent = `
+      .destination-chip-list .destination-office-chip {
+        display: grid;
+        width: 100%;
+        gap: 2px;
+        padding: 9px 11px;
+        text-align: left;
+        line-height: 1.15;
+      }
+      .destination-office-chip strong {
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .destination-office-chip small {
+        font-size: 10px;
+        font-weight: 700;
+        opacity: .68;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+      .destination-office-chip.is-active small {
+        opacity: .82;
+      }
+    `;
+    if (!document.getElementById(style.id)) {
+      document.head.appendChild(style);
+    }
+
+    if (typeof renderReassignmentWorkspace_ === "function") {
+      renderReassignmentWorkspace_();
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
