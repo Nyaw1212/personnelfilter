@@ -8,55 +8,9 @@
   const PRE_EDIT_CART_KEY = "personnelFilterPreEditAoCartV1";
   const WORKSPACE_DRAFT_KEY = "personnelFilterReassignmentWorkspaceDraftV1";
 
-  function isRevisionCart_() {
-    if (typeof PersonnelState === "undefined" || !(PersonnelState.aoCart instanceof Map)) {
-      return false;
-    }
-
-    return [...PersonnelState.aoCart.keys()].some(key =>
-      String(key || "").indexOf("revision:") === 0
-    );
-  }
-
-  function savePreEditCart_() {
-    try {
-      if (typeof PersonnelState === "undefined" || !(PersonnelState.aoCart instanceof Map)) {
-        return;
-      }
-
-      // Do not replace a good main-page snapshot with another revision cart.
-      if (isRevisionCart_()) return;
-
-      localStorage.setItem(
-        PRE_EDIT_CART_KEY,
-        JSON.stringify([...PersonnelState.aoCart.entries()])
-      );
-    } catch (error) {
-      console.warn("Unable to preserve the current personnel selection:", error);
-    }
-  }
-
-  function restorePreEditCart_() {
-    try {
-      const raw = localStorage.getItem(PRE_EDIT_CART_KEY);
-      if (!raw) return false;
-
-      const entries = JSON.parse(raw);
-      if (!Array.isArray(entries)) return false;
-
-      PersonnelState.aoCart = new Map(entries);
-      return true;
-    } catch (error) {
-      console.warn("Unable to restore the personnel selection:", error);
-      return false;
-    }
-  }
-
-  function hideLauncher_() {
-    const backdrop = document.getElementById("stage1MainReportChoiceBackdrop");
-    const dialog = document.getElementById("stage1MainReportChoiceDialog");
-    if (backdrop) backdrop.hidden = true;
-    if (dialog) dialog.hidden = true;
+  function hide_(id) {
+    const element = document.getElementById(id);
+    if (element) element.hidden = true;
   }
 
   function clearReportFields_() {
@@ -83,29 +37,27 @@
     }
   }
 
-  function startTrulyNewReport_() {
-    const editingGeneratedReport =
-      isRevisionCart_() ||
-      Boolean(document.getElementById("stage1RevisionBanner")) ||
-      (typeof Stage1ReportEditorState !== "undefined" &&
-        Boolean(Stage1ReportEditorState.sourceReport));
-
-    // Editing a generated report replaces aoCart. Restore the main-page
-    // selection that existed before edit mode was opened.
-    if (editingGeneratedReport) {
-      restorePreEditCart_();
+  function resetNewReportSession_() {
+    // New Report means a completely fresh selection. Do not restore the
+    // personnel from the last report or from the pre-edit snapshot.
+    if (typeof PersonnelState !== "undefined") {
+      PersonnelState.aoCart = new Map();
     }
 
-    ReassignmentState.activeOffice = "";
-    if ("activeCamp" in ReassignmentState) ReassignmentState.activeCamp = "";
-    ReassignmentState.assignments = new Map();
-    ReassignmentState.selectedKeys = new Set();
-    ReassignmentState.filters = {
-      search: "",
-      rank: "",
-      office: "",
-      camp: "",
-    };
+    if (typeof ReassignmentState !== "undefined") {
+      ReassignmentState.activeOffice = "";
+      if ("activeCamp" in ReassignmentState) {
+        ReassignmentState.activeCamp = "";
+      }
+      ReassignmentState.assignments = new Map();
+      ReassignmentState.selectedKeys = new Set();
+      ReassignmentState.filters = {
+        search: "",
+        rank: "",
+        office: "",
+        camp: "",
+      };
+    }
 
     if (typeof Stage1ReportEditorState !== "undefined") {
       Stage1ReportEditorState.loading = false;
@@ -113,6 +65,8 @@
     }
 
     document.getElementById("stage1RevisionBanner")?.remove();
+
+    localStorage.removeItem(PRE_EDIT_CART_KEY);
     localStorage.removeItem(WORKSPACE_DRAFT_KEY);
 
     if (typeof REASSIGNMENT_FORM_STORAGE_KEY !== "undefined") {
@@ -122,26 +76,25 @@
     if (typeof saveAoCart_ === "function") saveAoCart_();
     if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
     if (typeof updateAoCartCount_ === "function") updateAoCartCount_();
+    if (typeof updateReportGeneratorButton_ === "function") {
+      updateReportGeneratorButton_();
+    }
     if (typeof renderPreviewTable === "function") renderPreviewTable();
 
     clearReportFields_();
-    hideLauncher_();
 
-    if (typeof openReportTypeDialog_ === "function") {
-      openReportTypeDialog_();
-    }
+    hide_("stage1MainReportChoiceBackdrop");
+    hide_("stage1MainReportChoiceDialog");
+    hide_("reportTypeBackdrop");
+    hide_("reportTypeDialog");
+    hide_("reassignmentWorkspace");
+    document.body.classList.remove("reassignment-is-open");
+
+    // Return to the Personnel Table so the user can pick the personnel for
+    // the new report. The Report Generator button will enable again after
+    // at least one new personnel entry is selected.
   }
 
-  // Save the current main-page selection before the generated-report editor
-  // replaces PersonnelState.aoCart with rows from the old report.
-  document.addEventListener("click", event => {
-    if (event.target.closest(".stage1-edit-report-button")) {
-      savePreEditCart_();
-    }
-  }, true);
-
-  // Handle New Report before the older launcher handler can reload its stale
-  // workspace state.
   document.addEventListener("click", event => {
     const button = event.target.closest(
       "#stage1MainReportChoiceDialog button[data-action='NEW']"
@@ -150,6 +103,6 @@
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    startTrulyNewReport_();
+    resetNewReportSession_();
   }, true);
 })();
