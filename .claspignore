@@ -1,8 +1,10 @@
-﻿.clasp.json
+.clasp.json
 .git/**
 .gitignore
 node_modules/**
 package.json
 package-lock.json
 tests/**
+scripts/**
+dev/**
 *.broken
