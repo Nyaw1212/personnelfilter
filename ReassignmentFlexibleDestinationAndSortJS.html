@@ -1,43 +1,120 @@
 //----------------------------------
-// Flexible destination + LIST sequence sorting
+// Transfer mode + flexible destination + LIST sorting
 //----------------------------------
 
 (function () {
+  const STORAGE_KEY = "personnelFilterTransferModeV1";
   const CAMP_PREFIX = "__CAMP_ONLY__:";
 
-  function selectedDestination_() {
-    const office = String(ReassignmentState.activeOffice || "").trim();
-    const camp = String(ReassignmentState.activeCamp || "").trim();
+  let transferMode = loadTransferMode_();
 
-    if (office) {
-      return { office, camp: camp || "", mode: camp ? "OFFICE_AND_CAMP" : "OFFICE_ONLY" };
+  function loadTransferMode_() {
+    try {
+      const saved = String(localStorage.getItem(STORAGE_KEY) || "").trim();
+      return saved === "CAMP_TO_CAMP" ? saved : "OFFICE_TO_OFFICE";
+    } catch (ignored) {
+      return "OFFICE_TO_OFFICE";
     }
-    if (camp) {
-      return { office: "", camp, mode: "CAMP_ONLY" };
+  }
+
+  function saveTransferMode_() {
+    try {
+      localStorage.setItem(STORAGE_KEY, transferMode);
+    } catch (ignored) {}
+  }
+
+  function ensureTransferModeControl_() {
+    const panel = document.querySelector(".reassignment-destination-panel");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    if (!panel || !officeContainer) return false;
+
+    let wrapper = document.getElementById("reassignmentTransferModeBlock");
+    if (!wrapper) {
+      wrapper = document.createElement("div");
+      wrapper.id = "reassignmentTransferModeBlock";
+      wrapper.className = "reassignment-transfer-mode-block";
+      wrapper.innerHTML = `
+        <label>Transfer Type</label>
+        <div class="reassignment-transfer-mode-buttons">
+          <button type="button" data-transfer-mode="CAMP_TO_CAMP">Camp to Camp</button>
+          <button type="button" data-transfer-mode="OFFICE_TO_OFFICE">Office to Office</button>
+        </div>
+      `;
+
+      panel.insertBefore(wrapper, panel.firstChild);
+
+      wrapper.addEventListener("click", event => {
+        const button = event.target.closest("[data-transfer-mode]");
+        if (!button) return;
+
+        transferMode = button.dataset.transferMode;
+        ReassignmentState.activeCamp = "";
+        ReassignmentState.activeOffice = "";
+        saveTransferMode_();
+        if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+        updateTransferModeUI_();
+        if (typeof renderDestinationChips_ === "function") {
+          renderDestinationChips_([...PersonnelState.aoCart.entries()]);
+        }
+        if (typeof updateReassignmentControls_ === "function") {
+          updateReassignmentControls_(PersonnelState.aoCart.size);
+        }
+      });
     }
-    return null;
+
+    updateTransferModeUI_();
+    return true;
+  }
+
+  function updateTransferModeUI_() {
+    document.querySelectorAll("[data-transfer-mode]").forEach(button => {
+      button.classList.toggle("is-active", button.dataset.transferMode === transferMode);
+    });
+
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    const campLabel = campContainer && campContainer.previousElementSibling;
+    const officeLabel = officeContainer && officeContainer.previousElementSibling;
+
+    const campMode = transferMode === "CAMP_TO_CAMP";
+    if (campContainer) campContainer.hidden = !campMode;
+    if (officeContainer) officeContainer.hidden = campMode;
+    if (campLabel && campLabel.classList.contains("destination-group-label")) campLabel.hidden = !campMode;
+    if (officeLabel && officeLabel.classList.contains("destination-group-label")) officeLabel.hidden = campMode;
+  }
+
+  function selectedDestination_() {
+    if (transferMode === "CAMP_TO_CAMP") {
+      const camp = String(ReassignmentState.activeCamp || "").trim();
+      return camp ? { office: "", camp, mode: "CAMP_TO_CAMP" } : null;
+    }
+
+    const office = String(ReassignmentState.activeOffice || "").trim();
+    return office ? { office, camp: "", mode: "OFFICE_TO_OFFICE" } : null;
   }
 
   function normalizeAssignment_(value) {
     if (value && typeof value === "object") {
-      return {
-        office: String(value.office || "").trim(),
-        camp: String(value.camp || "").trim(),
-        mode: String(value.mode || "").trim() || "OFFICE_ONLY",
-      };
+      const office = String(value.office || "").trim();
+      const camp = String(value.camp || "").trim();
+      const rawMode = String(value.mode || "").trim();
+      const mode = rawMode || (camp && !office ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE");
+      return { office, camp, mode };
     }
 
     const text = String(value || "").trim();
     if (text.indexOf(CAMP_PREFIX) === 0) {
-      return { office: "", camp: text.slice(CAMP_PREFIX.length), mode: "CAMP_ONLY" };
+      return { office: "", camp: text.slice(CAMP_PREFIX.length), mode: "CAMP_TO_CAMP" };
     }
-    return { office: text, camp: "", mode: "OFFICE_ONLY" };
+    return { office: text, camp: "", mode: "OFFICE_TO_OFFICE" };
   }
 
   function assignKeys_(keys) {
     const destination = selectedDestination_();
     if (!destination) {
-      alert("Choose either a destination Camp or Office first.");
+      alert(transferMode === "CAMP_TO_CAMP"
+        ? "Choose a destination Camp first."
+        : "Choose a destination Office first.");
       return;
     }
 
@@ -81,15 +158,12 @@
     const original = window.updateReassignmentControls_;
     window.updateReassignmentControls_ = function (total) {
       original.apply(this, arguments);
-      const hasDestination = Boolean(
-        String(ReassignmentState.activeOffice || "").trim() ||
-        String(ReassignmentState.activeCamp || "").trim()
-      );
+      const hasDestination = transferMode === "CAMP_TO_CAMP"
+        ? Boolean(String(ReassignmentState.activeCamp || "").trim())
+        : Boolean(String(ReassignmentState.activeOffice || "").trim());
       const selected = document.getElementById("assignSelectedButton");
       const visible = document.getElementById("assignAllVisibleButton");
-      if (selected) {
-        selected.disabled = !hasDestination || !ReassignmentState.selectedKeys.size;
-      }
+      if (selected) selected.disabled = !hasDestination || !ReassignmentState.selectedKeys.size;
       if (visible) visible.disabled = !hasDestination;
     };
   }
@@ -109,58 +183,58 @@
     });
 
     if (index >= 0) return index;
-    const numeric = Number(String(key || "").match(/\d+/)?.[0]);
+    const match = String(key || "").match(/\d+/);
+    const numeric = match ? Number(match[0]) : NaN;
     return Number.isFinite(numeric) ? numeric : Number.MAX_SAFE_INTEGER;
   }
 
   function patchPayload_() {
     if (
       typeof window.buildReassignmentGeneratePayload_ !== "function" ||
-      window.buildReassignmentGeneratePayload_.flexibleDestinationPatched
+      window.buildReassignmentGeneratePayload_.transferModePatched
     ) return false;
 
     const original = window.buildReassignmentGeneratePayload_;
     function patched() {
       const payload = original.apply(this, arguments);
-      const personnel = [...ReassignmentState.assignments.entries()]
+      payload.transferType = transferMode;
+      payload.personnel = [...ReassignmentState.assignments.entries()]
         .map(([key, rawDestination]) => {
           const person = PersonnelState.aoCart.get(key);
           if (!person) return null;
           const destination = normalizeAssignment_(rawDestination);
           const currentOffice = String(person.office || person.record?.Office || "").trim();
           const currentCamp = String(person.camp || person.record?.CAMP || "").trim();
-          const destinationLabel = destination.office || destination.camp;
+          const campMode = destination.mode === "CAMP_TO_CAMP" || Boolean(destination.camp && !destination.office);
 
           return {
             key,
             sequence: listSequence_(person, key),
             rank: person.rank || person.record?.RANK || "",
             fullName: person.fullName || person.record?.["FULL NAME"] || "",
-            from: currentOffice || currentCamp,
+            from: campMode ? currentCamp : currentOffice,
             fromOffice: currentOffice,
             fromCamp: currentCamp,
-            to: destinationLabel,
+            to: campMode ? destination.camp : destination.office,
             toOffice: destination.office,
             toCamp: destination.camp,
-            transferMode: destination.mode,
+            transferMode: campMode ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE",
             notes: "",
           };
         })
         .filter(Boolean)
         .sort((a, b) => a.sequence - b.sequence)
         .map(({ key, sequence, ...person }) => person);
-
-      payload.personnel = personnel;
       return payload;
     }
-    patched.flexibleDestinationPatched = true;
+    patched.transferModePatched = true;
     window.buildReassignmentGeneratePayload_ = patched;
     return true;
   }
 
   function patchAssignmentCards_() {
     if (typeof window.renderAssignmentCards_ !== "function") return;
-    window.renderAssignmentCards_ = function (people) {
+    window.renderAssignmentCards_ = function () {
       const grid = document.getElementById("assignmentCardGrid");
       if (!grid) return;
       grid.replaceChildren();
@@ -168,9 +242,9 @@
 
       ReassignmentState.assignments.forEach((raw, key) => {
         const destination = normalizeAssignment_(raw);
-        const label = destination.office
-          ? `${destination.office}${destination.camp ? ` · ${destination.camp}` : ""}`
-          : `CAMP: ${destination.camp}`;
+        const label = destination.mode === "CAMP_TO_CAMP" || (destination.camp && !destination.office)
+          ? `CAMP TO ${destination.camp}`
+          : `OFFICE TO ${destination.office}`;
         if (!groups.has(label)) groups.set(label, []);
         groups.get(label).push(key);
       });
@@ -200,13 +274,33 @@
     };
   }
 
+  function injectStyles_() {
+    if (document.getElementById("reassignmentTransferModeStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentTransferModeStyles";
+    style.textContent = `
+      .reassignment-transfer-mode-block{margin-bottom:14px}
+      .reassignment-transfer-mode-block>label{display:block;margin-bottom:6px;color:#235b31;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+      .reassignment-transfer-mode-buttons{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+      .reassignment-transfer-mode-buttons button{min-height:38px;padding:7px 9px;border:1px solid rgba(31,111,52,.24);border-radius:10px;background:#fff;cursor:pointer}
+      .reassignment-transfer-mode-buttons button.is-active{background:#245f34;color:#fff;border-color:#245f34}
+    `;
+    document.head.appendChild(style);
+  }
+
   function install_() {
+    if (!("activeCamp" in ReassignmentState)) ReassignmentState.activeCamp = "";
+    ensureTransferModeControl_();
     installAssignmentButtons_();
     patchControls_();
     patchAssignmentCards_();
     patchPayload_();
+    injectStyles_();
 
-    const observer = new MutationObserver(() => patchPayload_());
+    const observer = new MutationObserver(() => {
+      ensureTransferModeControl_();
+      patchPayload_();
+    });
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
