@@ -166,6 +166,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentStaticDestinationOptionsJS")
       .getContent();
+
+    // Final safe Step 3 UI: grouped destination columns with compact draggable rows.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentGroupedCompactSafeJS")
+      .getContent();
   }
 
   return content;
