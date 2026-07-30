@@ -1,0 +1,186 @@
+//----------------------------------
+// Static Step 2 destination options
+//----------------------------------
+
+(function () {
+  const CAMPS = ["NBP", "MAXIMUM", "MEDIUM", "MINIMUM", "RDC"];
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function recordValue_(record, names) {
+    for (const name of names) {
+      const value = record && record[name];
+      if (text_(value)) return text_(value);
+    }
+    return "";
+  }
+
+  function allOffices_() {
+    const offices = new Set();
+    const records = Array.isArray(PersonnelState && PersonnelState.records)
+      ? PersonnelState.records
+      : [];
+
+    records.forEach(record => {
+      const office = recordValue_(record, ["Office", "OFFICE", "office"]);
+      if (office) offices.add(office);
+    });
+
+    return [...offices].sort((a, b) =>
+      a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    );
+  }
+
+  function transferType_() {
+    const active = document.querySelector(
+      "#reassignmentTransferType [data-transfer-type].is-active"
+    );
+
+    if (active && active.dataset.transferType) {
+      return active.dataset.transferType;
+    }
+
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("personnelFilterReassignmentWorkflowOptionsV1") || "{}"
+      );
+      return saved.transferType || "OFFICE_TO_OFFICE";
+    } catch (error) {
+      return "OFFICE_TO_OFFICE";
+    }
+  }
+
+  function setTransferType_(value) {
+    document
+      .querySelectorAll("#reassignmentTransferType [data-transfer-type]")
+      .forEach(button => {
+        button.classList.toggle(
+          "is-active",
+          button.dataset.transferType === value
+        );
+      });
+
+    try {
+      const key = "personnelFilterReassignmentWorkflowOptionsV1";
+      const saved = JSON.parse(localStorage.getItem(key) || "{}");
+      saved.transferType = value;
+      localStorage.setItem(key, JSON.stringify(saved));
+    } catch (error) {
+      console.warn("Unable to save transfer type:", error);
+    }
+  }
+
+  function ensureLabels_() {
+    const panel = document.querySelector(".reassignment-destination-panel");
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    if (!panel || !campContainer || !officeContainer) return false;
+
+    let campLabel = document.getElementById("staticDestinationCampLabel");
+    if (!campLabel) {
+      campLabel = document.createElement("label");
+      campLabel.id = "staticDestinationCampLabel";
+      campLabel.className = "destination-group-label";
+      campLabel.textContent = "Camp";
+      panel.insertBefore(campLabel, campContainer);
+    }
+
+    let officeLabel = document.getElementById("staticDestinationOfficeLabel");
+    if (!officeLabel) {
+      officeLabel = document.createElement("label");
+      officeLabel.id = "staticDestinationOfficeLabel";
+      officeLabel.className = "destination-group-label";
+      officeLabel.textContent = "Office";
+      panel.insertBefore(officeLabel, officeContainer);
+    }
+
+    campLabel.hidden = false;
+    officeLabel.hidden = false;
+    campContainer.hidden = false;
+    officeContainer.hidden = false;
+    return true;
+  }
+
+  function renderStaticDestinations_() {
+    if (!ensureLabels_()) return;
+
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+
+    campContainer.replaceChildren();
+    CAMPS.forEach(camp => {
+      campContainer.appendChild(
+        makeChip_(
+          camp,
+          text_(ReassignmentState.activeCamp).toUpperCase() === camp,
+          () => {
+            ReassignmentState.activeCamp = camp;
+            ReassignmentState.activeOffice = "";
+            setTransferType_("CAMP_TO_CAMP");
+            if (typeof saveReassignmentState_ === "function") {
+              saveReassignmentState_();
+            }
+            renderStaticDestinations_();
+            if (typeof updateReassignmentControls_ === "function") {
+              updateReassignmentControls_(PersonnelState.aoCart.size);
+            }
+          }
+        )
+      );
+    });
+
+    officeContainer.replaceChildren();
+    allOffices_().forEach(office => {
+      officeContainer.appendChild(
+        makeChip_(
+          office,
+          text_(ReassignmentState.activeOffice) === office,
+          () => {
+            ReassignmentState.activeOffice = office;
+            ReassignmentState.activeCamp = "";
+            setTransferType_("OFFICE_TO_OFFICE");
+            if (typeof saveReassignmentState_ === "function") {
+              saveReassignmentState_();
+            }
+            renderStaticDestinations_();
+            if (typeof updateReassignmentControls_ === "function") {
+              updateReassignmentControls_(PersonnelState.aoCart.size);
+            }
+          }
+        )
+      );
+    });
+
+    // Keep the transfer-type buttons synchronized, but never hide either option list.
+    setTransferType_(transferType_());
+  }
+
+  function install_() {
+    window.renderDestinationChips_ = function () {
+      renderStaticDestinations_();
+    };
+
+    renderStaticDestinations_();
+
+    document.addEventListener("click", event => {
+      const typeButton = event.target.closest(
+        "#reassignmentTransferType [data-transfer-type]"
+      );
+      if (!typeButton) return;
+
+      // Allow the existing handler to save state, then restore both static lists.
+      window.setTimeout(renderStaticDestinations_, 0);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
