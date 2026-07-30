@@ -37,85 +37,58 @@ function include(
     )
     .getContent();
 
-  // Load the generate-dialog module first so it replaces the
-  // temporary validation handler before the workspace button
-  // attaches its click listener.
   if (filename === "AppJS") {
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentGenerateJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentGenerateJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentPatchJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentPatchJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentSourceOfficePatchJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentSourceOfficePatchJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentClearPatchJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentClearPatchJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentWorkspaceClearJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentWorkspaceClearJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentFormPersistencePatchJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentFormPersistencePatchJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentPreviewPolishJS"
-      )
-      .getContent();
-
-    // Loaded after the preview module to keep the preview table synced
-    // with the current personnel assignments and form values.
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "ReassignmentLivePreviewFixJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentPreviewPolishJS")
       .getContent();
 
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "GeneratedReportsJS"
-      )
+      .createHtmlOutputFromFile("ReassignmentLivePreviewFixJS")
       .getContent();
 
-    // Adds an in-app quick scan of generated report personnel rows
-    // without opening the Google Doc in a new tab.
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "GeneratedReportPreviewJS"
-      )
+      .createHtmlOutputFromFile("GeneratedReportsJS")
       .getContent();
 
-    // Adds Remove All Visible and Deselect All to the AO toolbar.
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile(
-        "AOSelectionBulkControlsJS"
-      )
+      .createHtmlOutputFromFile("GeneratedReportPreviewJS")
+      .getContent();
+
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("AOSelectionBulkControlsJS")
+      .getContent();
+
+    // Loaded last so performance overrides apply after all feature patches.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("PerformanceClientJS")
       .getContent();
   }
 
