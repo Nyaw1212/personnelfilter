@@ -1,0 +1,184 @@
+//----------------------------------
+// Stage 1: Main Report Launcher + Escape
+//----------------------------------
+
+(function () {
+  const ids = {
+    backdrop: "stage1MainReportChoiceBackdrop",
+    dialog: "stage1MainReportChoiceDialog",
+  };
+
+  function ensureLauncherDialog_() {
+    if (document.getElementById(ids.dialog)) return;
+
+    const backdrop = document.createElement("div");
+    backdrop.id = ids.backdrop;
+    backdrop.className = "stage1-save-backdrop";
+    backdrop.hidden = true;
+
+    const dialog = document.createElement("section");
+    dialog.id = ids.dialog;
+    dialog.className = "stage1-save-dialog";
+    dialog.hidden = true;
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "stage1MainReportChoiceTitle");
+
+    backdrop.addEventListener("click", closeLauncherDialog_);
+    document.body.append(backdrop, dialog);
+  }
+
+  function openLauncherDialog_() {
+    ensureLauncherDialog_();
+
+    const dialog = document.getElementById(ids.dialog);
+    const backdrop = document.getElementById(ids.backdrop);
+
+    dialog.innerHTML = `
+      <span>REPORT GENERATOR</span>
+      <h2 id="stage1MainReportChoiceTitle">Choose Report Action</h2>
+      <p>Create a new report or reopen an existing generated report for editing.</p>
+      <button type="button" data-action="NEW" class="button button-primary">New Report</button>
+      <button type="button" data-action="EDIT" class="button button-secondary">Edit Existing Report</button>
+      <button type="button" data-action="CANCEL" class="button button-ghost">Cancel</button>
+      <small class="stage1-launcher-hint">Press Esc to close</small>
+    `;
+
+    dialog.querySelectorAll("button[data-action]").forEach(button => {
+      button.addEventListener("click", () => {
+        const action = button.dataset.action;
+        closeLauncherDialog_();
+
+        if (action === "NEW") {
+          if (typeof openReportTypeDialog_ === "function") {
+            openReportTypeDialog_();
+          }
+          return;
+        }
+
+        if (action === "EDIT") {
+          if (typeof openGeneratedReportsDialog_ === "function") {
+            openGeneratedReportsDialog_();
+          }
+        }
+      });
+    });
+
+    backdrop.hidden = false;
+    dialog.hidden = false;
+    window.setTimeout(() => dialog.querySelector('[data-action="NEW"]')?.focus(), 0);
+  }
+
+  function closeLauncherDialog_() {
+    const backdrop = document.getElementById(ids.backdrop);
+    const dialog = document.getElementById(ids.dialog);
+    if (backdrop) backdrop.hidden = true;
+    if (dialog) dialog.hidden = true;
+  }
+
+  function isVisible_(element) {
+    return Boolean(element && !element.hidden && element.offsetParent !== null);
+  }
+
+  function clickVisible_(selector) {
+    const element = document.querySelector(selector);
+    if (!isVisible_(element)) return false;
+    element.click();
+    return true;
+  }
+
+  function closeTopmostDialog_() {
+    if (isVisible_(document.getElementById(ids.dialog))) {
+      closeLauncherDialog_();
+      return true;
+    }
+
+    const closers = [
+      "#closeReassignmentGenerateButton",
+      "#closeGeneratedReportPreviewButton",
+      "#closeGeneratedReportsButton",
+      "#closeReassignmentGenerateButton",
+      "#cancelReassignmentGenerateButton",
+      "#stage1SaveChoiceDialog [data-mode='CANCEL']",
+      "#stage1RuntimeChoiceDialog [data-action='CANCEL']",
+      "#reportTypeDialog button",
+    ];
+
+    for (const selector of closers) {
+      if (clickVisible_(selector)) return true;
+    }
+
+    if (typeof closeReassignmentGenerateDialog_ === "function") {
+      const dialog = document.getElementById("reassignmentGenerateDialog");
+      if (isVisible_(dialog)) {
+        closeReassignmentGenerateDialog_();
+        return true;
+      }
+    }
+
+    if (typeof closeGeneratedReportsDialog_ === "function") {
+      const dialog = document.getElementById("generatedReportsDialog");
+      if (isVisible_(dialog)) {
+        closeGeneratedReportsDialog_();
+        return true;
+      }
+    }
+
+    if (typeof closeReportTypeDialog_ === "function") {
+      const dialog = document.getElementById("reportTypeDialog");
+      if (isVisible_(dialog)) {
+        closeReportTypeDialog_();
+        return true;
+      }
+    }
+
+    if (typeof closeReassignmentWorkspace_ === "function") {
+      const workspace = document.getElementById("reassignmentWorkspace");
+      if (isVisible_(workspace)) {
+        closeReassignmentWorkspace_();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function install_() {
+    ensureLauncherDialog_();
+
+    document.addEventListener("click", event => {
+      const button = event.target.closest("#openReportGeneratorButton");
+      if (!button) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openLauncherDialog_();
+    }, true);
+
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      if (!closeTopmostDialog_()) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .stage1-launcher-hint {
+      display:block;
+      margin-top:2px;
+      text-align:center;
+      opacity:.62;
+      font-size:11px;
+    }
+  `;
+  document.head.appendChild(style);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
