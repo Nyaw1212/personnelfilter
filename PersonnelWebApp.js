@@ -166,6 +166,12 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentStaticDestinationOptionsJS")
       .getContent();
+
+    // Stable Step 3 destination segregation board. This only replaces the
+    // Step 3 renderer and does not trigger a workspace render during startup.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentGroupedColumnBoardJS")
+      .getContent();
   }
 
   return content;
