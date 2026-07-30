@@ -94,9 +94,13 @@ function include(
       .createHtmlOutputFromFile("Stage1WorkflowUXJS")
       .getContent();
 
-    // Loaded last so performance overrides apply after all feature patches.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("PerformanceClientJS")
+      .getContent();
+
+    // Runtime hook loaded last so no later patch can replace its controls.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("Stage1WorkflowRuntimeFixJS")
       .getContent();
   }
 
