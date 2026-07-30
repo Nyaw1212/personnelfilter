@@ -130,6 +130,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentTodayDatePatchJS")
       .getContent();
+
+    // Step 2 destination chips show both Office and Camp.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("DestinationCampChipsJS")
+      .getContent();
   }
 
   return content;
