@@ -106,9 +106,14 @@ function include(
       .createHtmlOutputFromFile("Stage1GenerateChoiceHardFixJS")
       .getContent();
 
-    // Main toolbar launcher and global Escape handling load absolutely last.
+    // Main toolbar launcher and global Escape handling load near the end.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("Stage1ReportLauncherAndEscapeJS")
+      .getContent();
+
+    // Layout selector loads last so it can extend the final report dialog.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentLayoutChoiceJS")
       .getContent();
   }
 
