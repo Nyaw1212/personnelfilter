@@ -1,0 +1,150 @@
+//----------------------------------
+// Stage 1 Generate Choice Hard Fix
+//----------------------------------
+
+(function () {
+  function getSourceReport_() {
+    return typeof Stage1ReportEditorState !== "undefined"
+      ? Stage1ReportEditorState.sourceReport
+      : null;
+  }
+
+  function ensureDialog_() {
+    if (document.getElementById("stage1HardChoiceDialog")) return;
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "stage1HardChoiceBackdrop";
+    backdrop.className = "stage1-save-backdrop";
+    backdrop.hidden = true;
+
+    const dialog = document.createElement("section");
+    dialog.id = "stage1HardChoiceDialog";
+    dialog.className = "stage1-save-dialog";
+    dialog.hidden = true;
+
+    backdrop.addEventListener("click", closeDialog_);
+    document.body.append(backdrop, dialog);
+  }
+
+  function closeDialog_() {
+    const backdrop = document.getElementById("stage1HardChoiceBackdrop");
+    const dialog = document.getElementById("stage1HardChoiceDialog");
+    if (backdrop) backdrop.hidden = true;
+    if (dialog) dialog.hidden = true;
+  }
+
+  function openDialog_() {
+    ensureDialog_();
+
+    const dialog = document.getElementById("stage1HardChoiceDialog");
+    const backdrop = document.getElementById("stage1HardChoiceBackdrop");
+    const editing = Boolean(getSourceReport_());
+
+    dialog.innerHTML = editing
+      ? `
+        <span>REPORT SAVE OPTION</span>
+        <h2>Edit Existing Report</h2>
+        <p>The official order number remains unchanged. Revisions are tracked internally only.</p>
+        <button type="button" data-mode="UPDATE_EXISTING" class="button button-primary">Update Existing Report</button>
+        <button type="button" data-mode="NEW_REVISION" class="button button-secondary">Save New Internal Revision</button>
+        <button type="button" data-mode="CANCEL" class="button button-ghost">Cancel</button>
+      `
+      : `
+        <span>REPORT ACTION</span>
+        <h2>Generate Report</h2>
+        <p>Choose what you want to do.</p>
+        <button type="button" data-mode="NEW" class="button button-primary">New Report</button>
+        <button type="button" data-mode="EDIT_EXISTING" class="button button-secondary">Edit Existing Report</button>
+        <button type="button" data-mode="CANCEL" class="button button-ghost">Cancel</button>
+      `;
+
+    dialog.querySelectorAll("button[data-mode]").forEach(button => {
+      button.addEventListener("click", () => chooseMode_(button.dataset.mode));
+    });
+
+    backdrop.hidden = false;
+    dialog.hidden = false;
+  }
+
+  function chooseMode_(mode) {
+    closeDialog_();
+    if (!mode || mode === "CANCEL") return;
+
+    if (mode === "EDIT_EXISTING") {
+      if (typeof closeReassignmentWorkspace_ === "function") {
+        closeReassignmentWorkspace_();
+      }
+      if (typeof openGeneratedReportsDialog_ === "function") {
+        openGeneratedReportsDialog_();
+      }
+      return;
+    }
+
+    if (typeof Stage1SaveState !== "undefined") {
+      Stage1SaveState.mode = mode;
+    }
+
+    if (typeof openReassignmentGenerateDialog_ === "function") {
+      openReassignmentGenerateDialog_();
+    }
+  }
+
+  function findGenerateButton_() {
+    const workspace = document.getElementById("reassignmentWorkspace");
+    if (!workspace) return null;
+
+    const explicit = workspace.querySelector(
+      "#stage1GenerateReportButton, #generateReassignmentReportButton, .reassignment-footer-actions button"
+    );
+
+    if (explicit && /generate/i.test(explicit.textContent || "")) {
+      return explicit;
+    }
+
+    return [...workspace.querySelectorAll("button")].find(button =>
+      /generate\s+(reassignment\s+)?report/i.test(button.textContent || "")
+    ) || null;
+  }
+
+  function patchGenerateButton_() {
+    const current = findGenerateButton_();
+    if (!current) return false;
+    if (current.id === "stage1GenerateReportButton" && current.dataset.hardChoicePatched === "true") {
+      return true;
+    }
+
+    const replacement = current.cloneNode(true);
+    replacement.id = "stage1GenerateReportButton";
+    replacement.dataset.hardChoicePatched = "true";
+    replacement.textContent = "Generate Report";
+    replacement.onclick = null;
+    replacement.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openDialog_();
+    }, true);
+
+    current.replaceWith(replacement);
+    return true;
+  }
+
+  function install_() {
+    ensureDialog_();
+    patchGenerateButton_();
+
+    const observer = new MutationObserver(() => {
+      patchGenerateButton_();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => window.setTimeout(install_, 0));
+  } else {
+    window.setTimeout(install_, 0);
+  }
+})();
