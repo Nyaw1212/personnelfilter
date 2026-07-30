@@ -136,7 +136,7 @@ function include(
       .createHtmlOutputFromFile("DestinationCampChipsJS")
       .getContent();
 
-    // Final Step 2 layout: Camp selector first, then the existing Office list.
+    // Camp and Office destination option chips.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDestinationCampFilterJS")
       .getContent();
@@ -146,25 +146,9 @@ function include(
       .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
       .getContent();
 
-    // Legacy flexible destination behavior.
+    // Explicit Camp-to-Camp / Office-to-Office transfer selection.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
-      .getContent();
-
-    // Final workflow behavior: transfer type, sorting, name composition,
-    // editable Step 3 destinations, and freehand drag ordering.
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentWorkflowOptionsJS")
-      .getContent();
-
-    // Runtime safety fix for Step 3 sorting/rendering.
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentWorkflowRenderHotfixJS")
-      .getContent();
-
-    // Step 2 uses static Camp and Office destination choices.
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentStaticDestinationOptionsJS")
       .getContent();
   }
 
