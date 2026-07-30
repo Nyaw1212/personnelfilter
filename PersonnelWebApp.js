@@ -140,6 +140,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDestinationCampFilterJS")
       .getContent();
+
+    // Step 1 can return to Personnel Filter to add more personnel.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
+      .getContent();
   }
 
   return content;
