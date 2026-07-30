@@ -155,6 +155,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentCompactSourceUXJS")
       .getContent();
+
+    // Correct Step 1 Camp/Office subtitles using the active transfer mode.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentSourceSubtitleFixJS")
+      .getContent();
   }
 
   return content;
