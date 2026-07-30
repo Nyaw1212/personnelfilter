@@ -1,0 +1,350 @@
+//----------------------------------
+// Stage 1 Upgrade: Undo/Redo + Save Choices
+//----------------------------------
+
+const Stage1HistoryState = {
+  undo: [],
+  redo: [],
+  limit: 20,
+  restoring: false,
+};
+
+const Stage1SaveState = {
+  mode: "NEW",
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  installStage1History_();
+  installStage1GenerateChoice_();
+  injectStage1WorkflowStyles_();
+});
+
+function snapshotStage1Workspace_() {
+  return {
+    aoCart: [...PersonnelState.aoCart.entries()],
+    assignments: [...ReassignmentState.assignments.entries()],
+    selectedKeys: [...ReassignmentState.selectedKeys],
+    activeOffice: ReassignmentState.activeOffice || "",
+    filters: { ...ReassignmentState.filters },
+  };
+}
+
+function recordStage1History_() {
+  if (Stage1HistoryState.restoring) return;
+  Stage1HistoryState.undo.push(snapshotStage1Workspace_());
+  if (Stage1HistoryState.undo.length > Stage1HistoryState.limit) {
+    Stage1HistoryState.undo.shift();
+  }
+  Stage1HistoryState.redo.length = 0;
+  updateStage1HistoryButtons_();
+}
+
+function restoreStage1Snapshot_(snapshot) {
+  if (!snapshot) return;
+  Stage1HistoryState.restoring = true;
+
+  PersonnelState.aoCart = new Map(snapshot.aoCart || []);
+  ReassignmentState.assignments = new Map(snapshot.assignments || []);
+  ReassignmentState.selectedKeys = new Set(snapshot.selectedKeys || []);
+  ReassignmentState.activeOffice = snapshot.activeOffice || "";
+  ReassignmentState.filters = {
+    search: "",
+    rank: "",
+    office: "",
+    camp: "",
+    ...(snapshot.filters || {}),
+  };
+
+  if (typeof saveAoCart_ === "function") saveAoCart_();
+  if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+  if (typeof updateAoCartCount_ === "function") updateAoCartCount_();
+  if (typeof updateReportGeneratorButton_ === "function") updateReportGeneratorButton_();
+  if (typeof renderPreviewTable === "function") renderPreviewTable();
+  if (typeof renderReassignmentWorkspace_ === "function") renderReassignmentWorkspace_();
+
+  Stage1HistoryState.restoring = false;
+  updateStage1HistoryButtons_();
+}
+
+function undoStage1Action_() {
+  if (!Stage1HistoryState.undo.length) return;
+  Stage1HistoryState.redo.push(snapshotStage1Workspace_());
+  restoreStage1Snapshot_(Stage1HistoryState.undo.pop());
+}
+
+function redoStage1Action_() {
+  if (!Stage1HistoryState.redo.length) return;
+  Stage1HistoryState.undo.push(snapshotStage1Workspace_());
+  restoreStage1Snapshot_(Stage1HistoryState.redo.pop());
+}
+
+function installStage1History_() {
+  const wrap = name => {
+    const original = window[name];
+    if (typeof original !== "function" || original.__stage1HistoryWrapped) return;
+
+    const wrapped = function () {
+      recordStage1History_();
+      return original.apply(this, arguments);
+    };
+    wrapped.__stage1HistoryWrapped = true;
+    window[name] = wrapped;
+  };
+
+  [
+    "assignSelectedPersonnel_",
+    "assignAllVisiblePersonnel_",
+    "clearAllAssignments_",
+    "clearAllSelectedPersonnel_",
+    "removePersonnelFromReassignment_",
+  ].forEach(wrap);
+
+  if (typeof makeRemoveButton_ === "function") {
+    makeRemoveButton_ = function (key) {
+      const button = makeText_("button", "×");
+      button.type = "button";
+      button.title = "Return to unassigned list";
+      button.addEventListener("click", () => {
+        recordStage1History_();
+        ReassignmentState.assignments.delete(key);
+        ReassignmentState.selectedKeys.delete(key);
+        saveReassignmentState_();
+        renderReassignmentWorkspace_();
+      });
+      return button;
+    };
+  }
+
+  addStage1HistoryButtons_();
+
+  document.addEventListener("keydown", event => {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    if (isStage1EditableTarget_(event.target)) return;
+
+    const workspace = document.getElementById("reassignmentWorkspace");
+    if (!workspace || workspace.hidden) return;
+
+    const key = String(event.key || "").toLowerCase();
+    if (key === "z") {
+      event.preventDefault();
+      undoStage1Action_();
+    } else if (key === "u") {
+      event.preventDefault();
+      redoStage1Action_();
+    }
+  });
+}
+
+function isStage1EditableTarget_(target) {
+  if (!target) return false;
+  const tag = String(target.tagName || "").toLowerCase();
+  return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+}
+
+function addStage1HistoryButtons_() {
+  const headerActions = document.querySelector(".reassignment-header-actions");
+  if (!headerActions || document.getElementById("stage1UndoButton")) return;
+
+  const undo = document.createElement("button");
+  undo.id = "stage1UndoButton";
+  undo.type = "button";
+  undo.className = "stage1-history-button";
+  undo.textContent = "↶ Undo";
+  undo.title = "Undo last action (Ctrl+Z)";
+  undo.addEventListener("click", undoStage1Action_);
+
+  const redo = document.createElement("button");
+  redo.id = "stage1RedoButton";
+  redo.type = "button";
+  redo.className = "stage1-history-button";
+  redo.textContent = "↷ Redo";
+  redo.title = "Redo last undone action (Ctrl+U)";
+  redo.addEventListener("click", redoStage1Action_);
+
+  headerActions.insertBefore(redo, headerActions.lastElementChild);
+  headerActions.insertBefore(undo, redo);
+  updateStage1HistoryButtons_();
+}
+
+function updateStage1HistoryButtons_() {
+  const undo = document.getElementById("stage1UndoButton");
+  const redo = document.getElementById("stage1RedoButton");
+  if (undo) undo.disabled = !Stage1HistoryState.undo.length;
+  if (redo) redo.disabled = !Stage1HistoryState.redo.length;
+}
+
+function installStage1GenerateChoice_() {
+  if (typeof buildNextRevisionNumber_ === "function") {
+    buildNextRevisionNumber_ = value => stripInternalRevision_(value);
+  }
+
+  buildStage1SaveChoiceDialog_();
+
+  const workspaceGenerate = document.querySelector(
+    ".reassignment-footer-actions .button-primary"
+  );
+  if (workspaceGenerate && !workspaceGenerate.dataset.stage1Patched) {
+    const replacement = workspaceGenerate.cloneNode(true);
+    replacement.dataset.stage1Patched = "true";
+    replacement.textContent = "Generate Report";
+    replacement.addEventListener("click", openStage1SaveChoice_);
+    workspaceGenerate.replaceWith(replacement);
+  }
+
+  const submit = document.getElementById("submitReassignmentGenerateButton");
+  if (submit && !submit.dataset.stage1Patched) {
+    const replacement = submit.cloneNode(true);
+    replacement.dataset.stage1Patched = "true";
+    replacement.addEventListener("click", submitStage1Reassignment_);
+    submit.replaceWith(replacement);
+  }
+}
+
+function buildStage1SaveChoiceDialog_() {
+  if (document.getElementById("stage1SaveChoiceDialog")) return;
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "stage1SaveChoiceBackdrop";
+  backdrop.className = "stage1-save-backdrop";
+  backdrop.hidden = true;
+
+  const dialog = document.createElement("section");
+  dialog.id = "stage1SaveChoiceDialog";
+  dialog.className = "stage1-save-dialog";
+  dialog.hidden = true;
+
+  document.body.append(backdrop, dialog);
+  backdrop.addEventListener("click", closeStage1SaveChoice_);
+}
+
+function openStage1SaveChoice_() {
+  const editing = Boolean(Stage1ReportEditorState?.sourceReport);
+  const dialog = document.getElementById("stage1SaveChoiceDialog");
+  const backdrop = document.getElementById("stage1SaveChoiceBackdrop");
+
+  dialog.innerHTML = editing
+    ? `
+      <span>REPORT SAVE OPTION</span>
+      <h2>Editing Order ${escapeGeneratedReportHtml_(stripInternalRevision_(Stage1ReportEditorState.sourceReport.orderNumber || ""))}</h2>
+      <p>The official order number will remain unchanged. Revisions are tracked internally only.</p>
+      <button type="button" data-mode="UPDATE_EXISTING" class="button button-primary">Update Existing Report</button>
+      <button type="button" data-mode="NEW_REVISION" class="button button-secondary">Save New Internal Revision</button>
+      <button type="button" data-mode="CANCEL" class="button button-ghost">Cancel</button>
+    `
+    : `
+      <span>REPORT ACTION</span>
+      <h2>Generate Report</h2>
+      <p>Create a new report or load an existing generated report for editing.</p>
+      <button type="button" data-mode="NEW" class="button button-primary">New Report</button>
+      <button type="button" data-mode="EDIT_EXISTING" class="button button-secondary">Edit Existing Report</button>
+      <button type="button" data-mode="CANCEL" class="button button-ghost">Cancel</button>
+    `;
+
+  dialog.querySelectorAll("button[data-mode]").forEach(button => {
+    button.addEventListener("click", () => chooseStage1SaveMode_(button.dataset.mode));
+  });
+
+  backdrop.hidden = false;
+  dialog.hidden = false;
+}
+
+function closeStage1SaveChoice_() {
+  document.getElementById("stage1SaveChoiceBackdrop").hidden = true;
+  document.getElementById("stage1SaveChoiceDialog").hidden = true;
+}
+
+function chooseStage1SaveMode_(mode) {
+  closeStage1SaveChoice_();
+  if (!mode || mode === "CANCEL") return;
+
+  if (mode === "EDIT_EXISTING") {
+    closeReassignmentWorkspace_();
+    openGeneratedReportsDialog_();
+    return;
+  }
+
+  Stage1SaveState.mode = mode;
+  openReassignmentGenerateDialog_();
+
+  const source = Stage1ReportEditorState?.sourceReport;
+  if (source) {
+    const orderInput = document.getElementById("reassignmentOrderNumber");
+    if (orderInput) {
+      orderInput.value = stripInternalRevision_(source.orderNumber || orderInput.value);
+      orderInput.readOnly = true;
+    }
+  } else {
+    const orderInput = document.getElementById("reassignmentOrderNumber");
+    if (orderInput) orderInput.readOnly = false;
+  }
+}
+
+function stripInternalRevision_(value) {
+  return String(value || "")
+    .replace(/\s+REV\s+\d+$/i, "")
+    .trim();
+}
+
+function getNextInternalRevision_() {
+  const report = Stage1ReportEditorState?.sourceReport;
+  if (!report) return 0;
+  const current = Number(report.internalRevision || report.revision || 0);
+  return current + 1;
+}
+
+function submitStage1Reassignment_() {
+  try {
+    const payload = buildReassignmentGeneratePayload_();
+    if (!payload.orderNumber) throw new Error("Enter the Order Number.");
+    if (!payload.orderDate) throw new Error("Select the Order Date.");
+
+    const source = Stage1ReportEditorState?.sourceReport || null;
+    payload.orderNumber = stripInternalRevision_(payload.orderNumber);
+    payload.baseOrderNumber = payload.orderNumber;
+    payload.saveMode = Stage1SaveState.mode || "NEW";
+    payload.sourceDocumentId = source?.documentId || "";
+    payload.sourceReportUrl = source?.url || "";
+    payload.internalRevision = payload.saveMode === "NEW_REVISION"
+      ? getNextInternalRevision_()
+      : Number(source?.internalRevision || source?.revision || 0);
+
+    setReassignmentGenerateSubmitting_(true);
+    showReassignmentGenerateMessage_(
+      payload.saveMode === "UPDATE_EXISTING"
+        ? "Updating the existing report..."
+        : "Generating the reassignment report...",
+      "working"
+    );
+
+    google.script.run
+      .withSuccessHandler(response => {
+        handleReassignmentGenerateSuccess_(response);
+        if (response?.success) {
+          Stage1ReportEditorState.sourceReport = null;
+          Stage1SaveState.mode = "NEW";
+          document.getElementById("stage1RevisionBanner")?.remove();
+        }
+      })
+      .withFailureHandler(handleReassignmentGenerateFailure_)
+      .sendStage1ReassignmentToAogen(payload);
+  } catch (error) {
+    showReassignmentGenerateMessage_(error?.message || String(error), "error");
+  }
+}
+
+function injectStage1WorkflowStyles_() {
+  if (document.getElementById("stage1WorkflowStyles")) return;
+  const style = document.createElement("style");
+  style.id = "stage1WorkflowStyles";
+  style.textContent = `
+    .stage1-history-button { min-height:34px; padding:7px 10px; border:1px solid rgba(31,111,52,.18); border-radius:10px; background:#fff; color:#205b32; font:inherit; font-size:11px; font-weight:850; cursor:pointer; }
+    .stage1-history-button:disabled { opacity:.42; cursor:not-allowed; }
+    .stage1-save-backdrop { position:fixed; inset:0; z-index:19000; background:rgba(5,24,11,.52); backdrop-filter:blur(6px); }
+    .stage1-save-dialog { position:fixed; z-index:19001; top:50%; left:50%; transform:translate(-50%,-50%); width:min(460px,92vw); display:grid; gap:12px; padding:22px; border:1px solid rgba(31,111,52,.2); border-radius:20px; background:#f7fcf8; box-shadow:0 30px 90px rgba(0,0,0,.32); }
+    .stage1-save-backdrop[hidden], .stage1-save-dialog[hidden] { display:none; }
+    .stage1-save-dialog > span { color:#26723d; font-size:10px; font-weight:900; letter-spacing:.12em; }
+    .stage1-save-dialog h2 { margin:0; }
+    .stage1-save-dialog p { margin:0 0 4px; opacity:.72; line-height:1.5; }
+  `;
+  document.head.appendChild(style);
+}
