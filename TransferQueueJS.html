@@ -1,0 +1,372 @@
+//----------------------------------
+// Transfer Queue Client
+//----------------------------------
+
+(function () {
+  const ids = {
+    button: "openTransferQueueButton",
+    backdrop: "transferQueueBackdrop",
+    dialog: "transferQueueDialog",
+    body: "transferQueueTableBody",
+    message: "transferQueueMessage",
+    approve: "approveSelectedTransfersButton",
+  };
+
+  let selectedIds = new Set();
+  let latestPayload = null;
+
+  function install_() {
+    ensureButton_();
+    ensureDialog_();
+    patchPayloadCapture_();
+    patchGenerationSuccess_();
+
+    const observer = new MutationObserver(function () {
+      ensureButton_();
+      ensureDialog_();
+      patchPayloadCapture_();
+      patchGenerationSuccess_();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  function ensureButton_() {
+    if (document.getElementById(ids.button)) return;
+
+    const host =
+      document.querySelector(".app-header-actions") ||
+      document.querySelector(".header-actions") ||
+      document.querySelector("header") ||
+      document.body;
+
+    const button = document.createElement("button");
+    button.id = ids.button;
+    button.type = "button";
+    button.className = "button button-secondary transfer-queue-launcher";
+    button.textContent = "Transfer Queue";
+    button.addEventListener("click", openQueue_);
+    host.appendChild(button);
+  }
+
+  function ensureDialog_() {
+    if (document.getElementById(ids.dialog)) return;
+
+    const backdrop = document.createElement("div");
+    backdrop.id = ids.backdrop;
+    backdrop.className = "transfer-queue-backdrop";
+    backdrop.hidden = true;
+
+    const dialog = document.createElement("section");
+    dialog.id = ids.dialog;
+    dialog.className = "transfer-queue-dialog";
+    dialog.hidden = true;
+    dialog.innerHTML = `
+      <div class="transfer-queue-header">
+        <div>
+          <span>PERSONNEL MOVEMENT</span>
+          <h2>Transfer Queue</h2>
+          <p>Approve selected transfers and update Office and Camp in the LIST sheet.</p>
+        </div>
+        <button type="button" data-close title="Close">×</button>
+      </div>
+      <div id="${ids.message}" class="transfer-queue-message" hidden></div>
+      <div class="transfer-queue-toolbar">
+        <button type="button" data-select-all class="button button-secondary">Select pending</button>
+        <button type="button" data-refresh class="button button-secondary">Refresh</button>
+        <strong data-count>0 selected</strong>
+      </div>
+      <div class="transfer-queue-table-wrap">
+        <table class="transfer-queue-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Status</th>
+              <th>AO</th>
+              <th>Personnel</th>
+              <th>Previous Assignment</th>
+              <th>New Assignment</th>
+              <th>Document</th>
+            </tr>
+          </thead>
+          <tbody id="${ids.body}"></tbody>
+        </table>
+      </div>
+      <div class="transfer-queue-actions">
+        <button type="button" data-close class="button button-secondary">Close</button>
+        <button id="${ids.approve}" type="button" class="button button-primary">Approve & Apply Transfer</button>
+      </div>
+    `;
+
+    backdrop.addEventListener("click", closeQueue_);
+    dialog.querySelectorAll("[data-close]").forEach(button =>
+      button.addEventListener("click", closeQueue_)
+    );
+    dialog.querySelector("[data-refresh]").addEventListener("click", loadQueue_);
+    dialog.querySelector("[data-select-all]").addEventListener("click", selectAllPending_);
+    dialog.querySelector(`#${ids.approve}`).addEventListener("click", approveSelected_);
+
+    document.body.append(backdrop, dialog);
+    injectStyles_();
+  }
+
+  function openQueue_() {
+    ensureDialog_();
+    document.getElementById(ids.backdrop).hidden = false;
+    document.getElementById(ids.dialog).hidden = false;
+    selectedIds.clear();
+    updateSelectedCount_();
+    loadQueue_();
+  }
+
+  function closeQueue_() {
+    document.getElementById(ids.backdrop).hidden = true;
+    document.getElementById(ids.dialog).hidden = true;
+  }
+
+  function loadQueue_() {
+    showMessage_("Loading transfer queue...", "working");
+    google.script.run
+      .withSuccessHandler(renderQueue_)
+      .withFailureHandler(error => {
+        showMessage_(error?.message || "Unable to load transfer queue.", "error");
+      })
+      .getTransferQueueRecords();
+  }
+
+  function renderQueue_(response) {
+    const body = document.getElementById(ids.body);
+    body.replaceChildren();
+
+    if (!response || response.success !== true) {
+      showMessage_(response?.message || "Unable to load transfer queue.", "error");
+      return;
+    }
+
+    hideMessage_();
+    const records = Array.isArray(response.records) ? response.records : [];
+
+    if (!records.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.className = "transfer-queue-empty";
+      cell.textContent = "No transfers have been queued yet.";
+      row.appendChild(cell);
+      body.appendChild(row);
+      return;
+    }
+
+    records.forEach(record => {
+      const row = document.createElement("tr");
+      row.dataset.status = record.status || "";
+
+      const checkboxCell = document.createElement("td");
+      const hitbox = document.createElement("label");
+      hitbox.className = "transfer-queue-check-hitbox";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = record.transferId;
+      checkbox.disabled = String(record.status).toUpperCase() === "APPLIED";
+      checkbox.checked = selectedIds.has(record.transferId);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedIds.add(record.transferId);
+        else selectedIds.delete(record.transferId);
+        updateSelectedCount_();
+      });
+      hitbox.appendChild(checkbox);
+      checkboxCell.appendChild(hitbox);
+
+      const statusCell = document.createElement("td");
+      const status = document.createElement("span");
+      status.className = `transfer-status transfer-status-${String(record.status || "pending").toLowerCase()}`;
+      status.textContent = record.status || "PENDING";
+      statusCell.appendChild(status);
+      if (record.errorMessage) {
+        const error = document.createElement("small");
+        error.textContent = record.errorMessage;
+        statusCell.appendChild(error);
+      }
+
+      const aoCell = document.createElement("td");
+      aoCell.innerHTML = `<strong></strong><small></small>`;
+      aoCell.querySelector("strong").textContent = record.orderNumber || "—";
+      aoCell.querySelector("small").textContent = record.orderDate || "";
+
+      const personCell = document.createElement("td");
+      personCell.innerHTML = `<strong></strong><small></small>`;
+      personCell.querySelector("strong").textContent = [record.rank, record.fullName].filter(Boolean).join(" ");
+      personCell.querySelector("small").textContent = record.transferId || "";
+
+      const previousCell = assignmentCell_(record.previousOffice, record.previousCamp);
+      const newCell = assignmentCell_(record.newOffice, record.newCamp);
+
+      const documentCell = document.createElement("td");
+      if (record.documentUrl) {
+        const link = document.createElement("a");
+        link.href = record.documentUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open AO";
+        documentCell.appendChild(link);
+      } else {
+        documentCell.textContent = "—";
+      }
+
+      row.append(
+        checkboxCell,
+        statusCell,
+        aoCell,
+        personCell,
+        previousCell,
+        newCell,
+        documentCell
+      );
+      body.appendChild(row);
+    });
+  }
+
+  function assignmentCell_(office, camp) {
+    const cell = document.createElement("td");
+    const strong = document.createElement("strong");
+    const small = document.createElement("small");
+    strong.textContent = office || "—";
+    small.textContent = camp || "—";
+    cell.append(strong, small);
+    return cell;
+  }
+
+  function selectAllPending_() {
+    document.querySelectorAll(`#${ids.body} input[type="checkbox"]:not(:disabled)`).forEach(box => {
+      box.checked = true;
+      selectedIds.add(box.value);
+    });
+    updateSelectedCount_();
+  }
+
+  function approveSelected_() {
+    if (!selectedIds.size) {
+      showMessage_("Select at least one pending transfer.", "error");
+      return;
+    }
+
+    if (!window.confirm(
+      `Approve and apply ${selectedIds.size} transfer(s)? This will update Office and Camp in LIST.`
+    )) return;
+
+    const button = document.getElementById(ids.approve);
+    button.disabled = true;
+    button.textContent = "Applying...";
+    showMessage_("Updating the LIST sheet...", "working");
+
+    google.script.run
+      .withSuccessHandler(response => {
+        button.disabled = false;
+        button.textContent = "Approve & Apply Transfer";
+        showMessage_(response?.message || "Transfer processing completed.", response?.success ? "success" : "error");
+        selectedIds.clear();
+        updateSelectedCount_();
+        loadQueue_();
+        if (typeof loadPersonnelData === "function") {
+          try { loadPersonnelData(); } catch (ignored) {}
+        }
+      })
+      .withFailureHandler(error => {
+        button.disabled = false;
+        button.textContent = "Approve & Apply Transfer";
+        showMessage_(error?.message || "Transfer processing failed.", "error");
+      })
+      .approveAndApplyTransfers([...selectedIds]);
+  }
+
+  function patchPayloadCapture_() {
+    if (
+      typeof window.buildReassignmentGeneratePayload_ !== "function" ||
+      window.buildReassignmentGeneratePayload_.transferQueueCapturePatched
+    ) return;
+
+    const original = window.buildReassignmentGeneratePayload_;
+    function patched() {
+      const payload = original.apply(this, arguments);
+      latestPayload = JSON.parse(JSON.stringify(payload));
+      return payload;
+    }
+    patched.transferQueueCapturePatched = true;
+    window.buildReassignmentGeneratePayload_ = patched;
+  }
+
+  function patchGenerationSuccess_() {
+    if (
+      typeof window.handleReassignmentGenerateSuccess_ !== "function" ||
+      window.handleReassignmentGenerateSuccess_.transferQueuePatched
+    ) return;
+
+    const original = window.handleReassignmentGenerateSuccess_;
+    function patched(response) {
+      original.apply(this, arguments);
+      if (!response || response.success !== true || !latestPayload) return;
+
+      google.script.run
+        .withSuccessHandler(queueResponse => {
+          if (queueResponse?.success) {
+            showReassignmentGenerateMessage_(
+              `${response.message || "Report generated."} ${queueResponse.message}`,
+              "success"
+            );
+          }
+        })
+        .withFailureHandler(error => {
+          console.warn("Unable to add transfers to queue:", error);
+        })
+        .enqueueTransferBatch(latestPayload, response);
+    }
+    patched.transferQueuePatched = true;
+    window.handleReassignmentGenerateSuccess_ = patched;
+  }
+
+  function updateSelectedCount_() {
+    const count = document.querySelector(`#${ids.dialog} [data-count]`);
+    if (count) count.textContent = `${selectedIds.size} selected`;
+  }
+
+  function showMessage_(text, type) {
+    const message = document.getElementById(ids.message);
+    message.className = `transfer-queue-message is-${type || "info"}`;
+    message.textContent = text;
+    message.hidden = false;
+  }
+
+  function hideMessage_() {
+    const message = document.getElementById(ids.message);
+    message.hidden = true;
+    message.textContent = "";
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("transferQueueStyles")) return;
+    const style = document.createElement("style");
+    style.id = "transferQueueStyles";
+    style.textContent = `
+      .transfer-queue-launcher{margin-left:8px}
+      .transfer-queue-backdrop{position:fixed;inset:0;background:rgba(8,28,14,.48);z-index:12000}
+      .transfer-queue-dialog{position:fixed;z-index:12001;inset:5vh 3vw auto;max-height:90vh;overflow:auto;padding:20px;border-radius:18px;background:#f5fbf6;box-shadow:0 24px 70px rgba(0,0,0,.28)}
+      .transfer-queue-header,.transfer-queue-toolbar,.transfer-queue-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .transfer-queue-header h2{margin:2px 0}.transfer-queue-header p{margin:4px 0;color:#55705c}.transfer-queue-header>button{font-size:28px;border:0;background:transparent;cursor:pointer}
+      .transfer-queue-toolbar{margin:14px 0}.transfer-queue-table-wrap{overflow:auto;border:1px solid #cfe1d2;border-radius:14px;background:white}
+      .transfer-queue-table{width:100%;border-collapse:collapse;min-width:980px}.transfer-queue-table th,.transfer-queue-table td{padding:10px;border-bottom:1px solid #e6efe8;text-align:left;vertical-align:top}.transfer-queue-table th{position:sticky;top:0;background:#eaf5ec;z-index:1;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.transfer-queue-table td strong,.transfer-queue-table td small{display:block}.transfer-queue-table td small{margin-top:3px;color:#68776b}
+      .transfer-queue-check-hitbox{display:grid;place-items:center;width:42px;height:42px;margin:-8px;cursor:pointer}.transfer-queue-check-hitbox input{width:20px;height:20px;cursor:pointer}
+      .transfer-status{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900}.transfer-status-pending{background:#fff1a8}.transfer-status-applied{background:#ccefd4;color:#155b25}.transfer-status-error{background:#ffd8d8;color:#8c2222}
+      .transfer-queue-actions{justify-content:flex-end;margin-top:14px}.transfer-queue-message{margin:12px 0;padding:10px 12px;border-radius:10px}.transfer-queue-message.is-success{background:#dff5e3}.transfer-queue-message.is-error{background:#ffe2e2}.transfer-queue-message.is-working{background:#fff5bf}.transfer-queue-empty{text-align:center!important;padding:30px!important;color:#69766c}
+    `;
+    document.head.appendChild(style);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
