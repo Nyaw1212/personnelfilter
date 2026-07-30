@@ -1,0 +1,108 @@
+//----------------------------------
+// Reassignment document layout selector
+//----------------------------------
+
+(function () {
+  const SELECT_ID = "reassignmentPersonnelLayout";
+  const STORAGE_KEY = "personnelFilterReassignmentLayoutV1";
+
+  function ensureLayoutField_() {
+    const grid = document.querySelector(
+      "#reassignmentGenerateDialog .reassignment-generate-grid"
+    );
+
+    if (!grid || document.getElementById(SELECT_ID)) {
+      return;
+    }
+
+    const field = document.createElement("label");
+    field.className = "reassignment-field reassignment-field-wide";
+
+    const label = document.createElement("span");
+    label.textContent = "Personnel Layout";
+
+    const select = document.createElement("select");
+    select.id = SELECT_ID;
+    select.innerHTML =
+      '<option value="TABLE">Table</option>' +
+      '<option value="NUMBERED_LIST">Numbered List</option>' +
+      '<option value="GROUPED_MOVEMENT">Grouped by Movement</option>';
+
+    try {
+      select.value = localStorage.getItem(STORAGE_KEY) || "TABLE";
+    } catch (ignored) {
+      select.value = "TABLE";
+    }
+
+    select.addEventListener("change", function () {
+      try {
+        localStorage.setItem(STORAGE_KEY, select.value);
+      } catch (ignored) {
+        // Storage is optional.
+      }
+    });
+
+    const hint = document.createElement("small");
+    hint.textContent =
+      "Choose a table, a continuous numbered list, or movement headings with continuous numbering.";
+
+    field.append(label, select, hint);
+
+    const summary = grid.querySelector(
+      ".reassignment-personnel-summary"
+    );
+
+    if (summary) {
+      grid.insertBefore(field, summary);
+    } else {
+      grid.appendChild(field);
+    }
+  }
+
+  function patchPayloadBuilder_() {
+    if (
+      typeof window.buildReassignmentGeneratePayload_ !== "function" ||
+      window.buildReassignmentGeneratePayload_.layoutChoicePatched
+    ) {
+      return false;
+    }
+
+    const original = window.buildReassignmentGeneratePayload_;
+
+    function patchedBuildReassignmentGeneratePayload_() {
+      const payload = original.apply(this, arguments);
+      const select = document.getElementById(SELECT_ID);
+      payload.personnelLayout = select ? select.value : "TABLE";
+      return payload;
+    }
+
+    patchedBuildReassignmentGeneratePayload_.layoutChoicePatched = true;
+    window.buildReassignmentGeneratePayload_ =
+      patchedBuildReassignmentGeneratePayload_;
+
+    return true;
+  }
+
+  function install_() {
+    ensureLayoutField_();
+    patchPayloadBuilder_();
+
+    const observer = new MutationObserver(function () {
+      ensureLayoutField_();
+      patchPayloadBuilder_();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, {
+      once: true,
+    });
+  } else {
+    install_();
+  }
+})();
