@@ -1,0 +1,121 @@
+<script>
+//----------------------------------
+// Personnel Performance Client
+//----------------------------------
+
+const PERSONNEL_SEARCH_DEBOUNCE_MS = 250;
+
+window.addEventListener("DOMContentLoaded", () => {
+  PERSONNEL_APP_CONFIG.previewRowLimit = 100;
+  PersonnelState.autoApply = false;
+
+  const autoApplyToggle = document.getElementById("autoApplyToggle");
+  if (autoApplyToggle) {
+    autoApplyToggle.checked = false;
+  }
+
+  installDebouncedPersonnelSearch_();
+  patchPersonnelFiltering_();
+  patchAoRowButtonsForFastUpdates_();
+
+  setSyncStatus("Preview only", "ready");
+  setLastSyncLabel("Auto Apply is off. Click Apply Now only when you want to sync the Sheet view.");
+});
+
+function installDebouncedPersonnelSearch_() {
+  const original = document.getElementById("searchInput");
+  if (!original || original.dataset.performancePatched === "true") return;
+
+  const replacement = original.cloneNode(true);
+  replacement.dataset.performancePatched = "true";
+  original.replaceWith(replacement);
+
+  let timer = null;
+  replacement.addEventListener("input", event => {
+    clearTimeout(timer);
+    const value = event.target.value;
+
+    timer = window.setTimeout(() => {
+      PersonnelState.filters.search = value;
+      handleFilterChange();
+    }, PERSONNEL_SEARCH_DEBOUNCE_MS);
+  });
+}
+
+function patchPersonnelFiltering_() {
+  filterPersonnelRecords = function () {
+    const searchTerm = String(PersonnelState.filters.search || "")
+      .trim()
+      .toLowerCase();
+
+    const groups = PERSONNEL_APP_CONFIG.filterGroups;
+    const selectedRanks = PersonnelState.filters.ranks;
+
+    return PersonnelState.records.filter(record => {
+      for (const group of groups) {
+        const selected = PersonnelState.filters[group.key];
+        if (selected.size && !selected.has(String(record[group.recordKey] || "").trim())) {
+          return false;
+        }
+      }
+
+      if (selectedRanks.size && !selectedRanks.has(String(record.Rank || "").trim())) {
+        return false;
+      }
+
+      if (!searchTerm) return true;
+
+      if (!record.__personnelSearchText) {
+        record.__personnelSearchText = PERSONNEL_APP_CONFIG.searchableColumns
+          .map(column => String(record[column] || "").trim().toLowerCase())
+          .join("\u0001");
+      }
+
+      return record.__personnelSearchText.includes(searchTerm);
+    });
+  };
+
+  const originalFilterAndRender = filterAndRenderPersonnel;
+  let scheduled = false;
+
+  filterAndRenderPersonnel = function () {
+    if (scheduled) return;
+    scheduled = true;
+
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      originalFilterAndRender();
+    });
+  };
+}
+
+function patchAoRowButtonsForFastUpdates_() {
+  if (typeof createAoAddButton_ !== "function") return;
+
+  createAoAddButton_ = function (record) {
+    const key = getAoPersonnelKey_(record);
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "ao-row-add-button";
+
+    const refreshButton = () => {
+      const isAdded = PersonnelState.aoCart.has(key);
+      button.classList.toggle("is-added", isAdded);
+      button.textContent = isAdded ? "✓ Added" : "+ Add";
+      button.title = isAdded
+        ? "Remove from AO selection"
+        : "Add to AO selection";
+    };
+
+    refreshButton();
+
+    button.addEventListener("click", () => {
+      togglePersonnelInAoCart_(record);
+      refreshButton();
+    });
+
+    return button;
+  };
+}
+</script>
