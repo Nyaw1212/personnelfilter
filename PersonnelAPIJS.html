@@ -9,95 +9,57 @@ const PersonnelAPI = {
   //----------------------------------
 
   loadPersonnel() {
-
-    return new Promise(
-      (
-        resolve,
-        reject
-      ) => {
-
-        google.script.run
-          .withSuccessHandler(
-            resolve
-          )
-          .withFailureHandler(
-            error => {
-
-              reject(
-                normalizeServerError_(
-                  error
-                )
-              );
-
-            }
-          )
-          .getPersonnelWebAppData();
-
-      }
-    );
-
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => {
+          reject(normalizeServerError_(error));
+        })
+        .getPersonnelWebAppDataOptimized();
+    });
   },
 
   //----------------------------------
   // Apply Visible Rows
   //----------------------------------
 
-  applyVisibleRows(
-    payload
-  ) {
-
-    return new Promise(
-      (
-        resolve,
-        reject
-      ) => {
-
-        google.script.run
-          .withSuccessHandler(
-            resolve
-          )
-          .withFailureHandler(
-            error => {
-
-              reject(
-                normalizeServerError_(
-                  error
-                )
-              );
-
-            }
-          )
-          .applyPersonnelVisibleRows(
-            payload
-          );
-
-      }
-    );
-
+  applyVisibleRows(payload) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => {
+          reject(normalizeServerError_(error));
+        })
+        .applyPersonnelVisibleRows(payload);
+    });
   },
 
+  //----------------------------------
+  // Clear Personnel Cache
+  //----------------------------------
+
+  clearCache() {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => {
+          reject(normalizeServerError_(error));
+        })
+        .clearPersonnelPerformanceCache();
+    });
+  },
 };
 
 //----------------------------------
 // Normalize Server Error
 //----------------------------------
 
-function normalizeServerError_(
-  error
-) {
-
-  if (
-    error instanceof Error
-  ) {
-
-    return error;
-
-  }
+function normalizeServerError_(error) {
+  if (error instanceof Error) return error;
 
   return new Error(
     error?.message ||
     String(error) ||
     "Unknown Apps Script error."
   );
-
 }
