@@ -1,0 +1,137 @@
+//----------------------------------
+// Step 1 source subtitle fix
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const TRANSFER_MODE_KEY = "personnelFilterTransferModeV1";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizedField_(source, wanted) {
+    if (!source || typeof source !== "object") return "";
+    const target = String(wanted).trim().toUpperCase();
+    for (const [key, value] of Object.entries(source)) {
+      if (String(key).trim().toUpperCase() === target && text_(value)) {
+        return text_(value);
+      }
+    }
+    return "";
+  }
+
+  function transferMode_() {
+    try {
+      return localStorage.getItem(TRANSFER_MODE_KEY) === "CAMP_TO_CAMP"
+        ? "CAMP_TO_CAMP"
+        : "OFFICE_TO_OFFICE";
+    } catch (error) {
+      return "OFFICE_TO_OFFICE";
+    }
+  }
+
+  function personValue_(person, field) {
+    const direct = normalizedField_(person, field);
+    if (direct) return direct;
+    return normalizedField_(person?.record, field);
+  }
+
+  function subtitle_(person) {
+    const value = transferMode_() === "CAMP_TO_CAMP"
+      ? personValue_(person, "CAMP")
+      : personValue_(person, "OFFICE");
+    return value || "N/A";
+  }
+
+  function toggleSelection_(key, checkbox, details) {
+    checkbox.checked = !checkbox.checked;
+    if (checkbox.checked) ReassignmentState.selectedKeys.add(key);
+    else ReassignmentState.selectedKeys.delete(key);
+    details.setAttribute("aria-checked", String(checkbox.checked));
+    if (typeof updateReassignmentControls_ === "function") {
+      updateReassignmentControls_(PersonnelState.aoCart.size);
+    }
+  }
+
+  function renderSource_(entries) {
+    const list = document.getElementById("reassignmentSourceList");
+    if (!list) return;
+    list.replaceChildren();
+
+    if (!entries.length) {
+      list.appendChild(makeText_("div", "No personnel match the filters."));
+      return;
+    }
+
+    entries.forEach(([key, person]) => {
+      const row = makeElement_("div", "reassignment-person-row");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = ReassignmentState.selectedKeys.has(key);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) ReassignmentState.selectedKeys.add(key);
+        else ReassignmentState.selectedKeys.delete(key);
+        if (typeof updateReassignmentControls_ === "function") {
+          updateReassignmentControls_(PersonnelState.aoCart.size);
+        }
+      });
+
+      const details = document.createElement("div");
+      details.className = "reassignment-person-details reassignment-person-toggle-area";
+      details.tabIndex = 0;
+      details.setAttribute("role", "checkbox");
+      details.setAttribute("aria-checked", String(checkbox.checked));
+      details.append(
+        makeText_("strong", [person.rank, person.fullName].filter(Boolean).join(" ")),
+        makeText_("small", subtitle_(person))
+      );
+
+      details.addEventListener("click", event => {
+        event.preventDefault();
+        toggleSelection_(key, checkbox, details);
+      });
+      details.addEventListener("keydown", event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleSelection_(key, checkbox, details);
+      });
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "reassignment-source-remove-button";
+      remove.textContent = "×";
+      remove.title = "Remove this personnel from To Be Assigned";
+      remove.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof removePersonnelFromReassignment_ === "function") {
+          removePersonnelFromReassignment_(key);
+        }
+      });
+
+      row.append(checkbox, details, remove);
+      list.appendChild(row);
+    });
+  }
+
+  function install_() {
+    window.renderSourcePersonnel_ = renderSource_;
+
+    document.addEventListener("click", event => {
+      if (!event.target.closest("[data-transfer-mode]")) return;
+      setTimeout(() => {
+        if (typeof renderReassignmentWorkspace_ === "function") {
+          renderReassignmentWorkspace_();
+        }
+      }, 0);
+    }, true);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
