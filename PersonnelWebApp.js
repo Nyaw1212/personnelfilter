@@ -150,6 +150,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
       .getContent();
+
+    // Compact Step 1 filters and clickable personnel name area.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentCompactSourceUXJS")
+      .getContent();
   }
 
   return content;
