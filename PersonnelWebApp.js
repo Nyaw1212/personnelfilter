@@ -146,9 +146,15 @@ function include(
       .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
       .getContent();
 
-    // Allow Camp-only or Office-only transfer and preserve LIST order in reports.
+    // Legacy flexible destination behavior.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
+      .getContent();
+
+    // Final workflow behavior: transfer type, sorting, name composition,
+    // editable Step 3 destinations, and freehand drag ordering.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentWorkflowOptionsJS")
       .getContent();
   }
 
