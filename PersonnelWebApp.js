@@ -111,9 +111,14 @@ function include(
       .createHtmlOutputFromFile("Stage1ReportLauncherAndEscapeJS")
       .getContent();
 
-    // Layout selector loads last so it can extend the final report dialog.
+    // Layout selector extends the final report dialog.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentLayoutChoiceJS")
+      .getContent();
+
+    // Transfer Queue loads last so it captures the final report payload.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("TransferQueueJS")
       .getContent();
   }
 
