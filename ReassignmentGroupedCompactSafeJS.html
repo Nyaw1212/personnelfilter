@@ -1,0 +1,313 @@
+//----------------------------------
+// Safe grouped compact Step 3 renderer
+//----------------------------------
+
+(function () {
+  const STORAGE_KEY = "personnelFilterReassignmentWorkflowOptionsV1";
+  const CAMPS = ["NBP", "MAXIMUM", "MEDIUM", "MINIMUM", "RDC"];
+
+  function text_(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function assignment_(raw) {
+    if (raw && typeof raw === "object") {
+      return {
+        office: text_(raw.office),
+        camp: text_(raw.camp),
+        mode: text_(raw.mode),
+      };
+    }
+    return { office: text_(raw), camp: "", mode: "OFFICE_TO_OFFICE" };
+  }
+
+  function isCamp_(destination) {
+    return destination.mode === "CAMP_TO_CAMP" || Boolean(destination.camp && !destination.office);
+  }
+
+  function groupKey_(destination) {
+    return isCamp_(destination)
+      ? `CAMP::${destination.camp}`
+      : `OFFICE::${destination.office}`;
+  }
+
+  function groupTitle_(destination) {
+    return isCamp_(destination)
+      ? `CAMP TO ${destination.camp || "NOT SET"}`
+      : `OFFICE TO ${destination.office || "NOT SET"}`;
+  }
+
+  function personName_(person) {
+    const record = person?.record || {};
+    const rank = text_(record.RANK || record.Rank || person?.rank);
+    const first = text_(record["FIRST NAME"] || record.firstName);
+    const middle = text_(record["MIDDLE NAME"] || record.middleName);
+    const last = text_(record["LAST NAME"] || record.lastName);
+    const suffix = text_(record.SUFFIX || record.suffix);
+    const fallback = text_(person?.fullName || record["FULL NAME"]);
+    const name = [first, middle, last, suffix].filter(Boolean).join(" ") || fallback;
+    return [rank, name].filter(Boolean).join(" ");
+  }
+
+  function readState_() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      return {
+        sortMode: document.getElementById("reassignmentSortMode")?.value || saved.sortMode || "LIST",
+        manualOrder: Array.isArray(saved.manualOrder) ? saved.manualOrder : [],
+      };
+    } catch (error) {
+      return { sortMode: "LIST", manualOrder: [] };
+    }
+  }
+
+  function saveState_(state) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function orderedKeys_() {
+    const assigned = [...ReassignmentState.assignments.keys()];
+    const state = readState_();
+    if (state.sortMode === "MANUAL") {
+      const order = state.manualOrder.filter(key => assigned.includes(key));
+      assigned.forEach(key => { if (!order.includes(key)) order.push(key); });
+      return order;
+    }
+    return assigned;
+  }
+
+  function availableOffices_() {
+    const values = new Set();
+    (Array.isArray(PersonnelState.records) ? PersonnelState.records : []).forEach(record => {
+      const office = text_(record.Office || record.OFFICE || record.office);
+      if (office) values.add(office);
+    });
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function changeGroup_(keys, destination) {
+    const campMode = isCamp_(destination);
+    const options = campMode ? CAMPS : availableOffices_();
+    const current = campMode ? destination.camp : destination.office;
+    const selected = window.prompt(
+      `Change destination for ${keys.length} personnel\n\nAvailable ${campMode ? "camps" : "offices"}:\n${options.join(", ")}`,
+      current
+    );
+    if (selected === null || !text_(selected)) return;
+
+    keys.forEach(key => {
+      ReassignmentState.assignments.set(key, campMode
+        ? { office: "", camp: text_(selected), mode: "CAMP_TO_CAMP" }
+        : { office: text_(selected), camp: "", mode: "OFFICE_TO_OFFICE" });
+    });
+
+    if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+    renderGroupedCompact_();
+  }
+
+  function remove_(key) {
+    ReassignmentState.assignments.delete(key);
+    const state = readState_();
+    state.manualOrder = state.manualOrder.filter(item => item !== key);
+    saveState_(state);
+    if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+    renderGroupedCompact_();
+    if (typeof updateReassignmentControls_ === "function") {
+      updateReassignmentControls_(PersonnelState.aoCart.size);
+    }
+  }
+
+  function reorder_(draggedKey, targetKey) {
+    if (!draggedKey || draggedKey === targetKey) return;
+    const order = orderedKeys_().filter(key => key !== draggedKey);
+    const index = order.indexOf(targetKey);
+    order.splice(index < 0 ? order.length : index, 0, draggedKey);
+    const state = readState_();
+    state.manualOrder = order;
+    state.sortMode = "MANUAL";
+    saveState_(state);
+    const sort = document.getElementById("reassignmentSortMode");
+    if (sort) sort.value = "MANUAL";
+    renderGroupedCompact_();
+  }
+
+  function renderGroupedCompact_() {
+    const grid = document.getElementById("assignmentCardGrid");
+    if (!grid) return;
+
+    grid.replaceChildren();
+    grid.className = "assignment-group-board";
+
+    const keys = orderedKeys_();
+    if (!keys.length) {
+      const empty = document.createElement("div");
+      empty.className = "assignment-group-empty";
+      empty.textContent = "No personnel assigned yet.";
+      grid.appendChild(empty);
+      return;
+    }
+
+    const groups = new Map();
+    keys.forEach(key => {
+      const destination = assignment_(ReassignmentState.assignments.get(key));
+      const groupKey = groupKey_(destination);
+      if (!groups.has(groupKey)) groups.set(groupKey, { destination, keys: [] });
+      groups.get(groupKey).keys.push(key);
+    });
+
+    groups.forEach(group => {
+      const column = document.createElement("section");
+      column.className = "assignment-group-column";
+
+      const header = document.createElement("header");
+      header.className = "assignment-group-header";
+      const heading = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = groupTitle_(group.destination);
+      const count = document.createElement("small");
+      count.textContent = `${group.keys.length} personnel`;
+      heading.append(title, count);
+
+      const change = document.createElement("button");
+      change.type = "button";
+      change.textContent = "Change Group";
+      change.addEventListener("click", () => changeGroup_(group.keys, group.destination));
+      header.append(heading, change);
+
+      const list = document.createElement("div");
+      list.className = "assignment-group-list";
+
+      group.keys.forEach(key => {
+        const person = PersonnelState.aoCart.get(key);
+        if (!person) return;
+
+        const row = document.createElement("article");
+        row.className = "assignment-group-row";
+        row.draggable = true;
+        row.dataset.personKey = key;
+
+        const handle = document.createElement("span");
+        handle.className = "assignment-group-handle";
+        handle.textContent = "⋮⋮";
+        handle.title = "Drag to reorder";
+
+        const name = document.createElement("strong");
+        name.textContent = personName_(person);
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.title = "Return to Step 1";
+        remove.addEventListener("click", () => remove_(key));
+
+        row.append(handle, name, remove);
+        row.addEventListener("dragstart", event => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", key);
+          row.classList.add("is-dragging");
+        });
+        row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
+        row.addEventListener("dragover", event => event.preventDefault());
+        row.addEventListener("drop", event => {
+          event.preventDefault();
+          reorder_(event.dataTransfer.getData("text/plain"), key);
+        });
+
+        list.appendChild(row);
+      });
+
+      column.append(header, list);
+      grid.appendChild(column);
+    });
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("assignmentGroupedCompactSafeStyles")) return;
+    const style = document.createElement("style");
+    style.id = "assignmentGroupedCompactSafeStyles";
+    style.textContent = `
+      #assignmentCardGrid.assignment-group-board{
+        display:grid!important;
+        grid-template-columns:repeat(3,minmax(220px,1fr))!important;
+        gap:12px!important;
+        align-items:start!important;
+      }
+      .assignment-group-column{
+        min-width:0;
+        padding:10px;
+        border:1px solid rgba(31,111,52,.18);
+        border-radius:14px;
+        background:rgba(255,255,255,.78);
+      }
+      .assignment-group-header{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:8px;
+        margin-bottom:8px;
+      }
+      .assignment-group-header strong,.assignment-group-header small{display:block}
+      .assignment-group-header small{margin-top:2px;color:#68766b}
+      .assignment-group-header button{
+        flex:0 0 auto;
+        min-height:30px;
+        padding:5px 8px;
+        border:1px solid rgba(31,111,52,.2);
+        border-radius:8px;
+        background:#fff;
+        cursor:pointer;
+      }
+      .assignment-group-list{display:grid;gap:6px}
+      .assignment-group-row{
+        display:grid;
+        grid-template-columns:auto minmax(0,1fr) auto;
+        align-items:center;
+        gap:7px;
+        min-height:42px;
+        padding:6px 8px;
+        border:1px solid rgba(31,111,52,.12);
+        border-radius:9px;
+        background:#fff;
+        cursor:grab;
+      }
+      .assignment-group-row strong{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-size:12px;
+      }
+      .assignment-group-row button{
+        width:28px;
+        height:28px;
+        padding:0;
+        border:1px solid rgba(31,111,52,.18);
+        border-radius:8px;
+        background:#fff;
+        cursor:pointer;
+      }
+      .assignment-group-handle{color:#68806d;font-weight:900;user-select:none}
+      .assignment-group-row.is-dragging{opacity:.45}
+      @media (max-width:1200px){
+        #assignmentCardGrid.assignment-group-board{grid-template-columns:repeat(2,minmax(220px,1fr))!important}
+      }
+      @media (max-width:850px){
+        #assignmentCardGrid.assignment-group-board{grid-template-columns:1fr!important}
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function install_() {
+    injectStyles_();
+    window.renderAssignmentCards_ = renderGroupedCompact_;
+    // Render only Step 3 directly. Avoid calling the whole workspace renderer here.
+    requestAnimationFrame(renderGroupedCompact_);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
