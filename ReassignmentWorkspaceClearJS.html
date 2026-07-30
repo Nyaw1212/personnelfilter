@@ -45,7 +45,7 @@ function initializeReassignmentWorkspaceClear_() {
     }
 
     button.textContent = "Remove All";
-    button.title = "Remove every personnel from this reassignment report";
+    button.title = "Remove all personnel currently under To Be Assigned";
 
     return true;
   };
@@ -68,21 +68,26 @@ function initializeReassignmentWorkspaceClear_() {
 }
 
 function clearAllSelectedPersonnel_() {
-  const total = PersonnelState.aoCart.size;
+  const unassignedKeys = [
+    ...PersonnelState.aoCart.keys(),
+  ].filter(key =>
+    !ReassignmentState.assignments.has(key)
+  );
 
-  if (!total) {
+  if (!unassignedKeys.length) {
     return;
   }
 
   if (!confirm(
-    `Remove all ${total} personnel from this reassignment report?`
+    `Remove all ${unassignedKeys.length} personnel under To Be Assigned?\n\nAssigned personnel in Step 3 will remain.`
   )) {
     return;
   }
 
-  PersonnelState.aoCart.clear();
-  ReassignmentState.assignments.clear();
-  ReassignmentState.selectedKeys.clear();
+  unassignedKeys.forEach(key => {
+    PersonnelState.aoCart.delete(key);
+    ReassignmentState.selectedKeys.delete(key);
+  });
 
   persistReassignmentRemovalChanges_();
 }
@@ -92,8 +97,10 @@ function removePersonnelFromReassignment_(key) {
     return;
   }
 
+  // The individual X appears only in Step 1, so this removes only an
+  // unassigned personnel record. Assigned personnel remain controlled by
+  // their existing Step 3 X button, which returns them to Step 1.
   PersonnelState.aoCart.delete(key);
-  ReassignmentState.assignments.delete(key);
   ReassignmentState.selectedKeys.delete(key);
 
   persistReassignmentRemovalChanges_();
@@ -181,7 +188,7 @@ function patchReassignmentSourcePersonnelRemoval_() {
       remove.type = "button";
       remove.className = "reassignment-source-remove-button";
       remove.textContent = "×";
-      remove.title = "Remove this personnel from the report";
+      remove.title = "Remove this personnel from To Be Assigned";
       remove.setAttribute(
         "aria-label",
         `Remove ${person.fullName || "personnel"}`
@@ -240,6 +247,42 @@ function injectReassignmentRemovalStyles_() {
 
     .reassignment-remove-all-button {
       color: #8b2020;
+    }
+
+    /* Keep Step 3 compact even when hundreds of personnel are assigned. */
+    .reassignment-results-panel {
+      min-height: 0;
+      align-self: stretch;
+    }
+
+    .reassignment-results-panel .assignment-card-grid {
+      max-height: calc(100vh - 250px);
+      min-height: 180px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-right: 6px;
+      scrollbar-gutter: stable;
+    }
+
+    .reassignment-results-panel .assignment-card-grid::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    .reassignment-results-panel .assignment-card-grid::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background: rgba(31, 111, 52, .28);
+      background-clip: padding-box;
+    }
+
+    .reassignment-results-panel .assignment-card-grid::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    @media (max-width: 900px) {
+      .reassignment-results-panel .assignment-card-grid {
+        max-height: 55vh;
+      }
     }
   `;
 
