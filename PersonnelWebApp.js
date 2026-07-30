@@ -145,6 +145,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
       .getContent();
+
+    // Allow Camp-only or Office-only transfer and preserve LIST order in reports.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
+      .getContent();
   }
 
   return content;
