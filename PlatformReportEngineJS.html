@@ -1,0 +1,250 @@
+// Personnel Platform — reusable ReportEngine
+// Developer Mode foundation. Owns report drafts, metadata, preview, results, and revisions.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const drafts = new Map();
+  const history = [];
+  let sequence = 0;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function clone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizeType(value) {
+    return text(value).toUpperCase();
+  }
+
+  function normalizeMetadata(value = {}) {
+    return {
+      orderNumber: text(value.orderNumber ?? value.number),
+      orderDate: text(value.orderDate ?? value.date),
+      signingOfficer: text(value.signingOfficer),
+      signingPosition: text(value.signingPosition),
+      fileReference: text(value.fileReference),
+      personnelLayout: text(value.personnelLayout || "LIST").toUpperCase() || "LIST",
+    };
+  }
+
+  function draftId() {
+    return `RPT-${Date.now()}-${++sequence}`;
+  }
+
+  function saveDraft(draft) {
+    drafts.set(draft.id, draft);
+    platform.events.emit("report:draft-changed", clone(draft));
+    platform.events.emit(`report:draft-changed:${draft.id}`, clone(draft));
+    return clone(draft);
+  }
+
+  function createDraft(input = {}) {
+    const payload = clone(input.payload || {});
+    const metadata = normalizeMetadata({
+      ...(payload.order || {}),
+      ...(input.metadata || {}),
+      personnelLayout: input.personnelLayout || payload.personnelLayout,
+    });
+
+    const draft = {
+      id: input.id || draftId(),
+      reportType: normalizeType(input.reportType || payload.reportType),
+      pluginId: text(input.pluginId),
+      generatorRequestId: text(input.generatorRequestId),
+      status: "DRAFT",
+      revision: Math.max(1, Number(input.revision) || 1),
+      metadata,
+      payload,
+      preview: null,
+      result: null,
+      createdAt: input.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    return saveDraft(draft);
+  }
+
+  const ReportEngine = {
+    version: "1.0.0",
+
+    createDraft,
+
+    get(draftIdValue) {
+      const draft = drafts.get(text(draftIdValue));
+      return draft ? clone(draft) : null;
+    },
+
+    list() {
+      return [...drafts.values()]
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+        .map(clone);
+    },
+
+    setMetadata(draftIdValue, patch = {}) {
+      const id = text(draftIdValue);
+      const draft = drafts.get(id);
+      if (!draft) throw new Error(`Report draft ${id || "—"} was not found.`);
+
+      draft.metadata = normalizeMetadata({ ...draft.metadata, ...patch });
+      draft.payload = {
+        ...draft.payload,
+        personnelLayout: draft.metadata.personnelLayout,
+        order: {
+          number: draft.metadata.orderNumber,
+          date: draft.metadata.orderDate,
+          signingOfficer: draft.metadata.signingOfficer,
+          signingPosition: draft.metadata.signingPosition,
+          fileReference: draft.metadata.fileReference,
+        },
+      };
+      draft.updatedAt = new Date().toISOString();
+      return saveDraft(draft);
+    },
+
+    setPayload(draftIdValue, payload) {
+      const id = text(draftIdValue);
+      const draft = drafts.get(id);
+      if (!draft) throw new Error(`Report draft ${id || "—"} was not found.`);
+      draft.payload = clone(payload || {});
+      draft.reportType = normalizeType(draft.payload.reportType || draft.reportType);
+      draft.updatedAt = new Date().toISOString();
+      return saveDraft(draft);
+    },
+
+    preview(draftIdValue) {
+      const id = text(draftIdValue);
+      const draft = drafts.get(id);
+      if (!draft) throw new Error(`Report draft ${id || "—"} was not found.`);
+
+      const personnel = Array.isArray(draft.payload?.personnel)
+        ? draft.payload.personnel
+        : [];
+
+      draft.preview = {
+        reportType: draft.reportType,
+        title: draft.reportType === "REASSIGNMENT" ? "Reassignment Report" : draft.reportType,
+        revision: draft.revision,
+        metadata: clone(draft.metadata),
+        personnelCount: personnel.length,
+        personnel: clone(personnel),
+        generatedAt: new Date().toISOString(),
+      };
+      draft.status = "PREVIEW_READY";
+      draft.updatedAt = new Date().toISOString();
+      saveDraft(draft);
+      platform.events.emit("report:preview-ready", clone(draft));
+      console.table(draft.preview.personnel);
+      return clone(draft.preview);
+    },
+
+    markGenerating(draftIdValue) {
+      const id = text(draftIdValue);
+      const draft = drafts.get(id);
+      if (!draft) throw new Error(`Report draft ${id || "—"} was not found.`);
+      draft.status = "GENERATING";
+      draft.updatedAt = new Date().toISOString();
+      return saveDraft(draft);
+    },
+
+    saveResult(draftIdValue, result = {}) {
+      const id = text(draftIdValue);
+      const draft = drafts.get(id);
+      if (!draft) throw new Error(`Report draft ${id || "—"} was not found.`);
+
+      draft.result = clone(result);
+      draft.status = result?.status === "FAILED" ? "FAILED" : "GENERATED";
+      draft.updatedAt = new Date().toISOString();
+
+      const entry = {
+        id: draft.id,
+        reportType: draft.reportType,
+        pluginId: draft.pluginId,
+        revision: draft.revision,
+        status: draft.status,
+        metadata: clone(draft.metadata),
+        result: clone(draft.result),
+        createdAt: draft.createdAt,
+        completedAt: draft.updatedAt,
+      };
+      history.unshift(entry);
+      history.splice(100);
+
+      saveDraft(draft);
+      platform.events.emit("report:completed", clone(entry));
+      return clone(entry);
+    },
+
+    createRevision(draftIdValue) {
+      const source = this.get(draftIdValue);
+      if (!source) throw new Error(`Report draft ${text(draftIdValue) || "—"} was not found.`);
+      return createDraft({
+        reportType: source.reportType,
+        pluginId: source.pluginId,
+        metadata: source.metadata,
+        payload: source.payload,
+        revision: source.revision + 1,
+      });
+    },
+
+    remove(draftIdValue) {
+      const id = text(draftIdValue);
+      const removed = drafts.delete(id);
+      if (removed) platform.events.emit("report:draft-removed", { id });
+      return removed;
+    },
+
+    history(limit = 20) {
+      return history.slice(0, Math.max(0, Number(limit) || 0)).map(clone);
+    },
+
+    last() {
+      const list = this.list();
+      return list.length ? list[0] : null;
+    },
+
+    status() {
+      const last = this.last();
+      const report = {
+        version: this.version,
+        drafts: drafts.size,
+        history: history.length,
+        lastDraft: last?.id || "—",
+        lastStatus: last?.status || "—",
+        lastReportType: last?.reportType || "—",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("report")) platform.engines.replace("report", ReportEngine);
+  else platform.engines.register("report", ReportEngine);
+
+  // GeneratorEngine output becomes a ReportEngine draft. This keeps the
+  // Reassignment plugin unaware of metadata forms, previews, revisions, and
+  // future Google Docs/AOGEN adapters.
+  platform.events.on("generator:completed", event => {
+    const payload = event?.payload || event?.output?.payload;
+    if (!payload) return;
+
+    const draft = createDraft({
+      reportType: event.reportType || payload.reportType,
+      pluginId: event.pluginId,
+      generatorRequestId: event.id,
+      payload,
+    });
+
+    ReportEngine.preview(draft.id);
+    console.info("ReportEngine created preview draft.", ReportEngine.get(draft.id));
+  });
+
+  window.$PF.report = ReportEngine;
+  console.info("ReportEngine v1.0.0 active. Run $PF.report.status().");
+})();
