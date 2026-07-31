@@ -28,8 +28,6 @@ function appJsBundle() {
     "PlatformFilterEngineV2JS.html",
     "PlatformAssignmentEngineV2JS.html",
     "ReassignmentPluginJS.html",
-    "PlatformAssignmentHistoryControlsFixJS.html",
-    "PlatformAssignmentExplicitActionGuardJS.html",
   ];
 
   return [
@@ -58,4 +56,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with PersonnelPlatform engines, history controls, and explicit assignment guard loaded.");
+console.log("Built dev/index.html with PersonnelPlatform SelectionEngine v2, FilterEngine v2, and AssignmentEngine v0.3 loaded.");
