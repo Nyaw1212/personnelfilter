@@ -8,6 +8,15 @@ function read(name) {
   return fs.readFileSync(path.join(root, name), "utf8");
 }
 
+function unwrapScript(source) {
+  const match = String(source).match(/^\s*<script(?:\s[^>]*)?>([\s\S]*?)<\/script>\s*$/i);
+  return match ? match[1].trim() : source;
+}
+
+function readClientModule(name) {
+  return unwrapScript(read(name));
+}
+
 function appJsBundle() {
   const entry = read("PersonnelWebApp.js");
 
@@ -75,7 +84,7 @@ function appJsBundle() {
   return [
     read("AppJS.html"),
     ...names.map(name => read(`${name}.html`)),
-    ...platformPilot.map(read),
+    ...platformPilot.map(readClientModule),
   ].join("\n\n");
 }
 
@@ -97,4 +106,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with shared glass-green action theme.");
+console.log("Built dev/index.html with wrapped platform module support.");
