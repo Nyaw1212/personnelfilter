@@ -21,7 +21,7 @@ const REASSIGNMENT_BRIDGE_CONFIG = Object.freeze({
 function sendReassignmentToAogen(payload) {
   try {
     const normalizedPayload = normalizeBridgePayload_(payload);
-    validateBridgePayload_(normalizedPayload);
+    const validationWarnings = validateBridgePayload_(normalizedPayload);
 
     const properties = PropertiesService.getScriptProperties();
 
@@ -105,6 +105,10 @@ function sendReassignmentToAogen(payload) {
       personnelCount: Number(
         result.personnelCount || normalizedPayload.personnel.length || 0
       ),
+      validationWarnings,
+      caution: validationWarnings.length
+        ? "Report generated with incomplete details."
+        : "",
     };
 
     // Keep a permanent summary in the Personnel Filter spreadsheet.
@@ -154,44 +158,66 @@ function normalizeBridgePayload_(payload) {
   };
 }
 
+/**
+ * Caution-first validation.
+ *
+ * Missing report details and incomplete personnel cells are converted to an
+ * em dash so the report can still be generated. Only an empty personnel list
+ * remains a hard stop.
+ *
+ * @param {Object} payload Normalized reassignment payload.
+ * @return {string[]} Advisory warnings included in the success response.
+ */
 function validateBridgePayload_(payload) {
-  const missing = [];
-
-  if (!payload.orderNumber) missing.push("Order Number");
-  if (!payload.orderDate) missing.push("Order Date");
-  if (!payload.signingOfficer) missing.push("Signing Officer");
-  if (!payload.signingPosition) missing.push("Signing Position");
-
-  if (missing.length) {
-    throw new Error(
-      "Complete the following reassignment fields:\n\n" +
-        missing.join("\n")
-    );
-  }
-
   if (!payload.personnel.length) {
     throw new Error(
       "Assign at least one personnel before generating the report."
     );
   }
 
+  const warnings = [];
+  const advisoryFields = [
+    ["orderNumber", "Order Number"],
+    ["orderDate", "Order Date"],
+    ["signingOfficer", "Signing Officer"],
+    ["signingPosition", "Signing Position"],
+  ];
+
+  advisoryFields.forEach(([key, label]) => {
+    if (cleanBridgeValue_(payload[key])) return;
+    warnings.push(label + " was left blank.");
+    payload[key] = "—";
+  });
+
   payload.personnel.forEach((person, index) => {
     const rowMissing = [];
 
-    if (!person.rank) rowMissing.push("Rank");
-    if (!person.fullName) rowMissing.push("Full Name");
-    if (!person.from) rowMissing.push("From");
-    if (!person.to) rowMissing.push("To");
+    if (!person.rank) {
+      rowMissing.push("Rank");
+      person.rank = "—";
+    }
+    if (!person.fullName) {
+      rowMissing.push("Full Name");
+      person.fullName = "—";
+    }
+    if (!person.from) {
+      rowMissing.push("From");
+      person.from = "—";
+    }
+    if (!person.to) {
+      rowMissing.push("To");
+      person.to = "—";
+    }
 
     if (rowMissing.length) {
-      throw new Error(
-        "Personnel item " +
-          (index + 1) +
-          " is missing: " +
-          rowMissing.join(", ")
+      warnings.push(
+        "Personnel item " + (index + 1) +
+        " is missing: " + rowMissing.join(", ") + "."
       );
     }
   });
+
+  return warnings;
 }
 
 function cleanBridgeValue_(value) {
