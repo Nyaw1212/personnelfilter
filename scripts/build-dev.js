@@ -65,6 +65,7 @@ function appJsBundle() {
     "ReassignmentPluginV1Phase3JS.html",
     "PlatformReportLauncherUXJS.html",
     "PlatformUIControlBridgeFixJS.html",
+    "PlatformKeyboardEngineJS.html",
   ];
 
   return [
@@ -92,4 +93,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with local transfer apply adapter.");
+console.log("Built dev/index.html with KeyboardEngine shortcuts.");
