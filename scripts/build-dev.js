@@ -57,6 +57,7 @@ function appJsBundle() {
 
   const platformPilot = [
     "PlatformCoreJS.html",
+    "PlatformPerformanceEngineJS.html",
     "PlatformLegacyEngineAdaptersJS.html",
     "PlatformSelectionEngineV2JS.html",
     "PlatformFilterEngineV2JS.html",
