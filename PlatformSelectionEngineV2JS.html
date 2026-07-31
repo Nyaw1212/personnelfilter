@@ -1,6 +1,7 @@
 //----------------------------------
-// Personnel Platform — SelectionEngine v2 migration
-// Developer Mode only: platform state is canonical, legacy AO cart is mirrored.
+// Personnel Platform — SelectionEngine adapter
+// Developer Mode: the legacy Personnel Filter owns the AO cart.
+// This engine only mirrors that cart for clean plugins.
 //----------------------------------
 
 (function () {
@@ -11,8 +12,6 @@
 
   const SCOPE = "ao-cart";
   const STATE_SCOPE = `selection:${SCOPE}`;
-  const STORE_NAMESPACE = "selection";
-  const STORE_KEY = SCOPE;
 
   function text_(value) {
     return String(value === null || value === undefined ? "" : value).trim();
@@ -20,9 +19,7 @@
 
   function legacyState_() {
     try {
-      if (typeof PersonnelState !== "undefined" && PersonnelState) {
-        return PersonnelState;
-      }
+      if (typeof PersonnelState !== "undefined" && PersonnelState) return PersonnelState;
     } catch (ignored) {}
     return window.PersonnelState || null;
   }
@@ -38,71 +35,22 @@
   }
 
   function legacyEntries_() {
-    const state = legacyState_();
-    return state?.aoCart instanceof Map
-      ? [...state.aoCart.entries()]
-      : [];
+    const cart = legacyState_()?.aoCart;
+    return cart instanceof Map ? [...cart.entries()] : [];
   }
 
-  function ensureScope_() {
-    let state = platform.state.get(STATE_SCOPE);
-    if (state) return state;
-
-    // Developer Mode intentionally starts with an empty AO selection. Previous
-    // test selections must not silently return after a refresh and look like
-    // buttons changed state by themselves.
-    const entries = [];
-    state = {
-      entries,
-      order: [],
-      updatedAt: new Date().toISOString(),
-    };
-    platform.state.createScope(STATE_SCOPE, state);
-    platform.store.save(STORE_NAMESPACE, STORE_KEY, state);
-    return platform.state.get(STATE_SCOPE);
-  }
-
-  function refreshLegacyUi_() {
-    if (typeof window.renderPreviewTable === "function") window.renderPreviewTable();
-    if (typeof window.updateAoCartCount_ === "function") window.updateAoCartCount_();
-    if (typeof window.updateReportGeneratorButton_ === "function") {
-      window.updateReportGeneratorButton_();
-    }
-  }
-
-  function mirrorToLegacy_(state) {
-    const legacy = legacyState_();
-    if (!legacy) return;
-
-    if (!(legacy.aoCart instanceof Map)) {
-      legacy.aoCart = new Map();
-    }
-
-    legacy.aoCart.clear();
-    normalizeEntries_(state?.entries || []).forEach(([key, item]) => {
-      legacy.aoCart.set(key, item);
-    });
-
-    refreshLegacyUi_();
-  }
-
-  function commit_(entries, order) {
+  function snapshot_(entries) {
     const normalized = normalizeEntries_(entries);
-    const keys = new Set(normalized.map(([key]) => key));
-    const nextOrder = [...new Set((order || []).map(text_).filter(key => keys.has(key)))];
-    normalized.forEach(([key]) => {
-      if (!nextOrder.includes(key)) nextOrder.push(key);
-    });
-
     const next = {
       entries: normalized,
-      order: nextOrder,
+      order: normalized.map(([key]) => key),
       updatedAt: new Date().toISOString(),
     };
-    platform.state.set(STATE_SCOPE, next);
-    platform.store.save(STORE_NAMESPACE, STORE_KEY, next);
-    mirrorToLegacy_(next);
-    platform.events.emit("selection:changed", {
+
+    if (platform.state.get(STATE_SCOPE)) platform.state.set(STATE_SCOPE, next);
+    else platform.state.createScope(STATE_SCOPE, next);
+
+    platform.events.emit("selection:mirrored", {
       scopeId: SCOPE,
       count: normalized.length,
       keys: normalized.map(([key]) => key),
@@ -110,20 +58,27 @@
     return next;
   }
 
-  const SelectionEngineV2 = {
-    version: "0.2.4",
+  const SelectionEngine = {
+    version: "0.3.0",
+    mode: "LEGACY_MIRROR",
     scopeId: SCOPE,
+
+    syncFromLegacy() {
+      return snapshot_(legacyEntries_());
+    },
 
     get(scopeId = SCOPE) {
       if (scopeId !== SCOPE) {
-        return platform.state.createScope(`selection:${scopeId}`, {
+        const id = `selection:${scopeId}`;
+        return platform.state.get(id) || platform.state.createScope(id, {
           entries: [], order: [], updatedAt: "",
         });
       }
-      return ensureScope_();
+      return platform.state.get(STATE_SCOPE) || this.syncFromLegacy();
     },
 
     entries(scopeId = SCOPE) {
+      if (scopeId === SCOPE) this.syncFromLegacy();
       return normalizeEntries_(this.get(scopeId).entries || []);
     },
 
@@ -143,103 +98,37 @@
       return this.items(scopeId).has(text_(key));
     },
 
-    add(scopeId, key, item) {
-      if (scopeId !== SCOPE) throw new Error("SelectionEngine v2 pilot currently owns ao-cart only.");
-      const map = this.items(scopeId);
-      const value = text_(key);
-      if (!value) return this.get(scopeId);
-      map.set(value, item);
-      return commit_([...map.entries()], [...this.get(scopeId).order, value]);
-    },
-
-    remove(scopeId, key) {
-      const map = this.items(scopeId);
-      map.delete(text_(key));
-      return commit_([...map.entries()], this.get(scopeId).order);
-    },
-
-    toggle(scopeId, key, item) {
-      return this.has(scopeId, key)
-        ? this.remove(scopeId, key)
-        : this.add(scopeId, key, item);
-    },
-
-    replace(scopeId, entries) {
-      if (scopeId !== SCOPE) throw new Error("SelectionEngine v2 pilot currently owns ao-cart only.");
-      return commit_(entries, (entries || []).map(entry => entry?.[0]));
-    },
-
-    clear(scopeId = SCOPE) {
-      if (scopeId !== SCOPE) return platform.state.set(`selection:${scopeId}`, { entries: [], order: [] });
-      return commit_([], []);
-    },
-
-    syncFromLegacy() {
-      return commit_(legacyEntries_(), legacyEntries_().map(([key]) => key));
+    snapshot(scopeId = SCOPE) {
+      return {
+        scopeId,
+        entries: this.entries(scopeId),
+        count: this.count(scopeId),
+        capturedAt: new Date().toISOString(),
+      };
     },
 
     report() {
-      const state = this.get(SCOPE);
-      const legacyCount = legacyState_()?.aoCart?.size || 0;
+      const state = this.syncFromLegacy();
+      const legacyCount = legacyEntries_().length;
       const report = {
         version: this.version,
+        mode: this.mode,
         scope: SCOPE,
-        count: this.count(SCOPE),
+        count: state.entries.length,
         legacyCount,
-        synchronized: this.count(SCOPE) === legacyCount,
-        updatedAt: state.updatedAt || "",
+        synchronized: state.entries.length === legacyCount,
+        updatedAt: state.updatedAt,
       };
       console.table(report);
       return report;
     },
   };
 
-  platform.engines.replace("selection", SelectionEngineV2);
+  if (platform.engines.has("selection")) platform.engines.replace("selection", SelectionEngine);
+  else platform.engines.register("selection", SelectionEngine);
 
-  platform.commands.register("SELECTION.ADD", command =>
-    SelectionEngineV2.add(SCOPE, command.key, command.item)
-  );
-  platform.commands.register("SELECTION.REMOVE", command =>
-    SelectionEngineV2.remove(SCOPE, command.key)
-  );
-  platform.commands.register("SELECTION.TOGGLE", command =>
-    SelectionEngineV2.toggle(SCOPE, command.key, command.item)
-  );
-  platform.commands.register("SELECTION.REPLACE", command =>
-    SelectionEngineV2.replace(SCOPE, command.entries || [])
-  );
-  platform.commands.register("SELECTION.CLEAR", () =>
-    SelectionEngineV2.clear(SCOPE)
-  );
+  SelectionEngine.syncFromLegacy();
+  window.$PF.selection = SelectionEngine;
 
-  ensureScope_();
-  mirrorToLegacy_(SelectionEngineV2.get(SCOPE));
-
-  if (typeof window.togglePersonnelInAoCart_ === "function") {
-    window.togglePersonnelInAoCart_ = function (record) {
-      const key = window.getAoPersonnelKey_(record);
-      const item = window.normalizeAoPersonnel_(record);
-      SelectionEngineV2.toggle(SCOPE, key, item);
-    };
-  }
-
-  if (typeof window.addAllVisiblePersonnelToAo_ === "function") {
-    window.addAllVisiblePersonnelToAo_ = function () {
-      const legacy = legacyState_();
-      const records = Array.isArray(legacy?.filteredRecords)
-        ? legacy.filteredRecords
-        : [];
-      const map = SelectionEngineV2.items(SCOPE);
-      records.forEach(record => {
-        map.set(
-          window.getAoPersonnelKey_(record),
-          window.normalizeAoPersonnel_(record)
-        );
-      });
-      SelectionEngineV2.replace(SCOPE, [...map.entries()]);
-    };
-  }
-
-  window.$PF.selection = SelectionEngineV2;
-  console.info("SelectionEngine v0.2.4 starts each Developer Mode session with an empty AO cart.");
+  console.info("SelectionEngine v0.3.0 mirrors the legacy AO cart without controlling its UI.");
 })();
