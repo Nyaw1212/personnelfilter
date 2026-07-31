@@ -78,6 +78,7 @@
       .pf-rp-actions { display:flex; justify-content:flex-end; gap:9px; flex-wrap:wrap; margin-top:15px; }
       .pf-rp-btn { border:1px solid #c5d9ca; border-radius:10px; background:white; padding:9px 13px; font:inherit; font-weight:750; cursor:pointer; }
       .pf-rp-btn.primary { background:#ffe600; border-color:#d8c700; }
+      .pf-rp-btn.queue { background:#236b39; border-color:#236b39; color:white; }
       .pf-rp-empty { padding:24px; text-align:center; opacity:.7; }
       @media (max-width:760px) {
         .pf-rp-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -151,6 +152,7 @@
 
       <footer class="pf-rp-actions">
         <button type="button" class="pf-rp-btn" data-pf-report-preview="back">Back to Reassignment</button>
+        <button type="button" class="pf-rp-btn queue" data-pf-report-preview="queue">Add to Transfer Queue</button>
         <button type="button" class="pf-rp-btn primary" data-pf-report-preview="details">Continue to Report Details</button>
       </footer>
     `;
@@ -182,6 +184,16 @@
       close();
       return;
     }
+    if (action === "queue") {
+      const draft = report.get(activeDraftId);
+      const plugin = window.$PF?.transferQueuePlugin;
+      if (!draft || !plugin) return;
+      const entry = plugin.enqueueDraft(draft);
+      close();
+      plugin.open();
+      console.info("Report added to Transfer Queue.", entry);
+      return;
+    }
     if (action === "details") {
       const draft = report.get(activeDraftId);
       close();
@@ -195,11 +207,11 @@
   });
 
   window.$PF.reportPreview = {
-    version: "1.0.0",
+    version: "1.1.0",
     open,
     close,
     get activeDraftId() { return activeDraftId; },
   };
 
-  console.info("Report summary preview UI v1.0.0 active.");
+  console.info("Report summary preview UI v1.1.0 active.");
 })();
