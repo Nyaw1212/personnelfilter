@@ -57,6 +57,7 @@ function appJsBundle() {
     "PlatformGeneratorEngineJS.html",
     "PlatformReportEngineJS.html",
     "PlatformTransferQueueEngineJS.html",
+    "TransferQueuePluginV1JS.html",
     "PlatformReportPreviewUIJS.html",
     "ReassignmentPluginV1JS.html",
     "ReassignmentPluginV1GroupChangeFixJS.html",
@@ -88,4 +89,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with clean Reassignment V1, group change fix, and TransferQueueEngine.");
+console.log("Built dev/index.html with clean Reassignment V1 and Transfer Queue Plugin V1.");
