@@ -170,6 +170,12 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDestinationMasterAndGroupChangeJS")
       .getContent();
+
+    // Keep defaults, then automatically merge any new Office or Camp values
+    // found in the current LIST roster.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentDynamicDestinationDirectoryJS")
+      .getContent();
   }
 
   return content;
