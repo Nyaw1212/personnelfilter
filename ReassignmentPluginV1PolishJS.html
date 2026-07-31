@@ -1,0 +1,191 @@
+// Reassignment Plugin V1 — UI polish
+// Adds glass-green primary buttons, whole-card selection, and Step 1 removal.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const plugin = window.$PF?.reassignmentV1;
+  if (!platform || !engine || !plugin) return;
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
+  let scheduled = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function installStyles() {
+    if (document.getElementById("reassignmentPluginV1PolishStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1PolishStyles";
+    style.textContent = `
+      #${ROOT_ID} .rp1-btn.primary {
+        color:#174d2b;
+        background:linear-gradient(180deg,rgba(72,156,100,.20),rgba(72,156,100,.11));
+        border-color:rgba(40,119,67,.36);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 5px 16px rgba(38,107,62,.08);
+        backdrop-filter:blur(10px);
+        -webkit-backdrop-filter:blur(10px);
+      }
+      #${ROOT_ID} .rp1-btn.primary:hover:not(:disabled) {
+        color:#103f23;
+        background:linear-gradient(180deg,rgba(72,156,100,.29),rgba(72,156,100,.17));
+        border-color:rgba(36,111,61,.52);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 8px 20px rgba(38,107,62,.14);
+      }
+      #${ROOT_ID} .rp1-btn.primary:disabled {
+        color:rgba(23,77,43,.46);
+        background:rgba(72,156,100,.07);
+        border-color:rgba(40,119,67,.15);
+        box-shadow:none;
+      }
+      #${ROOT_ID} .rp1-person {
+        position:relative;
+        padding-right:44px;
+        transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
+      }
+      #${ROOT_ID} .rp1-person:hover {
+        background:rgba(73,151,98,.08);
+        border-color:rgba(45,124,71,.28);
+      }
+      #${ROOT_ID} .rp1-person.is-selected {
+        background:linear-gradient(180deg,rgba(69,151,96,.15),rgba(69,151,96,.09));
+        border-color:rgba(39,119,66,.38);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 5px 14px rgba(38,107,62,.08);
+        backdrop-filter:blur(9px);
+        -webkit-backdrop-filter:blur(9px);
+      }
+      #${ROOT_ID} .rp1-person input[type="checkbox"] { accent-color:#2b7444; }
+      #${ROOT_ID} .rp1-step1-remove {
+        position:absolute;
+        top:50%;
+        right:9px;
+        transform:translateY(-50%);
+        width:27px;
+        height:27px;
+        display:grid;
+        place-items:center;
+        padding:0;
+        border:1px solid rgba(92,128,103,.28);
+        border-radius:9px;
+        color:#45604d;
+        background:rgba(255,255,255,.62);
+        font:inherit;
+        font-size:17px;
+        line-height:1;
+        cursor:pointer;
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+      }
+      #${ROOT_ID} .rp1-step1-remove:hover {
+        color:#8d2929;
+        border-color:rgba(174,74,74,.38);
+        background:rgba(255,228,228,.78);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function decorate() {
+    scheduled = false;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    installStyles();
+    root.querySelectorAll(".rp1-person").forEach(card => {
+      const checkbox = card.querySelector("[data-rp1-check]");
+      if (!checkbox) return;
+
+      card.dataset.rp1Card = checkbox.dataset.rp1Check;
+      card.classList.toggle("is-selected", checkbox.checked);
+
+      if (!card.querySelector("[data-rp1-step1-remove]")) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "rp1-step1-remove";
+        remove.dataset.rp1Step1Remove = checkbox.dataset.rp1Check;
+        remove.title = "Remove from reassignment";
+        remove.setAttribute("aria-label", "Remove from reassignment");
+        remove.textContent = "×";
+        card.appendChild(remove);
+      }
+    });
+  }
+
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(decorate);
+  }
+
+  function removeFromWorkspace(key) {
+    const value = text(key);
+    if (!value) return;
+
+    const state = engine.get(SCOPE);
+    const participants = (state.participants || []).filter(([personKey]) => personKey !== value);
+    engine.setParticipants(SCOPE, participants);
+
+    const legacyCart = window.PersonnelState?.aoCart;
+    if (legacyCart instanceof Map && legacyCart.has(value)) {
+      legacyCart.delete(value);
+      try { window.saveAoCart_?.(); } catch (_error) {}
+      try { window.updateAoCartCount_?.(); } catch (_error) {}
+      try { window.renderPreviewTable?.(); } catch (_error) {}
+    }
+
+    plugin.render();
+    scheduleDecorate();
+  }
+
+  document.addEventListener("click", event => {
+    const remove = event.target.closest?.("[data-rp1-step1-remove]");
+    if (remove) {
+      event.preventDefault();
+      event.stopPropagation();
+      removeFromWorkspace(remove.dataset.rp1Step1Remove);
+      return;
+    }
+
+    const card = event.target.closest?.(`#${ROOT_ID} [data-rp1-card]`);
+    if (!card || event.target.closest("input[type='checkbox']")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    engine.toggleSelection(SCOPE, card.dataset.rp1Card);
+    plugin.render();
+    scheduleDecorate();
+  }, true);
+
+  document.addEventListener("change", event => {
+    if (!event.target.matches?.(`#${ROOT_ID} [data-rp1-check]`)) return;
+    scheduleDecorate();
+  });
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+
+  const originalOpen = plugin.open.bind(plugin);
+  plugin.open = function (...args) {
+    const result = originalOpen(...args);
+    scheduleDecorate();
+    return result;
+  };
+
+  Object.assign(plugin, {
+    version: "1.3.0",
+    removeParticipant: removeFromWorkspace,
+  });
+
+  window.$PF.reassignmentV1Polish = {
+    version: "1.0.0",
+    decorate,
+    removeFromWorkspace,
+  };
+
+  scheduleDecorate();
+  console.info("Reassignment V1 polish active: glass-green actions and Step 1 card controls.");
+})();
