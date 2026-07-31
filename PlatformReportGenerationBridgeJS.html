@@ -1,0 +1,123 @@
+<script>
+// Personnel Platform — Apps Script report generation bridge
+// Connects Report Designer generation requests to Stage1WorkflowServer.js.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  const inFlight = new Set();
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function fromValue(person) {
+    return text(person?.from) ||
+      (text(person?.transferMode) === "CAMP_TO_CAMP"
+        ? text(person?.fromCamp)
+        : text(person?.fromOffice));
+  }
+
+  function toValue(person) {
+    return text(person?.to) ||
+      (text(person?.transferMode) === "CAMP_TO_CAMP"
+        ? text(person?.toCamp)
+        : text(person?.toOffice));
+  }
+
+  function serverPayload(draft) {
+    const metadata = draft?.metadata || {};
+    const source = draft?.payload || {};
+    const personnel = Array.isArray(source.personnel) ? source.personnel : [];
+
+    return {
+      orderNumber: text(metadata.orderNumber || source?.order?.number),
+      orderDate: text(metadata.orderDate || source?.order?.date),
+      signingOfficer: text(metadata.signingOfficer || source?.order?.signingOfficer),
+      signingPosition: text(metadata.signingPosition || source?.order?.signingPosition),
+      fileReference: text(metadata.fileReference || source?.order?.fileReference),
+      personnel: personnel.map((person, index) => ({
+        sequence: Number(person?.sequence || index + 1),
+        rank: text(person?.rank),
+        fullName: text(person?.fullName),
+        from: fromValue(person),
+        to: toValue(person),
+        notes: text(person?.notes),
+      })),
+    };
+  }
+
+  function fail(draftId, message) {
+    const result = report.saveResult(draftId, {
+      status: "FAILED",
+      success: false,
+      message: text(message) || "The report could not be generated.",
+      generatedAt: new Date().toISOString(),
+    });
+    platform.events.emit("report:generation-failed", result);
+    return result;
+  }
+
+  platform.events.on("report:generation-requested", request => {
+    if (document.querySelector('meta[name="dev-mode"]')) return;
+
+    const draftId = text(request?.draftId || request?.draft?.id);
+    const draft = request?.draft || report.get(draftId);
+    if (!draftId || !draft || inFlight.has(draftId)) return;
+
+    if (!window.google?.script?.run) {
+      fail(draftId, "Apps Script runtime is unavailable.");
+      return;
+    }
+
+    inFlight.add(draftId);
+
+    google.script.run
+      .withSuccessHandler(response => {
+        inFlight.delete(draftId);
+
+        if (!response || response.success !== true) {
+          fail(draftId, response?.message || "The report generator returned an unsuccessful response.");
+          return;
+        }
+
+        const result = report.saveResult(draftId, {
+          ...response,
+          status: "GENERATED",
+          success: true,
+          documentUrl: text(response.url),
+          generatedAt: new Date().toISOString(),
+        });
+
+        console.info("Apps Script report generation completed.", result);
+      })
+      .withFailureHandler(error => {
+        inFlight.delete(draftId);
+        fail(draftId, error?.message || String(error || "Report generation failed."));
+      })
+      .sendStage1ReassignmentToAogen(serverPayload(draft));
+  });
+
+  window.$PF.reportGenerationBridge = {
+    version: "1.0.0",
+    payload: draftOrId => serverPayload(
+      typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId
+    ),
+    status() {
+      const state = {
+        version: this.version,
+        mode: document.querySelector('meta[name="dev-mode"]') ? "DEVELOPER" : "APPS_SCRIPT",
+        inFlight: inFlight.size,
+      };
+      console.table(state);
+      return state;
+    },
+  };
+
+  console.info("ReportGenerationBridge v1.0.0 active.");
+})();
+</script>
