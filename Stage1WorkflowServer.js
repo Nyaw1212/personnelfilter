@@ -6,7 +6,7 @@ function sendStage1ReassignmentToAogen(payload) {
   try {
     const source = payload && typeof payload === "object" ? payload : {};
     const normalizedPayload = normalizeBridgePayload_(source);
-    validateBridgePayload_(normalizedPayload);
+    const validationWarnings = validateBridgePayload_(normalizedPayload);
 
     normalizedPayload.saveMode = cleanBridgeValue_(source.saveMode) || "NEW";
     normalizedPayload.sourceDocumentId = cleanBridgeValue_(source.sourceDocumentId);
@@ -72,6 +72,10 @@ function sendStage1ReassignmentToAogen(payload) {
       saveMode: normalizedPayload.saveMode,
       internalRevision: normalizedPayload.internalRevision,
       orderNumber: normalizedPayload.orderNumber,
+      validationWarnings,
+      caution: validationWarnings.length
+        ? "Report generated with incomplete details."
+        : "",
     };
 
     try {
