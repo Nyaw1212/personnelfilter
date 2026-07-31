@@ -19,19 +19,56 @@ function initializeGeneratedReportsModule_() {
   injectGeneratedReportsStyles_();
   refreshGeneratedReportsBadge_();
 
-  // After a successful report, return to the main Personnel Filter and
-  // keep access to the document through the success toast/history button.
-  const originalSuccessHandler = handleReassignmentGenerateSuccess_;
-  handleReassignmentGenerateSuccess_ = function(response) {
-    originalSuccessHandler(response);
+  // New platform flow: ReportEngine owns successful report completion.
+  // Keep the old callback patch only when the legacy generator is actually
+  // loaded, so production does not crash when Reassignment V1 replaces it.
+  const platformEvents = window.PersonnelPlatform?.events;
+  if (platformEvents?.on) {
+    platformEvents.on("report:completed", handleGeneratedReportCompleted_);
+    return;
+  }
 
-    if (!response || response.success !== true) return;
+  if (typeof window.handleReassignmentGenerateSuccess_ === "function") {
+    const originalSuccessHandler = window.handleReassignmentGenerateSuccess_;
+    window.handleReassignmentGenerateSuccess_ = function(response) {
+      originalSuccessHandler(response);
+      handleGeneratedReportSuccess_(response);
+    };
+  }
+}
 
-    closeReassignmentGenerateDialog_();
-    closeReassignmentWorkspace_();
-    showGeneratedReportSuccessToast_(response);
-    refreshGeneratedReportsBadge_();
-  };
+function handleGeneratedReportCompleted_(entry) {
+  if (!entry || String(entry.status || "").toUpperCase() !== "GENERATED") return;
+
+  const result = entry.result && typeof entry.result === "object"
+    ? entry.result
+    : {};
+
+  handleGeneratedReportSuccess_({
+    ...result,
+    success: true,
+    reportId: entry.id,
+    reportType: entry.reportType,
+    orderNumber: entry.metadata?.orderNumber || result.orderNumber || "",
+    orderDate: entry.metadata?.orderDate || result.orderDate || "",
+  });
+}
+
+function handleGeneratedReportSuccess_(response) {
+  if (!response || response.success !== true) return;
+
+  if (typeof window.closeReassignmentGenerateDialog_ === "function") {
+    window.closeReassignmentGenerateDialog_();
+  }
+
+  if (typeof window.closeReassignmentWorkspace_ === "function") {
+    window.closeReassignmentWorkspace_();
+  } else if (window.$PF?.reassignmentV1?.close) {
+    window.$PF.reassignmentV1.close();
+  }
+
+  showGeneratedReportSuccessToast_(response);
+  refreshGeneratedReportsBadge_();
 }
 
 function addGeneratedReportsButton_() {
