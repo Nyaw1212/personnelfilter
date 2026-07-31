@@ -10,25 +10,49 @@ function read(name) {
 
 function appJsBundle() {
   const entry = read("PersonnelWebApp.js");
-  const names = [...entry.matchAll(/createHtmlOutputFromFile\("([^"]+)"\)/g)]
-    .map(match => match[1]);
 
-  const enginePilot = [
-    "ReassignmentEngineLegacyBridgeJS.html",
-    "ReassignmentEngineCoreJS.html",
-    "ReassignmentEngineControlsJS.html",
-    "ReassignmentEngineRendererJS.html",
-    "ReassignmentEngineDebugJS.html",
-  ];
+  // Developer Mode now runs the clean Reassignment V1 plugin. These legacy
+  // reassignment partials stay in the Apps Script project for production
+  // rollback safety, but are no longer bundled into dev/index.html.
+  const excludedLegacyReassignment = new Set([
+    "ReassignmentGenerateJS",
+    "ReassignmentJS",
+    "ReassignmentPatchJS",
+    "ReassignmentSourceOfficePatchJS",
+    "ReassignmentClearPatchJS",
+    "ReassignmentWorkspaceClearJS",
+    "ReassignmentFormPersistencePatchJS",
+    "ReassignmentPreviewPolishJS",
+    "ReassignmentLivePreviewFixJS",
+    "ReassignmentLayoutChoiceJS",
+    "ReassignmentTodayDatePatchJS",
+    "ReassignmentDestinationCampFilterJS",
+    "ReassignmentAddPersonnelJS",
+    "ReassignmentFlexibleDestinationAndSortJS",
+    "ReassignmentCompactSourceUXJS",
+    "ReassignmentSourceSubtitleFixJS",
+    "ReassignmentNewReportResetFixJS",
+    "ReassignmentDestinationMasterAndGroupChangeJS",
+    "ReassignmentDynamicDestinationDirectoryJS",
+    "ReassignmentDestinationDirectoryUXJS",
+    "DestinationCampChipsJS",
+    "Stage1WorkflowUXJS",
+    "Stage1WorkflowRuntimeFixJS",
+    "Stage1GenerateChoiceHardFixJS",
+    "Stage1ReportLauncherAndEscapeJS",
+  ]);
+
+  const names = [...entry.matchAll(/createHtmlOutputFromFile\("([^"]+)"\)/g)]
+    .map(match => match[1])
+    .filter(name => !excludedLegacyReassignment.has(name));
 
   const platformPilot = [
     "PlatformCoreJS.html",
     "PlatformLegacyEngineAdaptersJS.html",
     "PlatformSelectionEngineV2JS.html",
     "PlatformFilterEngineV2JS.html",
-    "PlatformAssignmentEngineV2JS.html",
-    "ReassignmentPluginJS.html",
     "PlatformAssignmentCoreJS.html",
+    "PlatformDirectoryEngineJS.html",
     "PlatformSortEngineJS.html",
     "PlatformGeneratorEngineJS.html",
     "PlatformReportEngineJS.html",
@@ -40,7 +64,6 @@ function appJsBundle() {
   return [
     read("AppJS.html"),
     ...names.map(name => read(`${name}.html`)),
-    ...enginePilot.map(read),
     ...platformPilot.map(read),
   ].join("\n\n");
 }
@@ -63,4 +86,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with ReportEngine summary table preview UI.");
+console.log("Built dev/index.html with clean Reassignment V1; legacy reassignment runtime detached.");
