@@ -47,12 +47,33 @@
     return text(item?.camp || item?.record?.Camp);
   }
 
+  function sortedUnique(values) {
+    return [...new Set((values || []).map(text).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }));
+  }
+
   function directory() {
-    const records = Array.isArray(window.PersonnelState?.records) ? window.PersonnelState.records : [];
-    const camps = [...new Set(records.map(row => text(row.Camp)).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    const offices = [...new Set(records.map(row => text(row.Office)).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const records = Array.isArray(window.PersonnelState?.records)
+      ? window.PersonnelState.records
+      : [];
+
+    // Use the complete shared destination directory when available, then merge
+    // any newly added values found in the current personnel roster.
+    const shared = window.ReassignmentEngine?.getDirectory?.() || {};
+
+    const camps = sortedUnique([
+      ...(Array.isArray(shared.camps) ? shared.camps : []),
+      ...records.map(row => row.Camp),
+    ]);
+
+    const offices = sortedUnique([
+      ...(Array.isArray(shared.offices) ? shared.offices : []),
+      ...records.map(row => row.Office),
+    ]);
+
     return { camps, offices };
   }
 
@@ -95,8 +116,8 @@
       .rp1-person-name { font-weight:800; line-height:1.15; }
       .rp1-person-sub { font-size:11px; opacity:.72; margin-top:2px; }
       .rp1-search { width:100%; box-sizing:border-box; border:1px solid #c5d9ca; border-radius:10px; padding:10px; margin-bottom:10px; font:inherit; }
-      .rp1-chip-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; max-height:430px; overflow:auto; padding-right:3px; }
-      .rp1-chip { text-align:left; border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px; font:inherit; font-weight:700; cursor:pointer; overflow-wrap:anywhere; }
+      .rp1-chip-grid { display:grid; grid-template-columns:1fr; gap:7px; max-height:430px; overflow:auto; padding-right:3px; }
+      .rp1-chip { width:100%; text-align:left; border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px; font:inherit; font-weight:700; cursor:pointer; overflow-wrap:anywhere; }
       .rp1-chip.active { background:#236b39; color:white; }
       .rp1-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; align-content:start; }
       .rp1-group { border:1px solid #c9decf; border-radius:14px; background:white; min-height:230px; padding:10px; }
@@ -133,7 +154,7 @@
           <div class="rp1-actions">
             <button class="rp1-btn" data-rp1="undo" ${current.undo.length ? "" : "disabled"}>↶ Undo</button>
             <button class="rp1-btn" data-rp1="redo" ${current.redo.length ? "" : "disabled"}>↷ Redo</button>
-            <button class="rp1-btn" data-rp1="reset">New Session</button>
+            <button class="rp1-btn" data-rp1="clear-all">Clear All</button>
             <button class="rp1-btn" data-rp1="close">Back to Personnel Filter</button>
           </div>
         </header>
@@ -222,7 +243,7 @@
     document.body.style.overflow = "";
   }
 
-  function newSession() {
+  function clearAll() {
     engine.reset(SCOPE, personnelEntries());
     render();
   }
@@ -262,7 +283,7 @@
     const action = event.target.closest("[data-rp1]")?.dataset.rp1;
     if (!action) return;
     if (action === "close") close();
-    else if (action === "reset") newSession();
+    else if (action === "clear-all") clearAll();
     else if (action === "select-all") engine.selectAllUnassigned(SCOPE);
     else if (action === "clear-selection") engine.clearSelection(SCOPE);
     else if (action === "assign") {
@@ -298,7 +319,7 @@
   const plugin = {
     id: PLUGIN_ID,
     name: "Reassignment V1",
-    version: "1.0.0",
+    version: "1.0.1",
     requires: ["state", "events", "selection", "assignmentCore"],
     install() {
       installStyles();
@@ -309,7 +330,7 @@
     deactivate() { close(); },
     open,
     close,
-    newSession,
+    clearAll,
     report() { return engine.report(SCOPE); },
   };
 
@@ -325,5 +346,5 @@
   document.body.appendChild(launcher);
 
   window.$PF.reassignmentV1 = plugin;
-  console.info("Reassignment Plugin V1 active. Run $PF.reassignmentV1.open().");
+  console.info("Reassignment Plugin V1.0.1 active. Run $PF.reassignmentV1.open().");
 })();
