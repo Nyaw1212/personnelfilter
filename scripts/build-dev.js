@@ -21,10 +21,17 @@ function appJsBundle() {
     "ReassignmentEngineDebugJS.html",
   ];
 
+  const platformPilot = [
+    "PlatformCoreJS.html",
+    "PlatformLegacyEngineAdaptersJS.html",
+    "ReassignmentPluginJS.html",
+  ];
+
   return [
     read("AppJS.html"),
     ...names.map(name => read(`${name}.html`)),
     ...enginePilot.map(read),
+    ...platformPilot.map(read),
   ].join("\n\n");
 }
 
@@ -46,4 +53,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with Apps Script includes expanded, ReassignmentEngine pilot, legacy bridge, and diagnostics loaded.");
+console.log("Built dev/index.html with ReassignmentEngine and PersonnelPlatform plugin foundation loaded.");
