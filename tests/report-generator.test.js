@@ -49,9 +49,10 @@ window.ReassignmentState = {
 
 window.Stage1ReportEditorState = {
   loading: false,
-  sourceReport: null,
+  sourceReport: { orderNumber: "OLD-REPORT" },
 };
 
+let reportTypeOpened = false;
 window.saveAoCart_ = () => {
   window.localStorage.setItem(
     "personnelFilterAoCartV1",
@@ -65,7 +66,11 @@ window.updateAoCartCount_ = () => {
 };
 window.updateReportGeneratorButton_ = () => {};
 window.renderPreviewTable = () => {};
-window.openReportTypeDialog_ = () => {};
+window.openReportTypeDialog_ = () => {
+  reportTypeOpened = true;
+  document.getElementById("reportTypeBackdrop").hidden = false;
+  document.getElementById("reportTypeDialog").hidden = false;
+};
 window.closeReportTypeDialog_ = () => {};
 
 window.localStorage.setItem(
@@ -90,15 +95,19 @@ assert.ok(newReportButton, "New Report button should exist.");
 
 newReportButton.click();
 
-assert.equal(window.PersonnelState.aoCart.size, 0,
-  "New Report should clear selected personnel.");
+assert.equal(window.PersonnelState.aoCart.size, 2,
+  "New Report should keep the personnel currently selected in the main table.");
 assert.equal(window.ReassignmentState.assignments.size, 0,
-  "New Report should clear Step 3 assignments.");
+  "New Report should clear old Step 3 assignments.");
 assert.equal(window.ReassignmentState.selectedKeys.size, 0,
-  "New Report should clear checked personnel.");
-assert.equal(window.localStorage.getItem("personnelFilterAoCartV1"), "[]",
-  "Saved AO cart should also be empty.");
-assert.equal(document.getElementById("aoCartCount").textContent, "0 selected",
-  "Toolbar count should update.");
+  "New Report should clear old workspace checkbox selections.");
+assert.equal(window.Stage1ReportEditorState.sourceReport, null,
+  "New Report should exit old generated-report edit mode.");
+assert.equal(reportTypeOpened, true,
+  "New Report should open the report type picker.");
+assert.equal(document.getElementById("reportTypeDialog").hidden, false,
+  "The report type dialog should be visible.");
+assert.equal(document.getElementById("aoCartCount").textContent, "2 selected",
+  "Toolbar count should continue showing the current selected personnel.");
 
-console.log("✓ Report Generator New Report reset passed");
+console.log("✓ Report Generator New Report picker flow passed");
