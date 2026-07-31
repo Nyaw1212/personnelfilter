@@ -1,0 +1,159 @@
+// Personnel Platform — KeyboardEngine
+// Central keyboard routing for active platform plugins and overlays.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const REASSIGNMENT_SCOPE = "reassignment-v1";
+  let enabled = true;
+  let lastAction = "";
+  let lastAt = "";
+
+  function isVisible(element) {
+    return Boolean(element && !element.hidden && element.getClientRects().length);
+  }
+
+  function isTextEditingTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = String(target.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  function record(action) {
+    lastAction = action;
+    lastAt = new Date().toISOString();
+    platform.events.emit("keyboard:action", { action, at: lastAt });
+  }
+
+  function closeTopmost() {
+    const reportPreview = document.getElementById("reportSummaryPreviewRoot");
+    if (isVisible(reportPreview)) {
+      window.$PF?.reportPreview?.close?.();
+      record("ESCAPE_REPORT_PREVIEW");
+      return true;
+    }
+
+    const transferQueue = document.getElementById("transferQueuePluginV1Root");
+    if (isVisible(transferQueue)) {
+      window.$PF?.transferQueuePlugin?.close?.();
+      record("ESCAPE_TRANSFER_QUEUE");
+      return true;
+    }
+
+    const launcher = document.getElementById("platformReportLauncherRoot");
+    if (isVisible(launcher)) {
+      window.$PF?.reportLauncher?.close?.();
+      if (isVisible(launcher)) launcher.hidden = true;
+      const backdrop = document.getElementById("platformReportLauncherBackdrop");
+      if (backdrop) backdrop.hidden = true;
+      record("ESCAPE_REPORT_LAUNCHER");
+      return true;
+    }
+
+    const reassignment = document.getElementById("reassignmentPluginV1Root");
+    if (isVisible(reassignment)) {
+      window.$PF?.reassignmentV1?.close?.();
+      if (isVisible(reassignment)) {
+        reassignment.hidden = true;
+        document.body.style.overflow = "";
+      }
+      record("ESCAPE_REASSIGNMENT");
+      return true;
+    }
+
+    return false;
+  }
+
+  function activeAssignmentContext() {
+    const root = document.getElementById("reassignmentPluginV1Root");
+    if (!isVisible(root)) return null;
+    const engine = platform.engines.get("assignmentCore");
+    if (!engine) return null;
+    return { engine, scope: REASSIGNMENT_SCOPE };
+  }
+
+  function undo() {
+    const context = activeAssignmentContext();
+    if (!context) return false;
+    const before = context.engine.get(context.scope);
+    if (!before.undo?.length) return false;
+    context.engine.undo(context.scope);
+    window.$PF?.reassignmentV1?.render?.();
+    record("UNDO_REASSIGNMENT");
+    return true;
+  }
+
+  function redo() {
+    const context = activeAssignmentContext();
+    if (!context) return false;
+    const before = context.engine.get(context.scope);
+    if (!before.redo?.length) return false;
+    context.engine.redo(context.scope);
+    window.$PF?.reassignmentV1?.render?.();
+    record("REDO_REASSIGNMENT");
+    return true;
+  }
+
+  function handleKeydown(event) {
+    if (!enabled || event.defaultPrevented) return;
+
+    if (event.key === "Escape") {
+      if (closeTopmost()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    const modifier = event.ctrlKey || event.metaKey;
+    if (!modifier || event.altKey || isTextEditingTarget(event.target)) return;
+
+    const key = String(event.key || "").toLowerCase();
+    const wantsUndo = key === "z" && !event.shiftKey;
+    const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
+
+    if (wantsUndo && undo()) {
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (wantsRedo && redo()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  document.addEventListener("keydown", handleKeydown, true);
+
+  const KeyboardEngine = {
+    version: "1.0.0",
+    enable() { enabled = true; return this.status(); },
+    disable() { enabled = false; return this.status(); },
+    escape: closeTopmost,
+    undo,
+    redo,
+    status() {
+      const context = activeAssignmentContext();
+      const state = context?.engine?.get?.(context.scope);
+      const report = {
+        version: this.version,
+        enabled,
+        reassignmentActive: Boolean(context),
+        canUndo: Boolean(state?.undo?.length),
+        canRedo: Boolean(state?.redo?.length),
+        lastAction: lastAction || "—",
+        lastAt: lastAt || "—",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("keyboard")) platform.engines.replace("keyboard", KeyboardEngine);
+  else platform.engines.register("keyboard", KeyboardEngine);
+
+  window.$PF.keyboard = KeyboardEngine;
+  console.info("KeyboardEngine v1.0.0 active: Esc, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z.");
+})();
