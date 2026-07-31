@@ -1,0 +1,187 @@
+// Personnel Platform — local transfer apply adapter
+// Developer Mode only: applies approved queue movements to PersonnelState.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const queue = platform?.engines?.get?.("transferQueue");
+  if (!platform || !queue || queue.localApplyInstalled) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function key(value) {
+    return text(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function legacyState() {
+    try {
+      if (typeof PersonnelState !== "undefined" && PersonnelState) return PersonnelState;
+    } catch (ignored) {}
+    return window.PersonnelState || null;
+  }
+
+  function rowFromPersonnelKey(personnelKey) {
+    const match = /^row:(.+)$/i.exec(text(personnelKey));
+    return match ? text(match[1]) : "";
+  }
+
+  function findRecord(records, movement) {
+    const row = rowFromPersonnelKey(movement.personnelKey);
+    if (row) {
+      const rowMatch = records.find(record => text(record.__sheetRow) === row);
+      if (rowMatch) return rowMatch;
+    }
+
+    const nameKey = key(movement.fullName);
+    let matches = records.filter(record => key(record["Full Name"]) === nameKey);
+
+    const originalOffice = key(movement.originalAssignment?.office);
+    const originalCamp = key(movement.originalAssignment?.camp);
+
+    if (originalOffice) {
+      const officeMatches = matches.filter(record => key(record.Office) === originalOffice);
+      if (officeMatches.length) matches = officeMatches;
+    }
+
+    if (originalCamp) {
+      const campMatches = matches.filter(record => key(record.Camp) === originalCamp);
+      if (campMatches.length) matches = campMatches;
+    }
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function updateAoCart(state, record) {
+    if (!(state.aoCart instanceof Map)) return;
+
+    for (const [cartKey, item] of state.aoCart.entries()) {
+      const sourceRow = text(item?.sourceRow || item?.record?.__sheetRow);
+      const sameRow = sourceRow && sourceRow === text(record.__sheetRow);
+      const sameName = key(item?.fullName || item?.record?.["Full Name"]) === key(record["Full Name"]);
+      if (!sameRow && !sameName) continue;
+
+      state.aoCart.set(cartKey, {
+        ...item,
+        office: text(record.Office),
+        camp: text(record.Camp),
+        record: { ...(item?.record || {}), ...record },
+      });
+    }
+
+    if (typeof saveAoCart_ === "function") saveAoCart_();
+  }
+
+  function refreshPersonnelFilter(state) {
+    if (typeof filterPersonnelRecords === "function") {
+      state.filteredRecords = filterPersonnelRecords();
+    }
+
+    if (typeof renderPreviewTable === "function") renderPreviewTable();
+    if (typeof renderActiveFilterSummary === "function") renderActiveFilterSummary();
+    if (typeof updateAoCartCount_ === "function") updateAoCartCount_();
+
+    platform.events.emit("personnel:local-transfers-applied", {
+      records: state.records,
+      filteredRecords: state.filteredRecords,
+    });
+  }
+
+  function applyEntryToLocalState(entry) {
+    const state = legacyState();
+    if (!state || !Array.isArray(state.records)) {
+      throw new Error("PersonnelState records are unavailable in Developer Mode.");
+    }
+
+    const applied = [];
+    const cautions = [];
+
+    (entry.movements || []).forEach(movement => {
+      if (!["PENDING", "APPROVED"].includes(text(movement.status).toUpperCase())) return;
+
+      const record = findRecord(state.records, movement);
+      if (!record) {
+        cautions.push({
+          code: "PERSONNEL_NOT_MATCHED",
+          personnelKey: movement.personnelKey,
+          fullName: movement.fullName,
+          message: `${movement.fullName || "Personnel"} was not uniquely matched in the local roster.`,
+        });
+        return;
+      }
+
+      const mode = text(movement.transferMode).toUpperCase();
+      const proposed = movement.proposedAssignment || {};
+
+      if (mode === "CAMP_TO_CAMP") {
+        if (text(proposed.camp)) record.Camp = text(proposed.camp);
+        if (text(proposed.office)) record.Office = text(proposed.office);
+      } else {
+        if (text(proposed.office)) record.Office = text(proposed.office);
+        if (text(proposed.camp)) record.Camp = text(proposed.camp);
+      }
+
+      updateAoCart(state, record);
+      applied.push({
+        personnelKey: movement.personnelKey,
+        fullName: movement.fullName,
+        office: text(record.Office),
+        camp: text(record.Camp),
+      });
+    });
+
+    refreshPersonnelFilter(state);
+
+    return {
+      localPreview: true,
+      appliedCount: applied.length,
+      cautionCount: cautions.length,
+      applied,
+      cautions,
+      note: cautions.length
+        ? `${applied.length} local transfer(s) applied with ${cautions.length} caution(s).`
+        : `${applied.length} local transfer(s) applied.`,
+    };
+  }
+
+  const originalApply = queue.apply.bind(queue);
+
+  queue.apply = function (id, result = {}, by = "") {
+    const entry = queue.get(id);
+    if (!entry) throw new Error(`Transfer queue entry ${text(id) || "—"} was not found.`);
+
+    const localResult = applyEntryToLocalState(entry);
+    const mergedResult = { ...result, ...localResult };
+    return originalApply(id, mergedResult, by || text(result.appliedBy));
+  };
+
+  queue.markApplied = function (id, result = {}) {
+    return queue.apply(id, result, text(result.appliedBy));
+  };
+
+  queue.applyLocal = function (id, options = {}) {
+    return queue.apply(id, { ...options, localPreview: true }, text(options.appliedBy));
+  };
+
+  queue.localApplyInstalled = true;
+  queue.localApplyVersion = "1.0.0";
+
+  window.$PF.transferApplyLocal = {
+    version: "1.0.0",
+    apply: id => queue.applyLocal(id),
+    status() {
+      const report = {
+        version: this.version,
+        active: true,
+        queueVersion: queue.version,
+        mode: "DEVELOPER_LOCAL_STATE",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  console.info("Local Transfer Apply adapter v1.0.0 active.");
+})();
