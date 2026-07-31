@@ -1,0 +1,186 @@
+//----------------------------------
+// Dynamic destination directory
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const DEFAULT_CAMPS = ["NBP", "MAXIMUM", "MEDIUM", "MINIMUM", "RDC"];
+  const DEFAULT_OFFICES = [
+    "CAMP COMMANDER",
+    "CASO",
+    "COMMAND CENTER",
+    "EAS",
+    "ESCORT",
+    "ESCORT GROUP",
+    "EXTERNAL AFFAIRS SECTION",
+    "EXTERNAL SECURITY SERVICES",
+    "IIS",
+    "IVSU",
+    "NBPH",
+    "OFFICE OF THE SUPERINTENDENT",
+    "SEPARATION CENTER",
+  ];
+
+  function clean_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function valueFrom_(record, keys) {
+    for (const key of keys) {
+      const value = clean_(record && record[key]);
+      if (value) return value;
+    }
+    return "";
+  }
+
+  function mergedValues_(defaults, keys) {
+    const values = new Map();
+
+    defaults.forEach(value => {
+      const clean = clean_(value);
+      if (clean) values.set(clean.toUpperCase(), clean);
+    });
+
+    const records = Array.isArray(window.PersonnelState?.records)
+      ? window.PersonnelState.records
+      : [];
+
+    records.forEach(record => {
+      const value = valueFrom_(record, keys);
+      if (value) values.set(value.toUpperCase(), value);
+    });
+
+    return [...values.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    );
+  }
+
+  function camps_() {
+    return mergedValues_(DEFAULT_CAMPS, ["Camp", "CAMP", "camp"]);
+  }
+
+  function offices_() {
+    return mergedValues_(DEFAULT_OFFICES, ["Office", "OFFICE", "office"]);
+  }
+
+  function transferMode_() {
+    try {
+      return localStorage.getItem("personnelFilterTransferModeV1") === "CAMP_TO_CAMP"
+        ? "CAMP_TO_CAMP"
+        : "OFFICE_TO_OFFICE";
+    } catch (_error) {
+      return "OFFICE_TO_OFFICE";
+    }
+  }
+
+  function saveTransferMode_(mode) {
+    try {
+      localStorage.setItem("personnelFilterTransferModeV1", mode);
+    } catch (_error) {}
+  }
+
+  function optionChip_(label, active, handler) {
+    if (typeof window.makeChip_ === "function") {
+      return window.makeChip_(label, active, handler);
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "filter-chip";
+    button.classList.toggle("is-active", active);
+    button.textContent = label;
+    button.addEventListener("click", handler);
+    return button;
+  }
+
+  function renderDestinations_() {
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    if (!campContainer || !officeContainer || !window.ReassignmentState) return;
+
+    campContainer.replaceChildren();
+    camps_().forEach(camp => {
+      campContainer.appendChild(optionChip_(
+        camp,
+        clean_(ReassignmentState.activeCamp).toUpperCase() === camp.toUpperCase(),
+        () => {
+          ReassignmentState.activeCamp = camp;
+          ReassignmentState.activeOffice = "";
+          saveTransferMode_("CAMP_TO_CAMP");
+          if (typeof window.saveReassignmentState_ === "function") saveReassignmentState_();
+          renderDestinations_();
+          if (typeof window.updateReassignmentControls_ === "function") {
+            updateReassignmentControls_(PersonnelState.aoCart.size);
+          }
+        }
+      ));
+    });
+
+    officeContainer.replaceChildren();
+    offices_().forEach(office => {
+      officeContainer.appendChild(optionChip_(
+        office,
+        clean_(ReassignmentState.activeOffice).toUpperCase() === office.toUpperCase(),
+        () => {
+          ReassignmentState.activeOffice = office;
+          ReassignmentState.activeCamp = "";
+          saveTransferMode_("OFFICE_TO_OFFICE");
+          if (typeof window.saveReassignmentState_ === "function") saveReassignmentState_();
+          renderDestinations_();
+          if (typeof window.updateReassignmentControls_ === "function") {
+            updateReassignmentControls_(PersonnelState.aoCart.size);
+          }
+        }
+      ));
+    });
+
+    const campMode = transferMode_() === "CAMP_TO_CAMP";
+    campContainer.hidden = !campMode;
+    officeContainer.hidden = campMode;
+  }
+
+  function patchGroupChangeDialog_() {
+    document.addEventListener("click", event => {
+      const button = event.target.closest(".assignment-group-change-button");
+      if (!button) return;
+
+      window.setTimeout(() => {
+        const dialog = document.getElementById("groupDestinationChangeDialog");
+        const select = dialog?.querySelector("select.group-destination-select");
+        if (!select) return;
+
+        const current = select.value;
+        const heading = dialog.querySelector("p")?.textContent || "";
+        const isCamp = /camp/i.test(
+          button.closest(".assignment-card")?.querySelector("strong")?.textContent || heading
+        );
+        const options = isCamp ? camps_() : offices_();
+
+        select.replaceChildren();
+        options.forEach(value => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          option.selected = value === current;
+          select.appendChild(option);
+        });
+      }, 0);
+    }, true);
+  }
+
+  function install_() {
+    window.renderDestinationChips_ = renderDestinations_;
+    renderDestinations_();
+    patchGroupChangeDialog_();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
