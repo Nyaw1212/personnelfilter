@@ -165,6 +165,11 @@ function include(
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentNewReportResetFixJS")
       .getContent();
+
+    // Fixed master destination options and per-group destination changes.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentDestinationMasterAndGroupChangeJS")
+      .getContent();
   }
 
   return content;
