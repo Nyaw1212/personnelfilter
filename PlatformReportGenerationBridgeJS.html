@@ -52,13 +52,17 @@
   }
 
   function fail(draftId, message) {
+    const failureMessage = text(message) || "The report could not be generated.";
     const result = report.saveResult(draftId, {
       status: "FAILED",
       success: false,
-      message: text(message) || "The report could not be generated.",
+      message: failureMessage,
       generatedAt: new Date().toISOString(),
     });
+
     platform.events.emit("report:generation-failed", result);
+    window.$PF.reportPreview?.open?.(draftId);
+    window.alert(failureMessage);
     return result;
   }
 
@@ -93,6 +97,7 @@
           generatedAt: new Date().toISOString(),
         });
 
+        window.$PF.reportPreview?.close?.();
         console.info("Apps Script report generation completed.", result);
       })
       .withFailureHandler(error => {
