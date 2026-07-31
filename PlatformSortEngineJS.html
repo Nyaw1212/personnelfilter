@@ -1,0 +1,76 @@
+// Personnel Platform — reusable SortEngine
+// Developer Mode foundation. Pure sorting service with no DOM dependencies.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function lastName(value) {
+    const name = text(value).replace(/\s+(JR\.?|SR\.?|II|III|IV)$/i, "").trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    return parts.at(-1) || "";
+  }
+
+  function compareText(a, b) {
+    return text(a).localeCompare(text(b), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  const SortEngine = {
+    version: "1.0.0",
+    modes: ["LIST", "RANK", "RANK_LAST_NAME", "LAST_NAME", "ASSIGNED_SEQUENCE"],
+
+    sort(items, options = {}) {
+      const mode = this.modes.includes(options.mode) ? options.mode : "LIST";
+      const list = [...(items || [])];
+      const getKey = options.getKey || (item => item?.key ?? item);
+      const getRank = options.getRank || (() => "");
+      const getName = options.getName || (() => "");
+      const listOrder = options.listOrder instanceof Map ? options.listOrder : new Map();
+      const assignedOrder = options.assignedOrder instanceof Map ? options.assignedOrder : new Map();
+
+      return list.sort((a, b) => {
+        const keyA = getKey(a);
+        const keyB = getKey(b);
+        const rankA = getRank(a);
+        const rankB = getRank(b);
+        const nameA = getName(a);
+        const nameB = getName(b);
+
+        if (mode === "RANK") {
+          return compareText(rankA, rankB) || compareText(nameA, nameB);
+        }
+
+        if (mode === "RANK_LAST_NAME") {
+          return compareText(rankA, rankB) || compareText(lastName(nameA), lastName(nameB)) || compareText(nameA, nameB);
+        }
+
+        if (mode === "LAST_NAME") {
+          return compareText(lastName(nameA), lastName(nameB)) || compareText(nameA, nameB);
+        }
+
+        if (mode === "ASSIGNED_SEQUENCE") {
+          return (assignedOrder.get(keyA) ?? Number.MAX_SAFE_INTEGER) -
+            (assignedOrder.get(keyB) ?? Number.MAX_SAFE_INTEGER);
+        }
+
+        return (listOrder.get(keyA) ?? Number.MAX_SAFE_INTEGER) -
+          (listOrder.get(keyB) ?? Number.MAX_SAFE_INTEGER);
+      });
+    },
+  };
+
+  if (platform.engines.has("sort")) platform.engines.replace("sort", SortEngine);
+  else platform.engines.register("sort", SortEngine);
+
+  window.$PF.sort = SortEngine;
+  console.info("Reusable SortEngine v1.0.0 active.");
+})();
