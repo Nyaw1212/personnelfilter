@@ -1,0 +1,329 @@
+//----------------------------------
+// Master Step 2 destinations + Step 3 group destination change
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const CAMPS = [
+    "NBP",
+    "MAXIMUM",
+    "MEDIUM",
+    "MINIMUM",
+    "RDC",
+  ];
+
+  // Fixed destination directory. These options are always available even
+  // when the currently loaded/local roster does not contain personnel from
+  // every office.
+  const OFFICES = [
+    "CAMP COMMANDER",
+    "CASO",
+    "COMMAND CENTER",
+    "EAS",
+    "ESCORT",
+    "ESCORT GROUP",
+    "EXTERNAL AFFAIRS SECTION",
+    "EXTERNAL SECURITY SERVICES",
+    "IIS",
+    "IVSU",
+    "NBPH",
+    "OFFICE OF THE SUPERINTENDENT",
+    "SEPARATION CENTER",
+  ];
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function transferMode_() {
+    try {
+      return localStorage.getItem("personnelFilterTransferModeV1") === "CAMP_TO_CAMP"
+        ? "CAMP_TO_CAMP"
+        : "OFFICE_TO_OFFICE";
+    } catch (_error) {
+      return "OFFICE_TO_OFFICE";
+    }
+  }
+
+  function saveTransferMode_(mode) {
+    try {
+      localStorage.setItem("personnelFilterTransferModeV1", mode);
+    } catch (_error) {}
+  }
+
+  function makeOptionChip_(label, active, onClick) {
+    if (typeof makeChip_ === "function") {
+      return makeChip_(label, active, onClick);
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "filter-chip";
+    button.classList.toggle("is-active", active);
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function renderMasterDestinationChips_() {
+    const campContainer = document.getElementById("destinationCampChips");
+    const officeContainer = document.getElementById("destinationOfficeChips");
+    if (!campContainer || !officeContainer) return;
+
+    campContainer.replaceChildren();
+    CAMPS.forEach(camp => {
+      campContainer.appendChild(
+        makeOptionChip_(
+          camp,
+          text_(ReassignmentState.activeCamp).toUpperCase() === camp,
+          () => {
+            ReassignmentState.activeCamp = camp;
+            ReassignmentState.activeOffice = "";
+            saveTransferMode_("CAMP_TO_CAMP");
+            if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+            renderMasterDestinationChips_();
+            if (typeof updateReassignmentControls_ === "function") {
+              updateReassignmentControls_(PersonnelState.aoCart.size);
+            }
+          }
+        )
+      );
+    });
+
+    officeContainer.replaceChildren();
+    OFFICES.forEach(office => {
+      officeContainer.appendChild(
+        makeOptionChip_(
+          office,
+          text_(ReassignmentState.activeOffice).toUpperCase() === office,
+          () => {
+            ReassignmentState.activeOffice = office;
+            ReassignmentState.activeCamp = "";
+            saveTransferMode_("OFFICE_TO_OFFICE");
+            if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+            renderMasterDestinationChips_();
+            if (typeof updateReassignmentControls_ === "function") {
+              updateReassignmentControls_(PersonnelState.aoCart.size);
+            }
+          }
+        )
+      );
+    });
+
+    const campMode = transferMode_() === "CAMP_TO_CAMP";
+    campContainer.hidden = !campMode;
+    officeContainer.hidden = campMode;
+  }
+
+  function normalizeAssignment_(value) {
+    if (value && typeof value === "object") {
+      const office = text_(value.office);
+      const camp = text_(value.camp);
+      const mode = text_(value.mode) || (camp && !office ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE");
+      return { office, camp, mode };
+    }
+
+    const raw = text_(value);
+    if (raw.indexOf("__CAMP_ONLY__:") === 0) {
+      return {
+        office: "",
+        camp: raw.slice("__CAMP_ONLY__:".length),
+        mode: "CAMP_TO_CAMP",
+      };
+    }
+
+    return { office: raw, camp: "", mode: "OFFICE_TO_OFFICE" };
+  }
+
+  function assignmentGroupKey_(destination) {
+    return destination.mode === "CAMP_TO_CAMP" || (destination.camp && !destination.office)
+      ? `CAMP_TO_CAMP|${destination.camp}`
+      : `OFFICE_TO_OFFICE|${destination.office}`;
+  }
+
+  function ensureChangeDialog_() {
+    let backdrop = document.getElementById("groupDestinationChangeBackdrop");
+    let dialog = document.getElementById("groupDestinationChangeDialog");
+    if (backdrop && dialog) return { backdrop, dialog };
+
+    backdrop = document.createElement("div");
+    backdrop.id = "groupDestinationChangeBackdrop";
+    backdrop.className = "stage1-save-backdrop";
+    backdrop.hidden = true;
+
+    dialog = document.createElement("section");
+    dialog.id = "groupDestinationChangeDialog";
+    dialog.className = "stage1-save-dialog group-destination-change-dialog";
+    dialog.hidden = true;
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    backdrop.addEventListener("click", closeChangeDialog_);
+    document.body.append(backdrop, dialog);
+    return { backdrop, dialog };
+  }
+
+  function closeChangeDialog_() {
+    const backdrop = document.getElementById("groupDestinationChangeBackdrop");
+    const dialog = document.getElementById("groupDestinationChangeDialog");
+    if (backdrop) backdrop.hidden = true;
+    if (dialog) dialog.hidden = true;
+  }
+
+  function openChangeDialog_(group) {
+    const { backdrop, dialog } = ensureChangeDialog_();
+    const options = group.mode === "CAMP_TO_CAMP" ? CAMPS : OFFICES;
+    const current = group.mode === "CAMP_TO_CAMP" ? group.camp : group.office;
+
+    dialog.replaceChildren();
+
+    const eyebrow = document.createElement("span");
+    eyebrow.textContent = "STEP 3";
+    const title = document.createElement("h2");
+    title.textContent = "Change Group Destination";
+    const description = document.createElement("p");
+    description.textContent = `Update the destination for all ${group.keys.length} personnel in this group.`;
+
+    const select = document.createElement("select");
+    select.className = "group-destination-select";
+    options.forEach(option => {
+      const element = document.createElement("option");
+      element.value = option;
+      element.textContent = option;
+      element.selected = option === current;
+      select.appendChild(element);
+    });
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "button button-primary";
+    save.textContent = "Apply to Group";
+    save.addEventListener("click", () => {
+      const destination = select.value;
+      group.keys.forEach(key => {
+        ReassignmentState.assignments.set(
+          key,
+          group.mode === "CAMP_TO_CAMP"
+            ? { office: "", camp: destination, mode: "CAMP_TO_CAMP" }
+            : { office: destination, camp: "", mode: "OFFICE_TO_OFFICE" }
+        );
+      });
+
+      if (typeof saveReassignmentState_ === "function") saveReassignmentState_();
+      closeChangeDialog_();
+      if (typeof renderReassignmentWorkspace_ === "function") {
+        renderReassignmentWorkspace_();
+      } else if (typeof renderAssignmentCards_ === "function") {
+        renderAssignmentCards_();
+      }
+    });
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "button button-secondary";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", closeChangeDialog_);
+
+    dialog.append(eyebrow, title, description, select, save, cancel);
+    backdrop.hidden = false;
+    dialog.hidden = false;
+    window.setTimeout(() => select.focus(), 0);
+  }
+
+  function renderAssignmentGroups_() {
+    const grid = document.getElementById("assignmentCardGrid");
+    if (!grid) return;
+
+    grid.replaceChildren();
+    const groups = new Map();
+
+    ReassignmentState.assignments.forEach((raw, key) => {
+      const destination = normalizeAssignment_(raw);
+      const groupKey = assignmentGroupKey_(destination);
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          mode: destination.mode,
+          office: destination.office,
+          camp: destination.camp,
+          keys: [],
+        });
+      }
+      groups.get(groupKey).keys.push(key);
+    });
+
+    if (!groups.size) {
+      const empty = document.createElement("div");
+      empty.textContent = "No personnel assigned yet.";
+      grid.appendChild(empty);
+      return;
+    }
+
+    groups.forEach(group => {
+      const card = document.createElement("article");
+      card.className = "assignment-card";
+
+      const header = document.createElement("div");
+      header.className = "assignment-card-header assignment-group-header";
+
+      const title = document.createElement("strong");
+      title.textContent = group.mode === "CAMP_TO_CAMP"
+        ? `CAMP TO ${group.camp}`
+        : `OFFICE TO ${group.office}`;
+
+      const count = document.createElement("span");
+      count.textContent = `${group.keys.length} ${group.keys.length === 1 ? "personnel" : "personnel"}`;
+
+      const change = document.createElement("button");
+      change.type = "button";
+      change.className = "assignment-group-change-button";
+      change.textContent = "Change";
+      change.addEventListener("click", () => openChangeDialog_(group));
+
+      header.append(title, count, change);
+      card.appendChild(header);
+
+      group.keys.forEach(key => {
+        const person = PersonnelState.aoCart.get(key);
+        if (!person) return;
+
+        const row = document.createElement("div");
+        row.className = "assignment-person";
+
+        const name = document.createElement("span");
+        name.textContent = [person.rank, person.fullName].filter(Boolean).join(" ");
+        row.append(name, makeRemoveButton_(key));
+        card.appendChild(row);
+      });
+
+      grid.appendChild(card);
+    });
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("masterDestinationAndGroupChangeStyles")) return;
+    const style = document.createElement("style");
+    style.id = "masterDestinationAndGroupChangeStyles";
+    style.textContent = `
+      .assignment-group-header{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px}
+      .assignment-group-change-button{min-height:28px;padding:4px 9px;border:1px solid rgba(31,111,52,.24);border-radius:8px;background:#fff;color:#1b5128;font:inherit;font-size:10px;font-weight:800;cursor:pointer}
+      .assignment-group-change-button:hover{background:#f1fff3;border-color:#2d7d46}
+      .group-destination-change-dialog{gap:10px}
+      .group-destination-select{width:100%;min-height:42px;padding:8px 10px;border:1px solid rgba(31,111,52,.25);border-radius:10px;background:#fff;font:inherit}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function install_() {
+    window.renderDestinationChips_ = renderMasterDestinationChips_;
+    window.renderAssignmentCards_ = renderAssignmentGroups_;
+    renderMasterDestinationChips_();
+    injectStyles_();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
