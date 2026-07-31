@@ -14177,6 +14177,52 @@ function patchAoRowButtonsForFastUpdates_() {
 
 
 //----------------------------------
+// Reassignment Engine — Legacy State Bridge (Developer Mode only)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function expose_(name, getter) {
+    try {
+      const value = getter();
+      if (value !== undefined && value !== null) {
+        window[name] = value;
+      }
+    } catch (_error) {}
+  }
+
+  expose_("PersonnelState", () =>
+    typeof PersonnelState !== "undefined" ? PersonnelState : null
+  );
+
+  expose_("ReassignmentState", () =>
+    typeof ReassignmentState !== "undefined" ? ReassignmentState : null
+  );
+
+  expose_("renderReassignmentWorkspace_", () =>
+    typeof renderReassignmentWorkspace_ === "function"
+      ? renderReassignmentWorkspace_
+      : null
+  );
+
+  expose_("filterUnassigned_", () =>
+    typeof filterUnassigned_ === "function" ? filterUnassigned_ : null
+  );
+
+  expose_("saveReassignmentState_", () =>
+    typeof saveReassignmentState_ === "function"
+      ? saveReassignmentState_
+      : null
+  );
+
+  window.ReassignmentEngineLegacyBridge = {
+    connected: Boolean(window.PersonnelState && window.ReassignmentState),
+  };
+})();
+
+
+//----------------------------------
 // Reassignment Engine — Core (Developer Mode pilot)
 //----------------------------------
 
@@ -14537,6 +14583,10 @@ function patchAoRowButtonsForFastUpdates_() {
       window.ReassignmentEngine?.dispatch({ type: "ASSIGN_SELECTED" });
     }
   });
+
+  window.ReassignmentEngineControls = {
+    connected: true,
+  };
 })();
 
 
@@ -14619,12 +14669,14 @@ function patchAoRowButtonsForFastUpdates_() {
       });
     }
 
+    const selectedKeys = window.ReassignmentState?.selectedKeys;
+
     const assignSelected = document.createElement("button");
     assignSelected.type = "button";
     assignSelected.className = "button button-primary";
     assignSelected.textContent = "Assign Selected";
     assignSelected.dataset.engineAction = "ASSIGN_SELECTED";
-    assignSelected.disabled = !selected || !window.ReassignmentState?.selectedKeys?.size;
+    assignSelected.disabled = !selected || !(selectedKeys instanceof Set && selectedKeys.size);
 
     const assignVisible = document.createElement("button");
     assignVisible.type = "button";
@@ -14725,6 +14777,11 @@ function patchAoRowButtonsForFastUpdates_() {
     window.ReassignmentEngine.initialize();
     renderEngineUI_();
 
+    window.ReassignmentEngineRenderer = {
+      connected: true,
+      render: renderEngineUI_,
+    };
+
     console.info("ReassignmentEngine pilot active in Developer Mode.");
   }
 
@@ -14733,6 +14790,2739 @@ function patchAoRowButtonsForFastUpdates_() {
   } else {
     install_();
   }
+})();
+
+
+//----------------------------------
+// Reassignment Engine — Debug API (Developer Mode only)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const engine = window.ReassignmentEngine;
+  if (!engine) {
+    console.warn("ReassignmentEngineDebug: engine is not available.");
+    return;
+  }
+
+  const VERSION = "0.1.0";
+  const MAX_COMMANDS = 20;
+  const commandLog = [];
+  const originalDispatch = engine.dispatch.bind(engine);
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function assignments_() {
+    return window.ReassignmentState?.assignments instanceof Map
+      ? window.ReassignmentState.assignments
+      : new Map();
+  }
+
+  function selectedKeys_() {
+    return window.ReassignmentState?.selectedKeys instanceof Set
+      ? window.ReassignmentState.selectedKeys
+      : new Set();
+  }
+
+  function personnelCount_() {
+    return window.PersonnelState?.aoCart instanceof Map
+      ? window.PersonnelState.aoCart.size
+      : 0;
+  }
+
+  function groupCount_() {
+    const groups = new Set();
+    assignments_().forEach(value => {
+      const mode = text_(value?.mode) || (value?.camp ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE");
+      const destination = mode === "CAMP_TO_CAMP"
+        ? text_(value?.camp)
+        : text_(value?.office ?? value);
+      groups.add(`${mode}|${destination}`);
+    });
+    return groups.size;
+  }
+
+  function snapshotReport_() {
+    return {
+      status: "OK",
+      version: VERSION,
+      transferMode: engine.state?.transferMode || "UNKNOWN",
+      personnel: personnelCount_(),
+      selected: selectedKeys_().size,
+      assigned: assignments_().size,
+      groups: groupCount_(),
+      destination: text_(engine.state?.destination?.value) || "—",
+      undo: engine.history?.undo?.length || 0,
+      redo: engine.history?.redo?.length || 0,
+      lastCommand: commandLog.at(-1)?.type || "—",
+    };
+  }
+
+  engine.dispatch = function (command) {
+    const type = text_(command?.type).toUpperCase() || "UNKNOWN";
+    commandLog.push({
+      type,
+      time: new Date().toLocaleTimeString(),
+    });
+    if (commandLog.length > MAX_COMMANDS) commandLog.shift();
+    return originalDispatch(command);
+  };
+
+  engine.version = VERSION;
+
+  engine.status = function () {
+    const report = snapshotReport_();
+    const mode = report.transferMode === "CAMP_TO_CAMP"
+      ? "Camp→Camp"
+      : "Office→Office";
+    const line = `[ENGINE] ${report.status} | ${mode} | ${report.assigned}/${report.personnel} assigned | ${report.groups} group(s) | ${report.destination}`;
+    console.log(line);
+    return line;
+  };
+
+  engine.report = function () {
+    const report = snapshotReport_();
+    console.table(report);
+    return report;
+  };
+
+  engine.last = function (count = 5) {
+    const rows = commandLog.slice(-Math.max(1, Number(count) || 5));
+    console.table(rows);
+    return rows;
+  };
+
+  engine.check = function () {
+    const result = {
+      engine: Boolean(window.ReassignmentEngine),
+      controls: Boolean(window.ReassignmentEngineControls),
+      renderer: Boolean(window.ReassignmentEngineRenderer),
+      personnelState: Boolean(window.PersonnelState),
+      reassignmentState: Boolean(window.ReassignmentState),
+      directory: Boolean(engine.getDirectory()?.offices?.length || engine.getDirectory()?.camps?.length),
+    };
+    result.ok = Object.values(result).every(Boolean);
+    console.table(result);
+    return result;
+  };
+
+  engine.help = function () {
+    const commands = [
+      "$RE.status()",
+      "$RE.report()",
+      "$RE.check()",
+      "$RE.last()",
+      "$RE.state",
+      "$RE.dispatch({ type: 'UNDO' })",
+      "$RE.dispatch({ type: 'REDO' })",
+    ];
+    console.log(commands.join("\n"));
+    return commands;
+  };
+
+  window.$RE = engine;
+  console.info("ReassignmentEngine debug API active. Run $RE.status() or $RE.report().");
+})();
+
+
+//----------------------------------
+// Personnel Platform Core — Developer Mode foundation
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function createEventBus_() {
+    const listeners = new Map();
+    return {
+      on(eventName, listener) {
+        const name = text_(eventName);
+        if (!name || typeof listener !== "function") return () => {};
+        if (!listeners.has(name)) listeners.set(name, new Set());
+        listeners.get(name).add(listener);
+        return () => listeners.get(name)?.delete(listener);
+      },
+      emit(eventName, payload) {
+        const name = text_(eventName);
+        (listeners.get(name) || []).forEach(listener => listener(payload));
+      },
+      clear(eventName) {
+        if (eventName) listeners.delete(text_(eventName));
+        else listeners.clear();
+      },
+    };
+  }
+
+  function createRegistry_(kind) {
+    const entries = new Map();
+    return {
+      register(id, value) {
+        const key = text_(id);
+        if (!key) throw new Error(`${kind} id is required.`);
+        if (!value) throw new Error(`${kind} "${key}" is required.`);
+        if (entries.has(key)) throw new Error(`${kind} "${key}" is already registered.`);
+        entries.set(key, value);
+        return value;
+      },
+      replace(id, value) {
+        const key = text_(id);
+        if (!key) throw new Error(`${kind} id is required.`);
+        entries.set(key, value);
+        return value;
+      },
+      get(id) {
+        return entries.get(text_(id));
+      },
+      require(id) {
+        const key = text_(id);
+        if (!entries.has(key)) throw new Error(`Missing ${kind.toLowerCase()} "${key}".`);
+        return entries.get(key);
+      },
+      has(id) {
+        return entries.has(text_(id));
+      },
+      list() {
+        return [...entries.keys()];
+      },
+    };
+  }
+
+  const EventBus = createEventBus_();
+  const EngineRegistry = createRegistry_("Engine");
+
+  const StateEngine = {
+    scopes: new Map(),
+    createScope(scopeId, initialState = {}) {
+      const id = text_(scopeId);
+      if (!id) throw new Error("State scope id is required.");
+      if (!this.scopes.has(id)) this.scopes.set(id, structuredClone(initialState));
+      return this.scopes.get(id);
+    },
+    get(scopeId) {
+      return this.scopes.get(text_(scopeId));
+    },
+    set(scopeId, nextState) {
+      const id = text_(scopeId);
+      this.scopes.set(id, nextState);
+      EventBus.emit("state:changed", { scopeId: id, state: nextState });
+      EventBus.emit(`state:changed:${id}`, nextState);
+      return nextState;
+    },
+    update(scopeId, updater) {
+      const id = text_(scopeId);
+      const current = this.get(id) || {};
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return this.set(id, next);
+    },
+    clear(scopeId) {
+      const id = text_(scopeId);
+      this.scopes.delete(id);
+      EventBus.emit("state:cleared", { scopeId: id });
+    },
+    list() {
+      return [...this.scopes.keys()];
+    },
+  };
+
+  const StoreEngine = {
+    key(namespace, key) {
+      return `personnelPlatform:${text_(namespace)}:${text_(key)}`;
+    },
+    save(namespace, key, value) {
+      localStorage.setItem(this.key(namespace, key), JSON.stringify(value));
+      return value;
+    },
+    load(namespace, key, fallback = null) {
+      try {
+        const raw = localStorage.getItem(this.key(namespace, key));
+        return raw === null ? fallback : JSON.parse(raw);
+      } catch (error) {
+        console.warn("StoreEngine load failed:", error);
+        return fallback;
+      }
+    },
+    remove(namespace, key) {
+      localStorage.removeItem(this.key(namespace, key));
+    },
+    clearNamespace(namespace) {
+      const prefix = `personnelPlatform:${text_(namespace)}:`;
+      Object.keys(localStorage)
+        .filter(key => key.startsWith(prefix))
+        .forEach(key => localStorage.removeItem(key));
+    },
+  };
+
+  const CommandBus = {
+    handlers: new Map(),
+    register(type, handler) {
+      const commandType = text_(type).toUpperCase();
+      if (!commandType || typeof handler !== "function") {
+        throw new Error("Command type and handler are required.");
+      }
+      this.handlers.set(commandType, handler);
+    },
+    dispatch(command) {
+      const type = text_(command?.type).toUpperCase();
+      const handler = this.handlers.get(type);
+      if (!handler) throw new Error(`No command handler registered for "${type}".`);
+      const result = handler(command);
+      EventBus.emit("command:dispatched", { command, result });
+      return result;
+    },
+    has(type) {
+      return this.handlers.has(text_(type).toUpperCase());
+    },
+    list() {
+      return [...this.handlers.keys()];
+    },
+  };
+
+  const PluginHost = {
+    plugins: new Map(),
+    register(plugin) {
+      const id = text_(plugin?.id);
+      if (!id) throw new Error("Plugin id is required.");
+      if (this.plugins.has(id)) throw new Error(`Plugin "${id}" is already registered.`);
+
+      const required = Array.isArray(plugin.requires) ? plugin.requires : [];
+      const missing = required.filter(engineId => !EngineRegistry.has(engineId));
+      if (missing.length) {
+        throw new Error(`Plugin "${id}" missing engines: ${missing.join(", ")}`);
+      }
+
+      const record = { plugin, active: false };
+      this.plugins.set(id, record);
+      plugin.install?.(this.context(id));
+      EventBus.emit("plugin:registered", { id });
+      return plugin;
+    },
+    activate(id) {
+      const key = text_(id);
+      const record = this.plugins.get(key);
+      if (!record) throw new Error(`Plugin "${key}" is not registered.`);
+      if (!record.active) {
+        record.plugin.activate?.(this.context(key));
+        record.active = true;
+        EventBus.emit("plugin:activated", { id: key });
+      }
+      return record.plugin;
+    },
+    deactivate(id) {
+      const key = text_(id);
+      const record = this.plugins.get(key);
+      if (!record) return;
+      if (record.active) {
+        record.plugin.deactivate?.(this.context(key));
+        record.active = false;
+        EventBus.emit("plugin:deactivated", { id: key });
+      }
+    },
+    get(id) {
+      return this.plugins.get(text_(id))?.plugin;
+    },
+    list() {
+      return [...this.plugins.entries()].map(([id, record]) => ({
+        id,
+        name: record.plugin.name || id,
+        version: record.plugin.version || "0.0.0",
+        active: record.active,
+        requires: record.plugin.requires || [],
+      }));
+    },
+    context(pluginId) {
+      return {
+        pluginId,
+        services: new Proxy({}, {
+          get(_target, property) {
+            return EngineRegistry.require(String(property));
+          },
+        }),
+        state: StateEngine,
+        store: StoreEngine,
+        commands: CommandBus,
+        events: EventBus,
+      };
+    },
+  };
+
+  EngineRegistry.register("state", StateEngine);
+  EngineRegistry.register("store", StoreEngine);
+  EngineRegistry.register("commands", CommandBus);
+  EngineRegistry.register("events", EventBus);
+
+  window.PersonnelPlatform = {
+    version: "0.1.0",
+    engines: EngineRegistry,
+    plugins: PluginHost,
+    commands: CommandBus,
+    events: EventBus,
+    state: StateEngine,
+    store: StoreEngine,
+    status() {
+      const report = {
+        version: this.version,
+        engines: EngineRegistry.list(),
+        plugins: PluginHost.list(),
+        scopes: StateEngine.list(),
+        commands: CommandBus.list(),
+      };
+      console.log("[PersonnelPlatform]", report);
+      return report;
+    },
+  };
+
+  window.$PF = window.PersonnelPlatform;
+  console.info("PersonnelPlatform core active. Run $PF.status().");
+})();
+
+
+//----------------------------------
+// Personnel Platform — Legacy engine adapters
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("PlatformLegacyEngineAdapters: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function registerOrReplace_(id, engine) {
+    if (platform.engines.has(id)) platform.engines.replace(id, engine);
+    else platform.engines.register(id, engine);
+  }
+
+  const FilterEngine = {
+    createScope(scopeId, initialFilters = {}) {
+      return platform.state.createScope(`filter:${scopeId}`, {
+        search: "",
+        rank: "",
+        office: "",
+        camp: "",
+        ...initialFilters,
+      });
+    },
+    get(scopeId) {
+      return this.createScope(scopeId);
+    },
+    set(scopeId, key, value) {
+      return platform.state.update(`filter:${scopeId}`, current => ({
+        ...current,
+        [key]: value,
+      }));
+    },
+    clear(scopeId) {
+      return platform.state.set(`filter:${scopeId}`, {
+        search: "",
+        rank: "",
+        office: "",
+        camp: "",
+      });
+    },
+    apply(scopeId, entries, selector) {
+      const filters = this.get(scopeId);
+      const query = text_(filters.search).toLowerCase();
+      return entries.filter(entry => {
+        const item = selector ? selector(entry) : entry;
+        const searchable = [item.name, item.rank, item.office, item.camp]
+          .map(text_)
+          .join(" ")
+          .toLowerCase();
+        return (!query || searchable.includes(query)) &&
+          (!filters.rank || text_(item.rank) === filters.rank) &&
+          (!filters.office || text_(item.office) === filters.office) &&
+          (!filters.camp || text_(item.camp) === filters.camp);
+      });
+    },
+  };
+
+  const SelectionEngine = {
+    createScope(scopeId) {
+      return platform.state.createScope(`selection:${scopeId}`, {
+        keys: [],
+        order: [],
+      });
+    },
+    get(scopeId) {
+      return this.createScope(scopeId);
+    },
+    selected(scopeId) {
+      return new Set(this.get(scopeId).keys || []);
+    },
+    toggle(scopeId, key) {
+      const value = text_(key);
+      return platform.state.update(`selection:${scopeId}`, current => {
+        const selected = new Set(current.keys || []);
+        const order = [...(current.order || [])];
+        if (selected.has(value)) selected.delete(value);
+        else {
+          selected.add(value);
+          if (!order.includes(value)) order.push(value);
+        }
+        return { keys: [...selected], order };
+      });
+    },
+    select(scopeId, keys) {
+      const values = [...new Set(keys.map(text_).filter(Boolean))];
+      return platform.state.update(`selection:${scopeId}`, current => ({
+        keys: values,
+        order: [...new Set([...(current.order || []), ...values])],
+      }));
+    },
+    clear(scopeId) {
+      return platform.state.set(`selection:${scopeId}`, { keys: [], order: [] });
+    },
+  };
+
+  const AssignmentEngine = {
+    legacy: window.ReassignmentEngine || null,
+    dispatch(command) {
+      if (!this.legacy?.dispatch) throw new Error("Legacy ReassignmentEngine is unavailable.");
+      return this.legacy.dispatch(command);
+    },
+    getState() {
+      return this.legacy?.state || {};
+    },
+    getDirectory() {
+      return this.legacy?.getDirectory?.() || { camps: [], offices: [] };
+    },
+    getAssignments() {
+      return window.ReassignmentState?.assignments instanceof Map
+        ? window.ReassignmentState.assignments
+        : new Map();
+    },
+    getSelectedKeys() {
+      return window.ReassignmentState?.selectedKeys instanceof Set
+        ? window.ReassignmentState.selectedKeys
+        : new Set();
+    },
+  };
+
+  const GeneratorEngine = {
+    build(type, context = {}) {
+      const generator = text_(type).toUpperCase();
+      platform.events.emit("generator:build", { type: generator, context });
+      if (generator === "REASSIGNMENT" && typeof window.buildReassignmentGeneratePayload_ === "function") {
+        return window.buildReassignmentGeneratePayload_(context);
+      }
+      throw new Error(`Generator "${generator}" is not registered.`);
+    },
+  };
+
+  const ReportEngine = {
+    preview(payload) {
+      platform.events.emit("report:preview", payload);
+      return payload;
+    },
+    generate(payload) {
+      platform.events.emit("report:generate", payload);
+      return payload;
+    },
+  };
+
+  registerOrReplace_("filter", FilterEngine);
+  registerOrReplace_("selection", SelectionEngine);
+  registerOrReplace_("assignment", AssignmentEngine);
+  registerOrReplace_("generator", GeneratorEngine);
+  registerOrReplace_("report", ReportEngine);
+
+  console.info("PersonnelPlatform reusable engine adapters registered.");
+})();
+
+
+//----------------------------------
+// Personnel Platform — SelectionEngine v2 migration
+// Developer Mode only: platform state is canonical, legacy AO cart is mirrored.
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const SCOPE = "ao-cart";
+  const STATE_SCOPE = `selection:${SCOPE}`;
+  const STORE_NAMESPACE = "selection";
+  const STORE_KEY = SCOPE;
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizeEntries_(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text_(entry[0]);
+      if (key) map.set(key, entry[1]);
+    });
+    return [...map.entries()];
+  }
+
+  function legacyEntries_() {
+    return window.PersonnelState?.aoCart instanceof Map
+      ? [...window.PersonnelState.aoCart.entries()]
+      : [];
+  }
+
+  function ensureScope_() {
+    let state = platform.state.get(STATE_SCOPE);
+    if (state) return state;
+
+    const stored = platform.store.load(STORE_NAMESPACE, STORE_KEY, null);
+    const entries = normalizeEntries_(stored?.entries || legacyEntries_());
+    state = {
+      entries,
+      order: entries.map(([key]) => key),
+      updatedAt: new Date().toISOString(),
+    };
+    platform.state.createScope(STATE_SCOPE, state);
+    return platform.state.get(STATE_SCOPE);
+  }
+
+  function mirrorToLegacy_(state) {
+    if (!window.PersonnelState) return;
+    window.PersonnelState.aoCart = new Map(normalizeEntries_(state?.entries || []));
+    if (typeof window.updateAoCartCount_ === "function") window.updateAoCartCount_();
+    if (typeof window.updateReportGeneratorButton_ === "function") {
+      window.updateReportGeneratorButton_();
+    }
+  }
+
+  function commit_(entries, order) {
+    const normalized = normalizeEntries_(entries);
+    const keys = new Set(normalized.map(([key]) => key));
+    const nextOrder = [...new Set((order || []).map(text_).filter(key => keys.has(key)))];
+    normalized.forEach(([key]) => {
+      if (!nextOrder.includes(key)) nextOrder.push(key);
+    });
+
+    const next = {
+      entries: normalized,
+      order: nextOrder,
+      updatedAt: new Date().toISOString(),
+    };
+    platform.state.set(STATE_SCOPE, next);
+    platform.store.save(STORE_NAMESPACE, STORE_KEY, next);
+    mirrorToLegacy_(next);
+    platform.events.emit("selection:changed", {
+      scopeId: SCOPE,
+      count: normalized.length,
+      keys: normalized.map(([key]) => key),
+    });
+    return next;
+  }
+
+  const SelectionEngineV2 = {
+    version: "0.2.0",
+    scopeId: SCOPE,
+
+    get(scopeId = SCOPE) {
+      if (scopeId !== SCOPE) {
+        return platform.state.createScope(`selection:${scopeId}`, {
+          entries: [], order: [], updatedAt: "",
+        });
+      }
+      return ensureScope_();
+    },
+
+    entries(scopeId = SCOPE) {
+      return normalizeEntries_(this.get(scopeId).entries || []);
+    },
+
+    items(scopeId = SCOPE) {
+      return new Map(this.entries(scopeId));
+    },
+
+    keys(scopeId = SCOPE) {
+      return this.entries(scopeId).map(([key]) => key);
+    },
+
+    count(scopeId = SCOPE) {
+      return this.entries(scopeId).length;
+    },
+
+    has(scopeId, key) {
+      return this.items(scopeId).has(text_(key));
+    },
+
+    add(scopeId, key, item) {
+      if (scopeId !== SCOPE) throw new Error("SelectionEngine v2 pilot currently owns ao-cart only.");
+      const map = this.items(scopeId);
+      const value = text_(key);
+      if (!value) return this.get(scopeId);
+      map.set(value, item);
+      return commit_([...map.entries()], [...this.get(scopeId).order, value]);
+    },
+
+    remove(scopeId, key) {
+      const map = this.items(scopeId);
+      map.delete(text_(key));
+      return commit_([...map.entries()], this.get(scopeId).order);
+    },
+
+    toggle(scopeId, key, item) {
+      return this.has(scopeId, key)
+        ? this.remove(scopeId, key)
+        : this.add(scopeId, key, item);
+    },
+
+    replace(scopeId, entries) {
+      if (scopeId !== SCOPE) throw new Error("SelectionEngine v2 pilot currently owns ao-cart only.");
+      return commit_(entries, (entries || []).map(entry => entry?.[0]));
+    },
+
+    clear(scopeId = SCOPE) {
+      if (scopeId !== SCOPE) return platform.state.set(`selection:${scopeId}`, { entries: [], order: [] });
+      return commit_([], []);
+    },
+
+    syncFromLegacy() {
+      return commit_(legacyEntries_(), legacyEntries_().map(([key]) => key));
+    },
+
+    report() {
+      const state = this.get(SCOPE);
+      const report = {
+        version: this.version,
+        scope: SCOPE,
+        count: this.count(SCOPE),
+        legacyCount: window.PersonnelState?.aoCart?.size || 0,
+        synchronized: this.count(SCOPE) === (window.PersonnelState?.aoCart?.size || 0),
+        updatedAt: state.updatedAt || "",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  platform.engines.replace("selection", SelectionEngineV2);
+
+  platform.commands.register("SELECTION.ADD", command =>
+    SelectionEngineV2.add(SCOPE, command.key, command.item)
+  );
+  platform.commands.register("SELECTION.REMOVE", command =>
+    SelectionEngineV2.remove(SCOPE, command.key)
+  );
+  platform.commands.register("SELECTION.TOGGLE", command =>
+    SelectionEngineV2.toggle(SCOPE, command.key, command.item)
+  );
+  platform.commands.register("SELECTION.REPLACE", command =>
+    SelectionEngineV2.replace(SCOPE, command.entries || [])
+  );
+  platform.commands.register("SELECTION.CLEAR", () =>
+    SelectionEngineV2.clear(SCOPE)
+  );
+
+  ensureScope_();
+  mirrorToLegacy_(SelectionEngineV2.get(SCOPE));
+
+  // Route the existing AO controls through the shared engine while preserving
+  // the current renderer and button behavior during migration.
+  if (typeof window.togglePersonnelInAoCart_ === "function") {
+    window.togglePersonnelInAoCart_ = function (record) {
+      const key = window.getAoPersonnelKey_(record);
+      const item = window.normalizeAoPersonnel_(record);
+      SelectionEngineV2.toggle(SCOPE, key, item);
+    };
+  }
+
+  if (typeof window.addAllVisiblePersonnelToAo_ === "function") {
+    window.addAllVisiblePersonnelToAo_ = function () {
+      const records = Array.isArray(window.PersonnelState?.filteredRecords)
+        ? window.PersonnelState.filteredRecords
+        : [];
+      const map = SelectionEngineV2.items(SCOPE);
+      records.forEach(record => {
+        map.set(
+          window.getAoPersonnelKey_(record),
+          window.normalizeAoPersonnel_(record)
+        );
+      });
+      SelectionEngineV2.replace(SCOPE, [...map.entries()]);
+      if (typeof window.renderPreviewTable === "function") window.renderPreviewTable();
+    };
+  }
+
+  window.$PF.selection = SelectionEngineV2;
+  console.info("SelectionEngine v0.2 owns AO cart in Developer Mode. Run $PF.selection.report().");
+})();
+
+//----------------------------------
+// Personnel Platform — FilterEngine v0.2 migration
+// Developer Mode only. Platform state is authoritative;
+// PersonnelState.filters remains a temporary UI mirror.
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("PlatformFilterEngineV2: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  const SCOPE = "personnel-main";
+  const STATE_SCOPE = `filter:${SCOPE}`;
+  const VERSION = "0.2.0";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizeArray_(values) {
+    return [...new Set((Array.isArray(values) ? values : [...(values || [])])
+      .map(text_)
+      .filter(Boolean))];
+  }
+
+  function groupDefinitions_() {
+    return Array.isArray(window.PERSONNEL_APP_CONFIG?.filterGroups)
+      ? window.PERSONNEL_APP_CONFIG.filterGroups
+      : [];
+  }
+
+  function emptyState_() {
+    const groups = {};
+    groupDefinitions_().forEach(group => {
+      groups[group.key] = [];
+    });
+
+    return {
+      search: "",
+      ranks: [],
+      groups,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function legacyFilters_() {
+    return window.PersonnelState?.filters || null;
+  }
+
+  function readLegacy_() {
+    const legacy = legacyFilters_();
+    const next = emptyState_();
+    if (!legacy) return next;
+
+    next.search = text_(legacy.search);
+    next.ranks = normalizeArray_(legacy.ranks instanceof Set ? legacy.ranks : []);
+
+    groupDefinitions_().forEach(group => {
+      const values = legacy[group.key];
+      next.groups[group.key] = normalizeArray_(values instanceof Set ? values : []);
+    });
+
+    return next;
+  }
+
+  function writeLegacy_(state) {
+    const legacy = legacyFilters_();
+    if (!legacy) return;
+
+    legacy.search = text_(state.search);
+    legacy.ranks = new Set(normalizeArray_(state.ranks));
+
+    groupDefinitions_().forEach(group => {
+      legacy[group.key] = new Set(normalizeArray_(state.groups?.[group.key]));
+    });
+
+    const searchInput = document.getElementById("searchInput");
+    if (searchInput && searchInput.value !== legacy.search) {
+      searchInput.value = legacy.search;
+    }
+  }
+
+  function equivalent_(a, b) {
+    return JSON.stringify({
+      search: text_(a?.search),
+      ranks: [...normalizeArray_(a?.ranks)].sort(),
+      groups: Object.fromEntries(groupDefinitions_().map(group => [
+        group.key,
+        [...normalizeArray_(a?.groups?.[group.key])].sort(),
+      ])),
+    }) === JSON.stringify({
+      search: text_(b?.search),
+      ranks: [...normalizeArray_(b?.ranks)].sort(),
+      groups: Object.fromEntries(groupDefinitions_().map(group => [
+        group.key,
+        [...normalizeArray_(b?.groups?.[group.key])].sort(),
+      ])),
+    });
+  }
+
+  function current_() {
+    return platform.state.get(STATE_SCOPE) || platform.state.createScope(STATE_SCOPE, readLegacy_());
+  }
+
+  function commit_(next, options = {}) {
+    const normalized = {
+      search: text_(next.search),
+      ranks: normalizeArray_(next.ranks),
+      groups: {},
+      updatedAt: new Date().toISOString(),
+    };
+
+    groupDefinitions_().forEach(group => {
+      normalized.groups[group.key] = normalizeArray_(next.groups?.[group.key]);
+    });
+
+    platform.state.set(STATE_SCOPE, normalized);
+    writeLegacy_(normalized);
+
+    if (options.render !== false && window.PersonnelState?.initialized) {
+      if (typeof window.filterAndRenderPersonnel === "function") {
+        window.filterAndRenderPersonnel();
+      }
+      if (options.sync !== false && typeof window.scheduleSheetSync === "function") {
+        window.scheduleSheetSync();
+      }
+    }
+
+    platform.events.emit("filter:changed", {
+      scope: SCOPE,
+      state: normalized,
+    });
+
+    return normalized;
+  }
+
+  function syncFromLegacy_() {
+    const legacy = readLegacy_();
+    const state = current_();
+    if (!equivalent_(state, legacy)) {
+      return commit_(legacy, { render: false, sync: false });
+    }
+    return state;
+  }
+
+  function matches_(record, state) {
+    const search = text_(state.search).toLowerCase();
+
+    for (const group of groupDefinitions_()) {
+      const selected = new Set(normalizeArray_(state.groups?.[group.key]));
+      if (selected.size && !selected.has(text_(record?.[group.recordKey]))) {
+        return false;
+      }
+    }
+
+    const ranks = new Set(normalizeArray_(state.ranks));
+    if (ranks.size && !ranks.has(text_(record?.Rank))) {
+      return false;
+    }
+
+    if (search) {
+      const columns = Array.isArray(window.PERSONNEL_APP_CONFIG?.searchableColumns)
+        ? window.PERSONNEL_APP_CONFIG.searchableColumns
+        : Object.keys(record || {});
+      const found = columns.some(column =>
+        text_(record?.[column]).toLowerCase().includes(search)
+      );
+      if (!found) return false;
+    }
+
+    return true;
+  }
+
+  const FilterEngineV2 = {
+    version: VERSION,
+    scope: SCOPE,
+
+    getState() {
+      return current_();
+    },
+
+    syncFromLegacy() {
+      return syncFromLegacy_();
+    },
+
+    apply(records) {
+      const state = current_();
+      return (Array.isArray(records) ? records : []).filter(record => matches_(record, state));
+    },
+
+    setSearch(value) {
+      return commit_({ ...current_(), search: text_(value) });
+    },
+
+    toggle(groupKey, value) {
+      const key = text_(groupKey);
+      const selectedValue = text_(value);
+      const state = current_();
+
+      if (key === "ranks" || key === "rank") {
+        const set = new Set(state.ranks || []);
+        if (set.has(selectedValue)) set.delete(selectedValue);
+        else set.add(selectedValue);
+        return commit_({ ...state, ranks: [...set] });
+      }
+
+      const groups = { ...(state.groups || {}) };
+      const set = new Set(groups[key] || []);
+      if (set.has(selectedValue)) set.delete(selectedValue);
+      else set.add(selectedValue);
+      groups[key] = [...set];
+      return commit_({ ...state, groups });
+    },
+
+    setGroup(groupKey, values) {
+      const key = text_(groupKey);
+      const state = current_();
+      if (key === "ranks" || key === "rank") {
+        return commit_({ ...state, ranks: normalizeArray_(values) });
+      }
+      return commit_({
+        ...state,
+        groups: {
+          ...(state.groups || {}),
+          [key]: normalizeArray_(values),
+        },
+      });
+    },
+
+    clearGroup(groupKey) {
+      return this.setGroup(groupKey, []);
+    },
+
+    clearAll() {
+      return commit_(emptyState_());
+    },
+
+    report() {
+      const state = current_();
+      const legacy = readLegacy_();
+      const activeGroups = Object.values(state.groups || {})
+        .reduce((total, values) => total + normalizeArray_(values).length, 0);
+      const report = {
+        version: VERSION,
+        scope: SCOPE,
+        records: window.PersonnelState?.records?.length || 0,
+        visible: window.PersonnelState?.filteredRecords?.length || 0,
+        search: state.search || "—",
+        ranks: state.ranks.length,
+        groupValues: activeGroups,
+        synchronized: equivalent_(state, legacy),
+        updatedAt: state.updatedAt,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  platform.engines.replace("filter", FilterEngineV2);
+  platform.filter = FilterEngineV2;
+
+  platform.commands.register("FILTER.SET_SEARCH", command =>
+    FilterEngineV2.setSearch(command.value)
+  );
+  platform.commands.register("FILTER.TOGGLE", command =>
+    FilterEngineV2.toggle(command.groupKey || command.group, command.value)
+  );
+  platform.commands.register("FILTER.SET_GROUP", command =>
+    FilterEngineV2.setGroup(command.groupKey || command.group, command.values || [])
+  );
+  platform.commands.register("FILTER.CLEAR_GROUP", command =>
+    FilterEngineV2.clearGroup(command.groupKey || command.group)
+  );
+  platform.commands.register("FILTER.CLEAR_ALL", () =>
+    FilterEngineV2.clearAll()
+  );
+
+  // Legacy UI bridge: every legacy filter action is mirrored into the engine.
+  const originalHandleFilterChange = window.handleFilterChange;
+  if (typeof originalHandleFilterChange === "function") {
+    window.handleFilterChange = function () {
+      syncFromLegacy_();
+      return originalHandleFilterChange.apply(this, arguments);
+    };
+  }
+
+  const originalFilterPersonnelRecords = window.filterPersonnelRecords;
+  window.filterPersonnelRecords = function () {
+    syncFromLegacy_();
+    return FilterEngineV2.apply(window.PersonnelState?.records || []);
+  };
+  window.filterPersonnelRecords.platformOwned = true;
+  window.filterPersonnelRecords.legacy = originalFilterPersonnelRecords;
+
+  syncFromLegacy_();
+
+  console.info(
+    "FilterEngine v0.2 owns personnel filters in Developer Mode. Run $PF.filter.report()."
+  );
+})();
+
+
+// Personnel Platform — AssignmentEngine v0.3.1 migration
+// Developer Mode only: platform state is canonical, legacy reassignment state is mirrored.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const SCOPE = "reassignment";
+  const STATE_SCOPE = `assignment:${SCOPE}`;
+  const STORE_NAMESPACE = "assignment";
+  const STORE_KEY = SCOPE;
+  const MAX_HISTORY = 30;
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizeMode_(value) {
+    return value === "CAMP_TO_CAMP" ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE";
+  }
+
+  function normalizeDestination_(mode, value) {
+    return {
+      type: mode === "CAMP_TO_CAMP" ? "CAMP" : "OFFICE",
+      value: text_(value),
+    };
+  }
+
+  function normalizeAssignment_(value) {
+    if (value && typeof value === "object") {
+      const mode = normalizeMode_(value.mode || (value.camp ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE"));
+      return {
+        mode,
+        office: mode === "OFFICE_TO_OFFICE" ? text_(value.office) : "",
+        camp: mode === "CAMP_TO_CAMP" ? text_(value.camp) : "",
+      };
+    }
+
+    return { mode: "OFFICE_TO_OFFICE", office: text_(value), camp: "" };
+  }
+
+  function normalizeEntries_(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text_(entry[0]);
+      if (key) map.set(key, normalizeAssignment_(entry[1]));
+    });
+    return [...map.entries()];
+  }
+
+  function uniqueKeys_(keys) {
+    return [...new Set((keys || []).map(text_).filter(Boolean))];
+  }
+
+  function legacyAssignments_() {
+    return window.ReassignmentState?.assignments instanceof Map
+      ? normalizeEntries_([...window.ReassignmentState.assignments.entries()])
+      : [];
+  }
+
+  function legacySelectedKeys_() {
+    return window.ReassignmentState?.selectedKeys instanceof Set
+      ? uniqueKeys_([...window.ReassignmentState.selectedKeys])
+      : [];
+  }
+
+  function initialState_() {
+    const legacyEngine = window.ReassignmentEngine;
+    const mode = normalizeMode_(legacyEngine?.state?.transferMode);
+    return {
+      transferMode: mode,
+      destination: normalizeDestination_(mode, legacyEngine?.state?.destination?.value || ""),
+      assignments: legacyAssignments_(),
+      selectedKeys: legacySelectedKeys_(),
+      undo: [],
+      redo: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function ensureScope_() {
+    let state = platform.state.get(STATE_SCOPE);
+    if (state) return state;
+
+    const stored = platform.store.load(STORE_NAMESPACE, STORE_KEY, null);
+    state = stored && typeof stored === "object"
+      ? {
+          ...initialState_(),
+          ...stored,
+          transferMode: normalizeMode_(stored.transferMode),
+          destination: normalizeDestination_(normalizeMode_(stored.transferMode), stored.destination?.value),
+          assignments: normalizeEntries_(stored.assignments),
+          selectedKeys: uniqueKeys_(stored.selectedKeys),
+          undo: Array.isArray(stored.undo) ? stored.undo : [],
+          redo: Array.isArray(stored.redo) ? stored.redo : [],
+        }
+      : initialState_();
+
+    platform.state.createScope(STATE_SCOPE, state);
+    return platform.state.get(STATE_SCOPE);
+  }
+
+  function snapshot_(state) {
+    return {
+      transferMode: state.transferMode,
+      destination: { ...state.destination },
+      assignments: normalizeEntries_(state.assignments),
+      selectedKeys: uniqueKeys_(state.selectedKeys),
+    };
+  }
+
+  function mirrorToLegacy_(state) {
+    if (window.ReassignmentState) {
+      window.ReassignmentState.assignments = new Map(normalizeEntries_(state.assignments));
+      window.ReassignmentState.selectedKeys = new Set(uniqueKeys_(state.selectedKeys));
+      window.ReassignmentState.activeOffice = state.transferMode === "OFFICE_TO_OFFICE" ? state.destination.value : "";
+      window.ReassignmentState.activeCamp = state.transferMode === "CAMP_TO_CAMP" ? state.destination.value : "";
+    }
+
+    if (window.ReassignmentEngine?.state) {
+      window.ReassignmentEngine.state.transferMode = state.transferMode;
+      window.ReassignmentEngine.state.destination = { ...state.destination };
+    }
+
+    if (typeof window.saveReassignmentState_ === "function") window.saveReassignmentState_();
+  }
+
+  function emit_(state, action) {
+    platform.events.emit("assignment:changed", {
+      scopeId: SCOPE,
+      action,
+      assigned: state.assignments.length,
+      selected: state.selectedKeys.length,
+      groups: AssignmentEngineV2.groups().length,
+    });
+
+    if (typeof window.ReassignmentEngine?.emit === "function") window.ReassignmentEngine.emit();
+    else if (typeof window.renderReassignmentWorkspace_ === "function") window.renderReassignmentWorkspace_();
+  }
+
+  function liveSelectedKeys_(current) {
+    const legacy = legacySelectedKeys_();
+    const stored = uniqueKeys_(current?.selectedKeys);
+    // While the legacy Step 1 renderer still owns its checkboxes, its Set is the
+    // freshest source. This prevents transfer-mode and destination commands from
+    // clearing a selection that was made immediately before the command.
+    if (window.ReassignmentState?.selectedKeys instanceof Set) return legacy;
+    return stored;
+  }
+
+  function commit_(next, action, options = {}) {
+    const current = ensureScope_();
+    const recordHistory = options.recordHistory !== false;
+    const selectedFallback = liveSelectedKeys_(current);
+
+    const state = {
+      ...current,
+      ...next,
+      transferMode: normalizeMode_(next.transferMode ?? current.transferMode),
+      assignments: normalizeEntries_(next.assignments ?? current.assignments),
+      selectedKeys: Object.prototype.hasOwnProperty.call(next, "selectedKeys")
+        ? uniqueKeys_(next.selectedKeys)
+        : selectedFallback,
+      updatedAt: new Date().toISOString(),
+    };
+
+    state.destination = normalizeDestination_(
+      state.transferMode,
+      next.destination?.value ?? current.destination?.value
+    );
+
+    if (recordHistory) {
+      const currentForHistory = { ...current, selectedKeys: selectedFallback };
+      state.undo = [...(current.undo || []), snapshot_(currentForHistory)].slice(-MAX_HISTORY);
+      state.redo = [];
+    }
+
+    platform.state.set(STATE_SCOPE, state);
+    platform.store.save(STORE_NAMESPACE, STORE_KEY, state);
+    mirrorToLegacy_(state);
+    emit_(state, action);
+    return state;
+  }
+
+  function visibleUnassignedKeys_() {
+    const cart = window.PersonnelState?.aoCart instanceof Map ? window.PersonnelState.aoCart : new Map();
+    const assigned = AssignmentEngineV2.items();
+    const entries = [...cart.entries()].filter(([key]) => !assigned.has(key));
+    const visible = typeof window.filterUnassigned_ === "function" ? window.filterUnassigned_(entries) : entries;
+    return visible.map(([key]) => key);
+  }
+
+  function assignmentForDestination_(state) {
+    const value = text_(state.destination?.value);
+    if (!value) return null;
+    return state.transferMode === "CAMP_TO_CAMP"
+      ? { mode: "CAMP_TO_CAMP", office: "", camp: value }
+      : { mode: "OFFICE_TO_OFFICE", office: value, camp: "" };
+  }
+
+  const AssignmentEngineV2 = {
+    version: "0.3.1",
+    scopeId: SCOPE,
+
+    get() { return ensureScope_(); },
+    items() { return new Map(normalizeEntries_(this.get().assignments)); },
+    selectedKeys() { return new Set(liveSelectedKeys_(this.get())); },
+    directory() { return window.ReassignmentEngine?.getDirectory?.() || { camps: [], offices: [] }; },
+
+    syncSelectionFromLegacy(options = {}) {
+      const current = this.get();
+      const selectedKeys = legacySelectedKeys_();
+      const same = JSON.stringify(uniqueKeys_(current.selectedKeys)) === JSON.stringify(selectedKeys);
+      if (same) {
+        if (options.render && typeof window.ReassignmentEngine?.emit === "function") window.ReassignmentEngine.emit();
+        return current;
+      }
+      return commit_({ selectedKeys }, "SYNC_SELECTION", { recordHistory: false });
+    },
+
+    setTransferMode(mode) {
+      const value = normalizeMode_(mode);
+      return commit_({ transferMode: value, destination: normalizeDestination_(value, "") }, "SET_TRANSFER_MODE");
+    },
+
+    setDestination(value) {
+      const state = this.get();
+      return commit_({ destination: normalizeDestination_(state.transferMode, value) }, "SET_DESTINATION");
+    },
+
+    assignKeys(keys) {
+      const state = this.get();
+      const assignment = assignmentForDestination_(state);
+      if (!assignment) {
+        alert(state.transferMode === "CAMP_TO_CAMP" ? "Choose a destination Camp first." : "Choose a destination Office first.");
+        return state;
+      }
+
+      const cart = window.PersonnelState?.aoCart instanceof Map ? window.PersonnelState.aoCart : new Map();
+      const map = this.items();
+      uniqueKeys_(keys).forEach(key => {
+        if (cart.has(key)) map.set(key, { ...assignment });
+      });
+      return commit_({ assignments: [...map.entries()], selectedKeys: [] }, "ASSIGN_KEYS");
+    },
+
+    assignSelected() { return this.assignKeys([...this.selectedKeys()]); },
+    assignVisible() { return this.assignKeys(visibleUnassignedKeys_()); },
+
+    remove(key) {
+      const map = this.items();
+      map.delete(text_(key));
+      return commit_({ assignments: [...map.entries()] }, "REMOVE");
+    },
+
+    clear() { return commit_({ assignments: [], selectedKeys: [] }, "CLEAR"); },
+
+    moveGroup(groupId, destination) {
+      const [mode, oldDestination] = text_(groupId).split("|");
+      const normalizedMode = normalizeMode_(mode);
+      const map = this.items();
+      map.forEach((assignment, key) => {
+        const currentDestination = assignment.mode === "CAMP_TO_CAMP" ? assignment.camp : assignment.office;
+        if (assignment.mode === normalizedMode && currentDestination === oldDestination) {
+          map.set(key, normalizedMode === "CAMP_TO_CAMP"
+            ? { mode: normalizedMode, office: "", camp: text_(destination) }
+            : { mode: normalizedMode, office: text_(destination), camp: "" });
+        }
+      });
+      return commit_({ assignments: [...map.entries()] }, "MOVE_GROUP");
+    },
+
+    groups() {
+      const groups = new Map();
+      this.items().forEach((assignment, key) => {
+        const destination = assignment.mode === "CAMP_TO_CAMP" ? assignment.camp : assignment.office;
+        const id = `${assignment.mode}|${destination}`;
+        if (!groups.has(id)) groups.set(id, { id, mode: assignment.mode, destination, keys: [] });
+        groups.get(id).keys.push(key);
+      });
+      return [...groups.values()];
+    },
+
+    undo() {
+      const current = this.get();
+      const previous = current.undo?.at(-1);
+      if (!previous) return current;
+      return commit_({
+        ...previous,
+        undo: current.undo.slice(0, -1),
+        redo: [...(current.redo || []), snapshot_(current)].slice(-MAX_HISTORY),
+      }, "UNDO", { recordHistory: false });
+    },
+
+    redo() {
+      const current = this.get();
+      const nextSnapshot = current.redo?.at(-1);
+      if (!nextSnapshot) return current;
+      return commit_({
+        ...nextSnapshot,
+        undo: [...(current.undo || []), snapshot_(current)].slice(-MAX_HISTORY),
+        redo: current.redo.slice(0, -1),
+      }, "REDO", { recordHistory: false });
+    },
+
+    syncFromLegacy() {
+      const legacyEngine = window.ReassignmentEngine;
+      const mode = normalizeMode_(legacyEngine?.state?.transferMode);
+      return commit_({
+        transferMode: mode,
+        destination: normalizeDestination_(mode, legacyEngine?.state?.destination?.value),
+        assignments: legacyAssignments_(),
+        selectedKeys: legacySelectedKeys_(),
+      }, "SYNC_FROM_LEGACY", { recordHistory: false });
+    },
+
+    report() {
+      const state = this.get();
+      const legacyCount = window.ReassignmentState?.assignments?.size || 0;
+      const report = {
+        version: this.version,
+        scope: SCOPE,
+        transferMode: state.transferMode,
+        destination: state.destination?.value || "—",
+        selected: this.selectedKeys().size,
+        assigned: this.items().size,
+        groups: this.groups().length,
+        undo: state.undo?.length || 0,
+        redo: state.redo?.length || 0,
+        legacyCount,
+        synchronized: this.items().size === legacyCount,
+        updatedAt: state.updatedAt || "",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  platform.engines.replace("assignment", AssignmentEngineV2);
+
+  platform.commands.register("ASSIGNMENT.SET_TRANSFER_MODE", command => AssignmentEngineV2.setTransferMode(command.value));
+  platform.commands.register("ASSIGNMENT.SET_DESTINATION", command => AssignmentEngineV2.setDestination(command.value));
+  platform.commands.register("ASSIGNMENT.ASSIGN_SELECTED", () => AssignmentEngineV2.assignSelected());
+  platform.commands.register("ASSIGNMENT.ASSIGN_VISIBLE", () => AssignmentEngineV2.assignVisible());
+  platform.commands.register("ASSIGNMENT.REMOVE", command => AssignmentEngineV2.remove(command.key));
+  platform.commands.register("ASSIGNMENT.MOVE_GROUP", command => AssignmentEngineV2.moveGroup(command.groupId, command.destination || command.value));
+  platform.commands.register("ASSIGNMENT.CLEAR", () => AssignmentEngineV2.clear());
+  platform.commands.register("ASSIGNMENT.UNDO", () => AssignmentEngineV2.undo());
+  platform.commands.register("ASSIGNMENT.REDO", () => AssignmentEngineV2.redo());
+  platform.commands.register("ASSIGNMENT.SYNC_SELECTION", () => AssignmentEngineV2.syncSelectionFromLegacy({ render: true }));
+
+  ensureScope_();
+  mirrorToLegacy_(AssignmentEngineV2.get());
+
+  if (window.ReassignmentEngine?.dispatch) {
+    const legacyDispatch = window.ReassignmentEngine.dispatch.bind(window.ReassignmentEngine);
+    window.ReassignmentEngine.dispatch = function (command) {
+      const type = text_(command?.type).toUpperCase();
+      if (type === "SET_TRANSFER_MODE") return AssignmentEngineV2.setTransferMode(command.value);
+      if (type === "SET_DESTINATION") return AssignmentEngineV2.setDestination(command.value);
+      if (type === "ASSIGN_SELECTED") return AssignmentEngineV2.assignSelected();
+      if (type === "ASSIGN_VISIBLE") return AssignmentEngineV2.assignVisible();
+      if (type === "REMOVE_ASSIGNMENT") return AssignmentEngineV2.remove(command.key);
+      if (type === "UNDO") return AssignmentEngineV2.undo();
+      if (type === "REDO") return AssignmentEngineV2.redo();
+      return legacyDispatch(command);
+    };
+  }
+
+  // The legacy Step 1 checkbox handler updates ReassignmentState after the
+  // checkbox event. Synchronize on the next task, then rerender Step 2 so its
+  // Assign Selected button immediately reflects the current selection.
+  document.addEventListener("change", event => {
+    const checkbox = event.target;
+    if (!(checkbox instanceof HTMLInputElement) || checkbox.type !== "checkbox") return;
+    if (!checkbox.closest(".reassignment-workspace, .reassignment-source-panel, .reassignment-layout")) return;
+    setTimeout(() => AssignmentEngineV2.syncSelectionFromLegacy({ render: true }), 0);
+  }, true);
+
+  window.$PF.assignment = AssignmentEngineV2;
+  console.info("AssignmentEngine v0.3.1 owns reassignment assignments in Developer Mode. Run $PF.assignment.report().");
+})();
+
+//----------------------------------
+// Reassignment Plugin — Platform pilot
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("ReassignmentPlugin: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  const SCOPE = "reassignment";
+
+  const plugin = {
+    id: "reassignment",
+    name: "Reassignment",
+    version: "0.1.0",
+    requires: ["state", "store", "commands", "events", "filter", "selection", "assignment", "generator", "report"],
+
+    install(context) {
+      context.state.createScope(`plugin:${SCOPE}`, {
+        active: false,
+        sessionMode: "NEW",
+        sourceReportId: "",
+      });
+
+      context.commands.register("REASSIGNMENT.SET_TRANSFER_MODE", command =>
+        context.services.assignment.dispatch({
+          type: "SET_TRANSFER_MODE",
+          value: command.value,
+        })
+      );
+
+      context.commands.register("REASSIGNMENT.SET_DESTINATION", command =>
+        context.services.assignment.dispatch({
+          type: "SET_DESTINATION",
+          value: command.value,
+        })
+      );
+
+      context.commands.register("REASSIGNMENT.ASSIGN_SELECTED", () =>
+        context.services.assignment.dispatch({ type: "ASSIGN_SELECTED" })
+      );
+
+      context.commands.register("REASSIGNMENT.ASSIGN_VISIBLE", () =>
+        context.services.assignment.dispatch({ type: "ASSIGN_VISIBLE" })
+      );
+
+      context.commands.register("REASSIGNMENT.UNDO", () =>
+        context.services.assignment.dispatch({ type: "UNDO" })
+      );
+
+      context.commands.register("REASSIGNMENT.REDO", () =>
+        context.services.assignment.dispatch({ type: "REDO" })
+      );
+
+      context.commands.register("REASSIGNMENT.BUILD_PAYLOAD", command =>
+        context.services.generator.build("REASSIGNMENT", command.context || {})
+      );
+    },
+
+    activate(context) {
+      context.state.update(`plugin:${SCOPE}`, current => ({ ...current, active: true }));
+      context.events.emit("reassignment:plugin-active", { plugin: this.id });
+    },
+
+    deactivate(context) {
+      context.state.update(`plugin:${SCOPE}`, current => ({ ...current, active: false }));
+      context.events.emit("reassignment:plugin-inactive", { plugin: this.id });
+    },
+
+    status(context) {
+      const assignment = context.services.assignment;
+      return {
+        id: this.id,
+        version: this.version,
+        active: Boolean(context.state.get(`plugin:${SCOPE}`)?.active),
+        transferMode: assignment.getState().transferMode || "UNKNOWN",
+        destination: assignment.getState().destination?.value || "",
+        selected: assignment.getSelectedKeys().size,
+        assigned: assignment.getAssignments().size,
+      };
+    },
+  };
+
+  platform.plugins.register(plugin);
+  platform.plugins.activate(plugin.id);
+
+  window.ReassignmentPlugin = plugin;
+  console.info("ReassignmentPlugin registered and active.");
+})();
+
+
+// Personnel Platform — reusable scoped AssignmentEngine core
+// Developer Mode foundation. No dependency on legacy reassignment state.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const MAX_HISTORY = 30;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function mode(value) {
+    return value === "CAMP_TO_CAMP" ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE";
+  }
+
+  function emptyState() {
+    return {
+      participants: [],
+      transferMode: "OFFICE_TO_OFFICE",
+      destination: "",
+      selectedKeys: [],
+      assignments: [],
+      undo: [],
+      redo: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function normalizeParticipants(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text(entry[0]);
+      if (key) map.set(key, entry[1]);
+    });
+    return [...map.entries()];
+  }
+
+  function normalizeAssignments(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text(entry[0]);
+      const value = entry[1] || {};
+      if (!key) return;
+      const transferMode = mode(value.transferMode || value.mode);
+      map.set(key, {
+        transferMode,
+        destination: text(value.destination || value.camp || value.office),
+      });
+    });
+    return [...map.entries()];
+  }
+
+  function unique(values) {
+    return [...new Set((values || []).map(text).filter(Boolean))];
+  }
+
+  function snapshot(state) {
+    return {
+      participants: normalizeParticipants(state.participants),
+      transferMode: mode(state.transferMode),
+      destination: text(state.destination),
+      selectedKeys: unique(state.selectedKeys),
+      assignments: normalizeAssignments(state.assignments),
+    };
+  }
+
+  function scopeKey(scopeId) {
+    return `assignment-core:${text(scopeId)}`;
+  }
+
+  const AssignmentCore = {
+    version: "1.0.0",
+
+    createScope(scopeId) {
+      const key = scopeKey(scopeId);
+      return platform.state.createScope(key, emptyState());
+    },
+
+    get(scopeId) {
+      return platform.state.get(scopeKey(scopeId)) || this.createScope(scopeId);
+    },
+
+    commit(scopeId, patch, action, options = {}) {
+      const current = this.get(scopeId);
+      const recordHistory = options.recordHistory !== false;
+      const next = {
+        ...current,
+        ...patch,
+        participants: normalizeParticipants(patch.participants ?? current.participants),
+        transferMode: mode(patch.transferMode ?? current.transferMode),
+        destination: text(patch.destination ?? current.destination),
+        selectedKeys: unique(patch.selectedKeys ?? current.selectedKeys),
+        assignments: normalizeAssignments(patch.assignments ?? current.assignments),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (recordHistory) {
+        next.undo = [...(current.undo || []), snapshot(current)].slice(-MAX_HISTORY);
+        next.redo = [];
+      }
+
+      platform.state.set(scopeKey(scopeId), next);
+      platform.events.emit("assignment-core:changed", { scopeId, action, state: next });
+      platform.events.emit(`assignment-core:changed:${scopeId}`, { action, state: next });
+      return next;
+    },
+
+    setParticipants(scopeId, entries) {
+      const participants = normalizeParticipants(entries);
+      const valid = new Set(participants.map(([key]) => key));
+      const state = this.get(scopeId);
+      const assignments = normalizeAssignments(state.assignments).filter(([key]) => valid.has(key));
+      const selectedKeys = unique(state.selectedKeys).filter(key => valid.has(key) && !assignments.some(([assigned]) => assigned === key));
+      return this.commit(scopeId, { participants, assignments, selectedKeys }, "SET_PARTICIPANTS", { recordHistory: false });
+    },
+
+    reset(scopeId, entries = []) {
+      const participants = normalizeParticipants(entries);
+      const next = { ...emptyState(), participants };
+      platform.state.set(scopeKey(scopeId), next);
+      platform.events.emit(`assignment-core:changed:${scopeId}`, { action: "RESET", state: next });
+      return next;
+    },
+
+    setTransferMode(scopeId, value) {
+      return this.commit(scopeId, { transferMode: mode(value), destination: "" }, "SET_TRANSFER_MODE");
+    },
+
+    setDestination(scopeId, value) {
+      return this.commit(scopeId, { destination: text(value) }, "SET_DESTINATION", { recordHistory: false });
+    },
+
+    toggleSelection(scopeId, key) {
+      const state = this.get(scopeId);
+      const selected = new Set(state.selectedKeys || []);
+      const assignments = new Map(state.assignments || []);
+      const value = text(key);
+      if (!value || assignments.has(value)) return state;
+      selected.has(value) ? selected.delete(value) : selected.add(value);
+      return this.commit(scopeId, { selectedKeys: [...selected] }, "TOGGLE_SELECTION", { recordHistory: false });
+    },
+
+    selectAllUnassigned(scopeId) {
+      const state = this.get(scopeId);
+      const assigned = new Set((state.assignments || []).map(([key]) => key));
+      const selectedKeys = (state.participants || []).map(([key]) => key).filter(key => !assigned.has(key));
+      return this.commit(scopeId, { selectedKeys }, "SELECT_ALL", { recordHistory: false });
+    },
+
+    clearSelection(scopeId) {
+      return this.commit(scopeId, { selectedKeys: [] }, "CLEAR_SELECTION", { recordHistory: false });
+    },
+
+    assignSelected(scopeId) {
+      const state = this.get(scopeId);
+      if (!state.destination) throw new Error("Choose a destination first.");
+      const participants = new Map(state.participants || []);
+      const assignments = new Map(state.assignments || []);
+      unique(state.selectedKeys).forEach(key => {
+        if (participants.has(key)) assignments.set(key, {
+          transferMode: mode(state.transferMode),
+          destination: text(state.destination),
+        });
+      });
+      return this.commit(scopeId, { assignments: [...assignments], selectedKeys: [] }, "ASSIGN_SELECTED");
+    },
+
+    removeAssignment(scopeId, key) {
+      const assignments = new Map(this.get(scopeId).assignments || []);
+      assignments.delete(text(key));
+      return this.commit(scopeId, { assignments: [...assignments] }, "REMOVE_ASSIGNMENT");
+    },
+
+    moveGroup(scopeId, groupId, destination) {
+      const [transferMode, oldDestination] = text(groupId).split("|");
+      const assignments = new Map(this.get(scopeId).assignments || []);
+      assignments.forEach((value, key) => {
+        if (value.transferMode === transferMode && value.destination === oldDestination) {
+          assignments.set(key, { transferMode, destination: text(destination) });
+        }
+      });
+      return this.commit(scopeId, { assignments: [...assignments] }, "MOVE_GROUP");
+    },
+
+    groups(scopeId) {
+      const groups = new Map();
+      (this.get(scopeId).assignments || []).forEach(([key, value]) => {
+        const id = `${value.transferMode}|${value.destination}`;
+        if (!groups.has(id)) groups.set(id, { id, transferMode: value.transferMode, destination: value.destination, keys: [] });
+        groups.get(id).keys.push(key);
+      });
+      return [...groups.values()];
+    },
+
+    undo(scopeId) {
+      const current = this.get(scopeId);
+      const previous = current.undo?.at(-1);
+      if (!previous) return current;
+      return this.commit(scopeId, {
+        ...previous,
+        undo: current.undo.slice(0, -1),
+        redo: [...(current.redo || []), snapshot(current)].slice(-MAX_HISTORY),
+      }, "UNDO", { recordHistory: false });
+    },
+
+    redo(scopeId) {
+      const current = this.get(scopeId);
+      const nextSnapshot = current.redo?.at(-1);
+      if (!nextSnapshot) return current;
+      return this.commit(scopeId, {
+        ...nextSnapshot,
+        undo: [...(current.undo || []), snapshot(current)].slice(-MAX_HISTORY),
+        redo: current.redo.slice(0, -1),
+      }, "REDO", { recordHistory: false });
+    },
+
+    report(scopeId) {
+      const state = this.get(scopeId);
+      const report = {
+        version: this.version,
+        scope: scopeId,
+        personnel: state.participants.length,
+        selected: state.selectedKeys.length,
+        assigned: state.assignments.length,
+        groups: this.groups(scopeId).length,
+        mode: state.transferMode,
+        destination: state.destination || "—",
+        undo: state.undo.length,
+        redo: state.redo.length,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("assignmentCore")) platform.engines.replace("assignmentCore", AssignmentCore);
+  else platform.engines.register("assignmentCore", AssignmentCore);
+
+  window.$PF.assignmentCore = AssignmentCore;
+  console.info("Reusable AssignmentCore v1.0.0 active.");
+})();
+
+// Personnel Platform — reusable SortEngine
+// Developer Mode foundation. Pure sorting service with no DOM dependencies.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function lastName(value) {
+    const name = text(value).replace(/\s+(JR\.?|SR\.?|II|III|IV)$/i, "").trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    return parts.at(-1) || "";
+  }
+
+  function compareText(a, b) {
+    return text(a).localeCompare(text(b), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  const SortEngine = {
+    version: "1.0.0",
+    modes: ["LIST", "RANK", "RANK_LAST_NAME", "LAST_NAME", "ASSIGNED_SEQUENCE"],
+
+    sort(items, options = {}) {
+      const mode = this.modes.includes(options.mode) ? options.mode : "LIST";
+      const list = [...(items || [])];
+      const getKey = options.getKey || (item => item?.key ?? item);
+      const getRank = options.getRank || (() => "");
+      const getName = options.getName || (() => "");
+      const listOrder = options.listOrder instanceof Map ? options.listOrder : new Map();
+      const assignedOrder = options.assignedOrder instanceof Map ? options.assignedOrder : new Map();
+
+      return list.sort((a, b) => {
+        const keyA = getKey(a);
+        const keyB = getKey(b);
+        const rankA = getRank(a);
+        const rankB = getRank(b);
+        const nameA = getName(a);
+        const nameB = getName(b);
+
+        if (mode === "RANK") {
+          return compareText(rankA, rankB) || compareText(nameA, nameB);
+        }
+
+        if (mode === "RANK_LAST_NAME") {
+          return compareText(rankA, rankB) || compareText(lastName(nameA), lastName(nameB)) || compareText(nameA, nameB);
+        }
+
+        if (mode === "LAST_NAME") {
+          return compareText(lastName(nameA), lastName(nameB)) || compareText(nameA, nameB);
+        }
+
+        if (mode === "ASSIGNED_SEQUENCE") {
+          return (assignedOrder.get(keyA) ?? Number.MAX_SAFE_INTEGER) -
+            (assignedOrder.get(keyB) ?? Number.MAX_SAFE_INTEGER);
+        }
+
+        return (listOrder.get(keyA) ?? Number.MAX_SAFE_INTEGER) -
+          (listOrder.get(keyB) ?? Number.MAX_SAFE_INTEGER);
+      });
+    },
+  };
+
+  if (platform.engines.has("sort")) platform.engines.replace("sort", SortEngine);
+  else platform.engines.register("sort", SortEngine);
+
+  window.$PF.sort = SortEngine;
+  console.info("Reusable SortEngine v1.0.0 active.");
+})();
+
+
+// Personnel Platform — reusable GeneratorEngine
+// Developer Mode foundation. Orchestrates registered report generators.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const handlers = new Map();
+  const history = [];
+  let sequence = 0;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function normalizeType(value) {
+    return text(value).toUpperCase();
+  }
+
+  function clone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function record(entry) {
+    history.unshift(entry);
+    history.splice(50);
+    return entry;
+  }
+
+  const GeneratorEngine = {
+    version: "1.0.0",
+
+    register(reportType, handler, options = {}) {
+      const type = normalizeType(reportType);
+      if (!type) throw new Error("Generator report type is required.");
+      if (typeof handler !== "function") throw new TypeError(`Generator ${type} must be a function.`);
+      if (handlers.has(type) && options.replace !== true) {
+        throw new Error(`Generator ${type} is already registered.`);
+      }
+      handlers.set(type, handler);
+      platform.events.emit("generator:registered", { reportType: type });
+      return type;
+    },
+
+    unregister(reportType) {
+      const type = normalizeType(reportType);
+      const removed = handlers.delete(type);
+      if (removed) platform.events.emit("generator:unregistered", { reportType: type });
+      return removed;
+    },
+
+    has(reportType) {
+      return handlers.has(normalizeType(reportType));
+    },
+
+    list() {
+      return [...handlers.keys()].sort();
+    },
+
+    async generate(reportType, payload, context = {}) {
+      const type = normalizeType(reportType || payload?.reportType);
+      const handler = handlers.get(type);
+      if (!handler) throw new Error(`No generator is registered for ${type || "this report type"}.`);
+
+      const request = {
+        id: `GEN-${Date.now()}-${++sequence}`,
+        reportType: type,
+        pluginId: text(context.pluginId),
+        requestedAt: new Date().toISOString(),
+        payload: clone(payload),
+      };
+
+      platform.events.emit("generator:started", request);
+
+      try {
+        const output = await handler(clone(payload), {
+          ...context,
+          requestId: request.id,
+          reportType: type,
+          platform,
+        });
+        const completed = record({
+          ...request,
+          status: "COMPLETED",
+          completedAt: new Date().toISOString(),
+          output: clone(output),
+        });
+        platform.events.emit("generator:completed", completed);
+        return completed;
+      } catch (error) {
+        const failed = record({
+          ...request,
+          status: "FAILED",
+          completedAt: new Date().toISOString(),
+          error: error?.message || String(error),
+        });
+        platform.events.emit("generator:failed", failed);
+        throw error;
+      }
+    },
+
+    history(limit = 20) {
+      return history.slice(0, Math.max(0, Number(limit) || 0)).map(clone);
+    },
+
+    last() {
+      return history.length ? clone(history[0]) : null;
+    },
+
+    status() {
+      const report = {
+        version: this.version,
+        generators: this.list(),
+        history: history.length,
+        lastStatus: history[0]?.status || "—",
+        lastReportType: history[0]?.reportType || "—",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("generator")) platform.engines.replace("generator", GeneratorEngine);
+  else platform.engines.register("generator", GeneratorEngine);
+
+  // First adapter: accept the Reassignment V1 payload and return a normalized
+  // preview result. The real AOGEN/ReportEngine output handler will replace it.
+  GeneratorEngine.register("REASSIGNMENT", async payload => ({
+    stage: "PAYLOAD_READY",
+    reportType: "REASSIGNMENT",
+    personnelCount: Array.isArray(payload?.personnel) ? payload.personnel.length : 0,
+    payload,
+  }), { replace: true });
+
+  platform.events.on("generator:requested", event => {
+    GeneratorEngine.generate(event?.reportType, event?.payload, {
+      pluginId: event?.pluginId,
+      sourceEvent: event,
+    }).then(result => {
+      console.info("GeneratorEngine completed request.", result);
+    }).catch(error => {
+      console.error("GeneratorEngine request failed.", error);
+    });
+  });
+
+  window.$PF.generator = GeneratorEngine;
+  console.info("GeneratorEngine v1.0.0 active. Run $PF.generator.status().");
+})();
+
+
+// Reassignment Plugin v1 — clean body built on AssignmentCore
+// Developer Mode only. Does not read or write legacy ReassignmentState.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const selection = platform?.engines?.get?.("selection");
+  if (!platform || !engine || !selection) return;
+
+  const PLUGIN_ID = "reassignment-v1";
+  const SCOPE = "reassignment-v1";
+  const ROOT_ID = "reassignmentPluginV1Root";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function personnelEntries() {
+    const items = selection.items?.("ao-cart") || new Map();
+    return [...items.entries()];
+  }
+
+  function personName(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName || "Unnamed Personnel");
+  }
+
+  function personRank(item) {
+    return text(item?.rank || item?.record?.Rank);
+  }
+
+  function personOffice(item) {
+    return text(item?.office || item?.record?.Office);
+  }
+
+  function personCamp(item) {
+    return text(item?.camp || item?.record?.Camp);
+  }
+
+  function sortedUnique(values) {
+    return [...new Set((values || []).map(text).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }));
+  }
+
+  function directory() {
+    const records = Array.isArray(window.PersonnelState?.records)
+      ? window.PersonnelState.records
+      : [];
+
+    // Use the complete shared destination directory when available, then merge
+    // any newly added values found in the current personnel roster.
+    const shared = window.ReassignmentEngine?.getDirectory?.() || {};
+
+    const camps = sortedUnique([
+      ...(Array.isArray(shared.camps) ? shared.camps : []),
+      ...records.map(row => row.Camp),
+    ]);
+
+    const offices = sortedUnique([
+      ...(Array.isArray(shared.offices) ? shared.offices : []),
+      ...records.map(row => row.Office),
+    ]);
+
+    return { camps, offices };
+  }
+
+  function state() {
+    return engine.get(SCOPE);
+  }
+
+  function participantMap() {
+    return new Map(state().participants || []);
+  }
+
+  function unassignedEntries() {
+    const assigned = new Set((state().assignments || []).map(([key]) => key));
+    return (state().participants || []).filter(([key]) => !assigned.has(key));
+  }
+
+  function installStyles() {
+    if (document.getElementById("reassignmentPluginV1Styles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1Styles";
+    style.textContent = `
+      #${ROOT_ID} { position: fixed; inset: 0; z-index: 99999; background: #eef8ef; color: #153c21; overflow: auto; font-family: inherit; }
+      #${ROOT_ID}[hidden] { display: none !important; }
+      .rp1-shell { min-height: 100%; padding: 14px; box-sizing: border-box; }
+      .rp1-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border:1px solid #c9decf; border-radius:16px; background:#f8fcf8; }
+      .rp1-title { margin:0; font-size:24px; }
+      .rp1-kicker { font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+      .rp1-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .rp1-btn { border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px 13px; font:inherit; font-weight:700; cursor:pointer; }
+      .rp1-btn.primary { background:#ffe600; border-color:#d9c700; }
+      .rp1-btn.active { background:#236b39; color:white; border-color:#236b39; }
+      .rp1-btn:disabled { opacity:.45; cursor:not-allowed; }
+      .rp1-grid { display:grid; grid-template-columns:minmax(290px, 1.05fr) minmax(230px,.72fr) minmax(420px,2fr); gap:12px; margin-top:12px; min-height:calc(100vh - 115px); }
+      .rp1-panel { border:1px solid #c9decf; border-radius:16px; background:#f8fcf8; padding:14px; min-width:0; }
+      .rp1-panel h2 { margin:4px 0 14px; font-size:20px; }
+      .rp1-toolbar { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+      .rp1-list { display:flex; flex-direction:column; gap:7px; }
+      .rp1-person { display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:10px; background:white; border:1px solid #e1eee4; cursor:pointer; }
+      .rp1-person-main { min-width:0; flex:1; }
+      .rp1-person-name { font-weight:800; line-height:1.15; }
+      .rp1-person-sub { font-size:11px; opacity:.72; margin-top:2px; }
+      .rp1-search { width:100%; box-sizing:border-box; border:1px solid #c5d9ca; border-radius:10px; padding:10px; margin-bottom:10px; font:inherit; }
+      .rp1-chip-grid { display:grid; grid-template-columns:1fr; gap:7px; max-height:430px; overflow:auto; padding-right:3px; }
+      .rp1-chip { width:100%; text-align:left; border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px; font:inherit; font-weight:700; cursor:pointer; overflow-wrap:anywhere; }
+      .rp1-chip.active { background:#236b39; color:white; }
+      .rp1-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; align-content:start; }
+      .rp1-group { border:1px solid #c9decf; border-radius:14px; background:white; min-height:230px; padding:10px; }
+      .rp1-group-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:10px; }
+      .rp1-group-title { font-weight:900; }
+      .rp1-assigned { display:flex; justify-content:space-between; gap:8px; align-items:center; background:#e9f6ec; border-radius:9px; padding:8px; margin-bottom:7px; }
+      .rp1-empty { padding:18px; text-align:center; opacity:.65; border:1px dashed #bfd4c4; border-radius:12px; }
+      .rp1-dev-launch { position:fixed; right:18px; bottom:18px; z-index:99990; box-shadow:0 8px 24px rgba(0,0,0,.15); }
+      @media (max-width: 980px) { .rp1-grid { grid-template-columns:1fr; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function render() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    const current = state();
+    const people = participantMap();
+    const selected = new Set(current.selectedKeys || []);
+    const unassigned = unassignedEntries();
+    const groups = engine.groups(SCOPE);
+    const dirs = directory();
+    const options = current.transferMode === "CAMP_TO_CAMP" ? dirs.camps : dirs.offices;
+
+    root.innerHTML = `
+      <div class="rp1-shell">
+        <header class="rp1-header">
+          <div>
+            <div class="rp1-kicker">First clean plugin body</div>
+            <h1 class="rp1-title">Reassignment Workspace V1</h1>
+            <div>${current.assignments.length} of ${current.participants.length} assigned</div>
+          </div>
+          <div class="rp1-actions">
+            <button class="rp1-btn" data-rp1="undo" ${current.undo.length ? "" : "disabled"}>↶ Undo</button>
+            <button class="rp1-btn" data-rp1="redo" ${current.redo.length ? "" : "disabled"}>↷ Redo</button>
+            <button class="rp1-btn" data-rp1="clear-all">Clear All</button>
+            <button class="rp1-btn" data-rp1="close">Back to Personnel Filter</button>
+          </div>
+        </header>
+
+        <main class="rp1-grid">
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Step 1</div>
+            <h2>To Be Assigned <small>${unassigned.length}</small></h2>
+            <div class="rp1-toolbar">
+              <button class="rp1-btn primary" data-rp1="select-all">Select All</button>
+              <button class="rp1-btn" data-rp1="clear-selection">Clear</button>
+            </div>
+            <div class="rp1-list">
+              ${unassigned.length ? unassigned.map(([key, item]) => `
+                <label class="rp1-person">
+                  <input type="checkbox" data-rp1-check="${escapeHtml(key)}" ${selected.has(key) ? "checked" : ""}>
+                  <span class="rp1-person-main">
+                    <div class="rp1-person-name">${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</div>
+                    <div class="rp1-person-sub">${escapeHtml(current.transferMode === "CAMP_TO_CAMP" ? personCamp(item) : personOffice(item))}</div>
+                  </span>
+                </label>
+              `).join("") : `<div class="rp1-empty">No unassigned personnel.</div>`}
+            </div>
+          </section>
+
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Transfer Type</div>
+            <div class="rp1-toolbar">
+              <button class="rp1-btn ${current.transferMode === "CAMP_TO_CAMP" ? "active" : ""}" data-rp1-mode="CAMP_TO_CAMP">Camp to Camp</button>
+              <button class="rp1-btn ${current.transferMode === "OFFICE_TO_OFFICE" ? "active" : ""}" data-rp1-mode="OFFICE_TO_OFFICE">Office to Office</button>
+            </div>
+            <div class="rp1-kicker">Step 2</div>
+            <h2>Destination ${current.transferMode === "CAMP_TO_CAMP" ? "Camp" : "Office"}</h2>
+            <input class="rp1-search" id="rp1DestinationSearch" placeholder="Search destination...">
+            <div class="rp1-chip-grid" id="rp1DestinationOptions">
+              ${options.map(option => `<button class="rp1-chip ${current.destination === option ? "active" : ""}" data-rp1-destination="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
+            </div>
+            <button class="rp1-btn primary" style="width:100%;margin-top:10px" data-rp1="assign" ${selected.size && current.destination ? "" : "disabled"}>Assign Selected</button>
+          </section>
+
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Step 3</div>
+            <h2>Assigned Personnel</h2>
+            <div class="rp1-groups">
+              ${groups.length ? groups.map(group => `
+                <article class="rp1-group">
+                  <div class="rp1-group-head">
+                    <div>
+                      <div class="rp1-group-title">${escapeHtml(group.transferMode === "CAMP_TO_CAMP" ? "CAMP TO" : "OFFICE TO")} ${escapeHtml(group.destination)}</div>
+                      <small>${group.keys.length} personnel</small>
+                    </div>
+                  </div>
+                  ${group.keys.map(key => {
+                    const item = people.get(key) || {};
+                    return `<div class="rp1-assigned"><span>${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</span><button class="rp1-btn" data-rp1-remove="${escapeHtml(key)}">×</button></div>`;
+                  }).join("")}
+                </article>
+              `).join("") : `<div class="rp1-empty">No personnel assigned yet.</div>`}
+            </div>
+          </section>
+        </main>
+      </div>
+    `;
+  }
+
+  function syncParticipants() {
+    engine.setParticipants(SCOPE, personnelEntries());
+  }
+
+  function open() {
+    syncParticipants();
+    let root = document.getElementById(ROOT_ID);
+    if (!root) {
+      root = document.createElement("div");
+      root.id = ROOT_ID;
+      document.body.appendChild(root);
+    }
+    root.hidden = false;
+    document.body.style.overflow = "hidden";
+    render();
+  }
+
+  function close() {
+    const root = document.getElementById(ROOT_ID);
+    if (root) root.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function clearAll() {
+    engine.reset(SCOPE, personnelEntries());
+    render();
+  }
+
+  document.addEventListener("click", event => {
+    const launch = event.target.closest("[data-rp1-launch]");
+    if (launch) {
+      event.preventDefault();
+      open();
+      return;
+    }
+
+    const root = event.target.closest(`#${ROOT_ID}`);
+    if (!root) return;
+
+    const modeButton = event.target.closest("[data-rp1-mode]");
+    if (modeButton) {
+      engine.setTransferMode(SCOPE, modeButton.dataset.rp1Mode);
+      render();
+      return;
+    }
+
+    const destination = event.target.closest("[data-rp1-destination]");
+    if (destination) {
+      engine.setDestination(SCOPE, destination.dataset.rp1Destination);
+      render();
+      return;
+    }
+
+    const remove = event.target.closest("[data-rp1-remove]");
+    if (remove) {
+      engine.removeAssignment(SCOPE, remove.dataset.rp1Remove);
+      render();
+      return;
+    }
+
+    const action = event.target.closest("[data-rp1]")?.dataset.rp1;
+    if (!action) return;
+    if (action === "close") close();
+    else if (action === "clear-all") clearAll();
+    else if (action === "select-all") engine.selectAllUnassigned(SCOPE);
+    else if (action === "clear-selection") engine.clearSelection(SCOPE);
+    else if (action === "assign") {
+      try { engine.assignSelected(SCOPE); }
+      catch (error) { alert(error.message); }
+    }
+    else if (action === "undo") engine.undo(SCOPE);
+    else if (action === "redo") engine.redo(SCOPE);
+    render();
+  });
+
+  document.addEventListener("change", event => {
+    const checkbox = event.target.closest?.("[data-rp1-check]");
+    if (!checkbox) return;
+    engine.toggleSelection(SCOPE, checkbox.dataset.rp1Check);
+    render();
+  });
+
+  document.addEventListener("input", event => {
+    if (event.target.id !== "rp1DestinationSearch") return;
+    const query = text(event.target.value).toLowerCase();
+    document.querySelectorAll(`#rp1DestinationOptions [data-rp1-destination]`).forEach(button => {
+      button.hidden = query && !text(button.dataset.rp1Destination).toLowerCase().includes(query);
+    });
+  });
+
+  platform.events.on("selection:changed", event => {
+    if (event?.scopeId !== "ao-cart") return;
+    syncParticipants();
+    render();
+  });
+
+  const plugin = {
+    id: PLUGIN_ID,
+    name: "Reassignment V1",
+    version: "1.0.1",
+    requires: ["state", "events", "selection", "assignmentCore"],
+    install() {
+      installStyles();
+      engine.createScope(SCOPE);
+      syncParticipants();
+    },
+    activate() {},
+    deactivate() { close(); },
+    open,
+    close,
+    clearAll,
+    report() { return engine.report(SCOPE); },
+  };
+
+  platform.plugins.register(plugin);
+  platform.plugins.activate(PLUGIN_ID);
+
+  installStyles();
+  const launcher = document.createElement("button");
+  launcher.type = "button";
+  launcher.className = "rp1-btn primary rp1-dev-launch";
+  launcher.dataset.rp1Launch = "true";
+  launcher.textContent = "Open Reassignment V1";
+  document.body.appendChild(launcher);
+
+  window.$PF.reassignmentV1 = plugin;
+  console.info("Reassignment Plugin V1.0.1 active. Run $PF.reassignmentV1.open().");
+})();
+
+// Reassignment Plugin V1 — Phase 3
+// Stable event-driven sorting, advisory validation, and report payload bridge.
+// No MutationObserver. No legacy ReassignmentState dependency.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const sorter = platform?.engines?.get?.("sort");
+  const plugin = window.$PF?.reassignmentV1;
+  if (!platform || !engine || !sorter || !plugin) return;
+
+  const SCOPE = "reassignment-v1";
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SORT_KEY = "reassignment-v1:sort-mode";
+  let sortMode = sessionStorage.getItem(SORT_KEY) || "LIST";
+  let scheduled = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function nameOf(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName || "Unnamed Personnel");
+  }
+
+  function rankOf(item) {
+    return text(item?.rank || item?.record?.Rank);
+  }
+
+  function officeOf(item) {
+    return text(item?.office || item?.record?.Office);
+  }
+
+  function campOf(item) {
+    return text(item?.camp || item?.record?.Camp);
+  }
+
+  function directory() {
+    const shared = window.ReassignmentEngine?.getDirectory?.() || {};
+    const rows = Array.isArray(window.PersonnelState?.records) ? window.PersonnelState.records : [];
+    const unique = values => [...new Set(values.map(text).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    return {
+      camps: unique([...(shared.camps || []), ...rows.map(row => row.Camp)]),
+      offices: unique([...(shared.offices || []), ...rows.map(row => row.Office)]),
+    };
+  }
+
+  function orderedKeys(keys, state, people) {
+    const listOrder = new Map((state.participants || []).map(([key], index) => [key, index]));
+    const assignedOrder = new Map((state.assignments || []).map(([key], index) => [key, index]));
+    return sorter.sort(keys, {
+      mode: sortMode,
+      getKey: key => key,
+      getRank: key => rankOf(people.get(key) || {}),
+      getName: key => nameOf(people.get(key) || {}),
+      listOrder,
+      assignedOrder,
+    });
+  }
+
+  function addStyles() {
+    if (document.getElementById("reassignmentPluginV1Phase3Styles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1Phase3Styles";
+    style.textContent = `
+      .rp1-phase3-tools { display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap; margin:-4px 0 12px; }
+      .rp1-group-change { display:flex; gap:5px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+      .rp1-caution-backdrop { position:fixed; inset:0; z-index:100100; background:rgba(10,35,18,.45); display:grid; place-items:center; padding:18px; }
+      .rp1-caution-card { width:min(560px,100%); max-height:80vh; overflow:auto; background:#fff; border:1px solid #c5d9ca; border-radius:16px; padding:18px; box-shadow:0 20px 55px rgba(0,0,0,.2); }
+      .rp1-caution-list { display:flex; flex-direction:column; gap:8px; margin:14px 0; }
+      .rp1-caution-item { padding:10px; border-radius:10px; background:#fff8cf; border:1px solid #eadc78; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function decorate() {
+    scheduled = false;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    addStyles();
+    const state = engine.get(SCOPE);
+    const people = new Map(state.participants || []);
+    const dirs = directory();
+    const panels = [...root.querySelectorAll(".rp1-panel")];
+    const step3 = panels.find(panel => /Step 3/i.test(panel.querySelector(".rp1-kicker")?.textContent || ""));
+    if (!step3) return;
+
+    const heading = step3.querySelector("h2");
+    if (heading && !step3.querySelector("#rp1Step3Sort")) {
+      const tools = document.createElement("div");
+      tools.className = "rp1-phase3-tools";
+      tools.innerHTML = `
+        <label style="font-size:12px;font-weight:800">Sort assigned personnel</label>
+        <select id="rp1Step3Sort" class="rp1-search" style="width:auto;min-width:190px;margin:0;padding:8px">
+          <option value="LIST">LIST sequence</option>
+          <option value="RANK">Rank</option>
+          <option value="RANK_LAST_NAME">Rank and last name</option>
+          <option value="LAST_NAME">Last name</option>
+          <option value="ASSIGNED_SEQUENCE">As assigned</option>
+        </select>
+      `;
+      heading.insertAdjacentElement("afterend", tools);
+      tools.querySelector("select").value = sortMode;
+    }
+
+    root.querySelectorAll(".rp1-group").forEach(groupEl => {
+      const assignedEls = [...groupEl.querySelectorAll(".rp1-assigned")];
+      const keys = assignedEls
+        .map(element => element.querySelector("[data-rp1-remove]")?.dataset.rp1Remove)
+        .filter(Boolean);
+      if (!keys.length) return;
+
+      const assignment = new Map(state.assignments || []).get(keys[0]);
+      if (!assignment) return;
+      const groupId = `${assignment.transferMode}|${assignment.destination}`;
+      const head = groupEl.querySelector(".rp1-group-head");
+
+      if (head && !head.querySelector("[data-rp1-group-change]")) {
+        const options = assignment.transferMode === "CAMP_TO_CAMP" ? dirs.camps : dirs.offices;
+        const controls = document.createElement("div");
+        controls.className = "rp1-group-change";
+        controls.innerHTML = `
+          <select class="rp1-search" data-rp1-group-select="${escapeHtml(groupId)}" style="width:150px;margin:0;padding:7px">
+            ${options.map(option => `<option value="${escapeHtml(option)}" ${option === assignment.destination ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+          </select>
+          <button type="button" class="rp1-btn" data-rp1-group-change="${escapeHtml(groupId)}" style="padding:7px 9px">Change</button>
+        `;
+        head.appendChild(controls);
+      }
+
+      const byKey = new Map(assignedEls.map(element => [
+        element.querySelector("[data-rp1-remove]")?.dataset.rp1Remove,
+        element,
+      ]));
+      orderedKeys(keys, state, people).forEach(key => {
+        const element = byKey.get(key);
+        if (element) groupEl.appendChild(element);
+      });
+    });
+
+    if (!root.querySelector("[data-rp1-generate]")) {
+      const step3Panel = step3;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rp1-btn primary";
+      button.dataset.rp1Generate = "true";
+      button.textContent = "Generate Report";
+      button.style.cssText = "float:right;margin-top:12px";
+      step3Panel.appendChild(button);
+    }
+  }
+
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(decorate);
+  }
+
+  function validate() {
+    const state = engine.get(SCOPE);
+    const cautions = [];
+    const assigned = new Set((state.assignments || []).map(([key]) => key));
+    const unassigned = (state.participants || []).filter(([key]) => !assigned.has(key));
+
+    if (!state.participants.length) {
+      cautions.push({ code: "NO_PERSONNEL", level: "critical-caution", message: "No personnel are included in this report." });
+    }
+    if (!state.assignments.length) {
+      cautions.push({ code: "NO_ASSIGNMENTS", level: "critical-caution", message: "No personnel have been assigned to a destination." });
+    }
+    if (unassigned.length) {
+      cautions.push({ code: "UNASSIGNED_PERSONNEL", level: "caution", message: `${unassigned.length} personnel remain unassigned.` });
+    }
+    if (!state.destination && state.selectedKeys?.length) {
+      cautions.push({ code: "SELECTED_WITHOUT_DESTINATION", level: "caution", message: "Selected personnel do not have an active destination." });
+    }
+
+    (state.assignments || []).forEach(([key, assignment]) => {
+      if (!text(assignment?.destination)) {
+        cautions.push({ code: "MISSING_DESTINATION", level: "critical-caution", message: `Personnel ${key} has no destination.` });
+      }
+    });
+
+    return { canGenerate: true, cautions };
+  }
+
+  function buildPayload() {
+    const state = engine.get(SCOPE);
+    const people = new Map(state.participants || []);
+    const assignments = new Map(state.assignments || []);
+    const allKeys = [...assignments.keys()];
+    const ordered = orderedKeys(allKeys, state, people);
+
+    return {
+      reportType: "REASSIGNMENT",
+      personnelLayout: "LIST",
+      sortMode,
+      generatedAt: new Date().toISOString(),
+      order: {
+        number: "",
+        date: "",
+        signingOfficer: "",
+        signingPosition: "",
+        fileReference: "",
+      },
+      personnel: ordered.map((key, index) => {
+        const item = people.get(key) || {};
+        const assignment = assignments.get(key) || {};
+        return {
+          sequence: index + 1,
+          key,
+          rank: rankOf(item),
+          fullName: nameOf(item),
+          fromOffice: officeOf(item),
+          fromCamp: campOf(item),
+          transferMode: assignment.transferMode || "OFFICE_TO_OFFICE",
+          toOffice: assignment.transferMode === "OFFICE_TO_OFFICE" ? text(assignment.destination) : "",
+          toCamp: assignment.transferMode === "CAMP_TO_CAMP" ? text(assignment.destination) : "",
+        };
+      }),
+    };
+  }
+
+  function previewPayload() {
+    const payload = buildPayload();
+    console.table(payload.personnel);
+    return payload;
+  }
+
+  function proceedToGenerator() {
+    const payload = buildPayload();
+    platform.events.emit("generator:requested", {
+      pluginId: "reassignment-v1",
+      reportType: "REASSIGNMENT",
+      payload,
+    });
+    console.info("Reassignment V1 payload ready for GeneratorEngine.", payload);
+    return payload;
+  }
+
+  function showCautions(result) {
+    document.getElementById("rp1CautionBackdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.id = "rp1CautionBackdrop";
+    backdrop.className = "rp1-caution-backdrop";
+    backdrop.innerHTML = `
+      <div class="rp1-caution-card">
+        <h2 style="margin-top:0">Report Cautions</h2>
+        <p>The report can still be generated. Review these items first:</p>
+        <div class="rp1-caution-list">
+          ${result.cautions.map(item => `<div class="rp1-caution-item">⚠ ${escapeHtml(item.message)}</div>`).join("")}
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+          <button class="rp1-btn" data-rp1-caution="back">Go Back</button>
+          <button class="rp1-btn primary" data-rp1-caution="continue">Generate Anyway</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+  }
+
+  function requestGenerate() {
+    const result = validate();
+    if (result.cautions.length) {
+      showCautions(result);
+      return result;
+    }
+    proceedToGenerator();
+    return result;
+  }
+
+  document.addEventListener("change", event => {
+    if (event.target.id !== "rp1Step3Sort") return;
+    sortMode = event.target.value || "LIST";
+    sessionStorage.setItem(SORT_KEY, sortMode);
+    scheduleDecorate();
+  });
+
+  document.addEventListener("click", event => {
+    const changeButton = event.target.closest("[data-rp1-group-change]");
+    if (changeButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const groupId = changeButton.dataset.rp1GroupChange;
+      const select = document.querySelector(`[data-rp1-group-select="${CSS.escape(groupId)}"]`);
+      const destination = text(select?.value);
+      if (destination) engine.moveGroup(SCOPE, groupId, destination);
+      scheduleDecorate();
+      return;
+    }
+
+    if (event.target.closest("[data-rp1-generate]")) {
+      event.preventDefault();
+      requestGenerate();
+      return;
+    }
+
+    const cautionAction = event.target.closest("[data-rp1-caution]")?.dataset.rp1Caution;
+    if (cautionAction === "back") {
+      document.getElementById("rp1CautionBackdrop")?.remove();
+    } else if (cautionAction === "continue") {
+      document.getElementById("rp1CautionBackdrop")?.remove();
+      proceedToGenerator();
+    }
+  }, true);
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+
+  Object.assign(plugin, {
+    version: "1.2.0",
+    validate,
+    buildPayload,
+    previewPayload,
+    requestGenerate,
+    get sortMode() { return sortMode; },
+    setSortMode(value) {
+      sortMode = sorter.modes.includes(value) ? value : "LIST";
+      sessionStorage.setItem(SORT_KEY, sortMode);
+      scheduleDecorate();
+      return sortMode;
+    },
+  });
+
+  window.$PF.reassignmentV1Phase3 = {
+    version: "1.2.0",
+    decorate,
+    validate,
+    buildPayload,
+  };
+
+  scheduleDecorate();
+  console.info("Reassignment V1.2 active: SortEngine, advisory validation, and payload bridge.");
 })();
 
 
