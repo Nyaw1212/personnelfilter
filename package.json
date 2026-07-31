@@ -4,6 +4,7 @@
   "private": true,
   "description": "Local development and tests for the Personnel Filter Apps Script web app",
   "scripts": {
+    "platform:wrap": "node scripts/wrap-platform-modules.js",
     "dev:build": "node scripts/build-dev.js",
     "dev": "npm run dev:build",
     "test": "node tests/report-generator.test.js",
