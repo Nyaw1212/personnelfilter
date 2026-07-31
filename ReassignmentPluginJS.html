@@ -1,0 +1,93 @@
+//----------------------------------
+// Reassignment Plugin — Platform pilot
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("ReassignmentPlugin: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  const SCOPE = "reassignment";
+
+  const plugin = {
+    id: "reassignment",
+    name: "Reassignment",
+    version: "0.1.0",
+    requires: ["state", "store", "commands", "events", "filter", "selection", "assignment", "generator", "report"],
+
+    install(context) {
+      context.state.createScope(`plugin:${SCOPE}`, {
+        active: false,
+        sessionMode: "NEW",
+        sourceReportId: "",
+      });
+
+      context.commands.register("REASSIGNMENT.SET_TRANSFER_MODE", command =>
+        context.services.assignment.dispatch({
+          type: "SET_TRANSFER_MODE",
+          value: command.value,
+        })
+      );
+
+      context.commands.register("REASSIGNMENT.SET_DESTINATION", command =>
+        context.services.assignment.dispatch({
+          type: "SET_DESTINATION",
+          value: command.value,
+        })
+      );
+
+      context.commands.register("REASSIGNMENT.ASSIGN_SELECTED", () =>
+        context.services.assignment.dispatch({ type: "ASSIGN_SELECTED" })
+      );
+
+      context.commands.register("REASSIGNMENT.ASSIGN_VISIBLE", () =>
+        context.services.assignment.dispatch({ type: "ASSIGN_VISIBLE" })
+      );
+
+      context.commands.register("REASSIGNMENT.UNDO", () =>
+        context.services.assignment.dispatch({ type: "UNDO" })
+      );
+
+      context.commands.register("REASSIGNMENT.REDO", () =>
+        context.services.assignment.dispatch({ type: "REDO" })
+      );
+
+      context.commands.register("REASSIGNMENT.BUILD_PAYLOAD", command =>
+        context.services.generator.build("REASSIGNMENT", command.context || {})
+      );
+    },
+
+    activate(context) {
+      context.state.update(`plugin:${SCOPE}`, current => ({ ...current, active: true }));
+      context.events.emit("reassignment:plugin-active", { plugin: this.id });
+    },
+
+    deactivate(context) {
+      context.state.update(`plugin:${SCOPE}`, current => ({ ...current, active: false }));
+      context.events.emit("reassignment:plugin-inactive", { plugin: this.id });
+    },
+
+    status(context) {
+      const assignment = context.services.assignment;
+      return {
+        id: this.id,
+        version: this.version,
+        active: Boolean(context.state.get(`plugin:${SCOPE}`)?.active),
+        transferMode: assignment.getState().transferMode || "UNKNOWN",
+        destination: assignment.getState().destination?.value || "",
+        selected: assignment.getSelectedKeys().size,
+        assigned: assignment.getAssignments().size,
+      };
+    },
+  };
+
+  platform.plugins.register(plugin);
+  platform.plugins.activate(plugin.id);
+
+  window.ReassignmentPlugin = plugin;
+  console.info("ReassignmentPlugin registered and active.");
+})();
