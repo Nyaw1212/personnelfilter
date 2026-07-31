@@ -30,7 +30,6 @@ function appJsBundle() {
     "ReassignmentPluginJS.html",
     "PlatformAssignmentCoreJS.html",
     "ReassignmentPluginV1JS.html",
-    "ReassignmentPluginV1Phase2JS.html",
   ];
 
   return [
@@ -59,4 +58,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with clean Reassignment Plugin V1 and Phase 2 group/sort controls.");
+console.log("Built dev/index.html with clean Reassignment Plugin V1. Phase 2 is temporarily disabled.");
