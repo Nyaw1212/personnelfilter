@@ -14,6 +14,7 @@ function appJsBundle() {
     .map(match => match[1]);
 
   const enginePilot = [
+    "ReassignmentEngineLegacyBridgeJS.html",
     "ReassignmentEngineCoreJS.html",
     "ReassignmentEngineControlsJS.html",
     "ReassignmentEngineRendererJS.html",
@@ -45,4 +46,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with Apps Script includes expanded, ReassignmentEngine pilot, and diagnostics loaded.");
+console.log("Built dev/index.html with Apps Script includes expanded, ReassignmentEngine pilot, legacy bridge, and diagnostics loaded.");
