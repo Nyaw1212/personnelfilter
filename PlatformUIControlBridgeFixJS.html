@@ -1,0 +1,108 @@
+// Personnel Platform — final UI control bridge
+// Keeps legacy-rendered Personnel Filter controls routed to clean platform engines/plugins.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function refreshPersonnelUI() {
+    if (typeof window.renderPreviewTable === "function") {
+      window.renderPreviewTable();
+    }
+    if (typeof window.updateAoCartCount_ === "function") {
+      window.updateAoCartCount_();
+    }
+    if (typeof window.updateReportGeneratorButton_ === "function") {
+      window.updateReportGeneratorButton_();
+    }
+  }
+
+  function recordForPreviewButton(button) {
+    const row = button.closest("#previewTableBody tr");
+    const body = row?.parentElement;
+    if (!row || !body) return null;
+
+    const rows = [...body.querySelectorAll(":scope > tr")];
+    const index = rows.indexOf(row);
+    if (index < 0) return null;
+
+    const records = Array.isArray(window.PersonnelState?.filteredRecords)
+      ? window.PersonnelState.filteredRecords
+      : [];
+    return records[index] || null;
+  }
+
+  // Capture before legacy row-button listeners. The SelectionEngine is canonical;
+  // the legacy AO cart is mirrored by SelectionEngine v2.
+  document.addEventListener("click", event => {
+    const button = event.target.closest?.("#previewTableBody tr button");
+    if (!button) return;
+
+    const label = text(button.textContent).toLowerCase();
+    if (!label.includes("add") && !label.includes("added")) return;
+
+    const selection = platform.engines.get("selection");
+    const record = recordForPreviewButton(button);
+    if (!selection || !record) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    const key = typeof window.getAoPersonnelKey_ === "function"
+      ? window.getAoPersonnelKey_(record)
+      : `row:${record.__sheetRow || record.rowIndex || record["Full Name"] || Date.now()}`;
+    const item = typeof window.normalizeAoPersonnel_ === "function"
+      ? window.normalizeAoPersonnel_(record)
+      : { record };
+
+    selection.toggle("ao-cart", key, item);
+    refreshPersonnelUI();
+  }, true);
+
+  // The header button existed before the clean Transfer Queue plugin and still
+  // carries a legacy addEventListener. Capture and route it to Plugin V1.
+  document.addEventListener("click", event => {
+    const button = event.target.closest?.("#openTransferQueueButton");
+    if (!button) return;
+    const plugin = window.$PF?.transferQueuePlugin;
+    if (!plugin?.open) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    plugin.open();
+  }, true);
+
+  // Keep the report launcher attached to the live toolbar after table rerenders.
+  platform.events.on("selection:changed", () => {
+    queueMicrotask(() => {
+      window.$PF?.reportLauncher?.install?.();
+      refreshPersonnelUI();
+    });
+  });
+
+  window.$PF.uiControlBridge = {
+    version: "1.0.0",
+    refresh: refreshPersonnelUI,
+    status() {
+      const result = {
+        version: this.version,
+        selection: Boolean(platform.engines.get("selection")),
+        reportLauncher: Boolean(window.$PF?.reportLauncher),
+        transferQueuePlugin: Boolean(window.$PF?.transferQueuePlugin),
+        transferQueueButton: Boolean(document.getElementById("openTransferQueueButton")),
+      };
+      console.table(result);
+      return result;
+    },
+  };
+
+  console.info("Platform UI control bridge v1.0.0 active.");
+})();
