@@ -40,8 +40,8 @@ function include(filename) {
   });
 
   // Index.html places AppJS inside its original <script> element. Close that
-  // element, insert the Apps Script-safe platform bundle, then reopen it so
-  // Index.html's existing closing tag remains balanced.
+  // element, insert the wrapped platform modules, then reopen it so the
+  // existing closing tag in Index.html remains balanced.
   content += "\n</script>\n" + includePlatformBundle() + "\n<script>\n";
 
   return content;
@@ -52,8 +52,9 @@ function include(filename) {
 //----------------------------------
 
 function includePlatformBundle() {
-  // These files contain plain browser JavaScript rather than complete HTML.
-  // Bundle them into one valid script element for Apps Script production.
+  // Each platform module is a valid HTML partial wrapped in its own <script>
+  // element. Joining those partials avoids Apps Script's malformed-HTML error
+  // while preserving the same execution order used in Developer Mode.
   const platformModules = [
     "PlatformCoreJS",
     "PlatformLegacyEngineAdaptersJS",
@@ -79,12 +80,9 @@ function includePlatformBundle() {
     "PlatformGlassGreenThemeJS"
   ];
 
-  const source = platformModules.map(function(moduleName) {
+  return platformModules.map(function(moduleName) {
     return HtmlService
       .createHtmlOutputFromFile(moduleName)
       .getContent();
   }).join("\n\n");
-
-  const safeSource = source.replace(/<\/script/gi, "<\\/script");
-  return "<script>\n" + safeSource + "\n<\/script>";
 }
