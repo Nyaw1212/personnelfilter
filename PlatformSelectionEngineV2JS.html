@@ -49,13 +49,18 @@
     return platform.state.get(STATE_SCOPE);
   }
 
-  function mirrorToLegacy_(state) {
-    if (!window.PersonnelState) return;
-    window.PersonnelState.aoCart = new Map(normalizeEntries_(state?.entries || []));
+  function refreshLegacyUi_() {
+    if (typeof window.renderPreviewTable === "function") window.renderPreviewTable();
     if (typeof window.updateAoCartCount_ === "function") window.updateAoCartCount_();
     if (typeof window.updateReportGeneratorButton_ === "function") {
       window.updateReportGeneratorButton_();
     }
+  }
+
+  function mirrorToLegacy_(state) {
+    if (!window.PersonnelState) return;
+    window.PersonnelState.aoCart = new Map(normalizeEntries_(state?.entries || []));
+    refreshLegacyUi_();
   }
 
   function commit_(entries, order) {
@@ -83,7 +88,7 @@
   }
 
   const SelectionEngineV2 = {
-    version: "0.2.0",
+    version: "0.2.1",
     scopeId: SCOPE,
 
     get(scopeId = SCOPE) {
@@ -209,10 +214,9 @@
         );
       });
       SelectionEngineV2.replace(SCOPE, [...map.entries()]);
-      if (typeof window.renderPreviewTable === "function") window.renderPreviewTable();
     };
   }
 
   window.$PF.selection = SelectionEngineV2;
-  console.info("SelectionEngine v0.2 owns AO cart in Developer Mode. Run $PF.selection.report().");
+  console.info("SelectionEngine v0.2.1 owns AO cart in Developer Mode. Run $PF.selection.report().");
 })();
