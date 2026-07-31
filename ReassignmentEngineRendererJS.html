@@ -77,12 +77,14 @@
       });
     }
 
+    const selectedKeys = window.ReassignmentState?.selectedKeys;
+
     const assignSelected = document.createElement("button");
     assignSelected.type = "button";
     assignSelected.className = "button button-primary";
     assignSelected.textContent = "Assign Selected";
     assignSelected.dataset.engineAction = "ASSIGN_SELECTED";
-    assignSelected.disabled = !selected || !window.ReassignmentState?.selectedKeys?.size;
+    assignSelected.disabled = !selected || !(selectedKeys instanceof Set && selectedKeys.size);
 
     const assignVisible = document.createElement("button");
     assignVisible.type = "button";
@@ -182,6 +184,11 @@
     injectStyles_();
     window.ReassignmentEngine.initialize();
     renderEngineUI_();
+
+    window.ReassignmentEngineRenderer = {
+      connected: true,
+      render: renderEngineUI_,
+    };
 
     console.info("ReassignmentEngine pilot active in Developer Mode.");
   }
