@@ -1,5 +1,5 @@
-// Reassignment V1 — state-driven group destination change
-// Owns the Change action before Phase 3 and forces a clean plugin rerender.
+// Reassignment V1 — state-driven group destination dropdown
+// Removes the separate Change button and applies the destination immediately.
 
 (function () {
   "use strict";
@@ -15,23 +15,32 @@
     return String(value == null ? "" : value).trim();
   }
 
+  function installStyles() {
+    if (document.getElementById("reassignmentV1GroupDropdownStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentV1GroupDropdownStyles";
+    style.textContent = `
+      #reassignmentPluginV1Root [data-rp1-group-change] {
+        display: none !important;
+      }
+
+      #reassignmentPluginV1Root [data-rp1-group-select] {
+        width: min(210px, 100%) !important;
+        cursor: pointer;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   function rerender() {
     // open() synchronizes participants and renders entirely from engine state.
     plugin.close();
     plugin.open();
   }
 
-  document.addEventListener("click", event => {
-    const button = event.target.closest?.("[data-rp1-group-change]");
-    if (!button) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    const groupId = text(button.dataset.rp1GroupChange);
-    const group = button.closest(".rp1-group");
-    const destination = text(group?.querySelector("[data-rp1-group-select]")?.value);
+  function updateGroup(select) {
+    const destination = text(select?.value);
+    const groupId = text(select?.dataset.rp1GroupSelect);
     if (!groupId || !destination) return;
 
     const before = engine.get(SCOPE);
@@ -42,7 +51,7 @@
       .map(([key]) => key);
 
     if (!matchingKeys.length) {
-      console.warn("Reassignment group change found no matching assignments.", {
+      console.warn("Reassignment group dropdown found no matching assignments.", {
         groupId,
         destination,
       });
@@ -65,13 +74,25 @@
     });
 
     rerender();
+  }
+
+  document.addEventListener("change", event => {
+    const select = event.target.closest?.("[data-rp1-group-select]");
+    if (!select) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    updateGroup(select);
   }, true);
 
+  installStyles();
+
   window.$PF.reassignmentV1GroupChangeFix = {
-    version: "1.1.0",
+    version: "1.2.0",
     active: true,
-    rule: "Group title, dropdown, payload, and preview use AssignmentCore state",
+    behavior: "dropdown-onchange",
   };
 
-  console.info("Reassignment V1 state-driven group destination fix active.");
+  console.info("Reassignment V1 group destinations now update on dropdown change.");
 })();
