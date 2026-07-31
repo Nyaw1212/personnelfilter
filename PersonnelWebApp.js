@@ -68,6 +68,7 @@ function includePlatformBundle() {
     "PlatformTransferQueueEngineJS",
     "TransferQueuePluginV1JS",
     "PlatformReportPreviewUIJS",
+    "PlatformReportGenerationBridgeJS",
     "PlatformReportQueueBridgeJS",
     "ReassignmentPluginV1JS",
     "ReassignmentPluginV1GroupChangeFixJS",
