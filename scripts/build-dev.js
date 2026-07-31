@@ -62,6 +62,7 @@ function appJsBundle() {
     "ReassignmentPluginV1JS.html",
     "ReassignmentPluginV1GroupChangeFixJS.html",
     "ReassignmentPluginV1Phase3JS.html",
+    "PlatformReportLauncherUXJS.html",
   ];
 
   return [
@@ -89,4 +90,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with clean Reassignment V1 and Transfer Queue Plugin V1.");
+console.log("Built dev/index.html with selection refresh fix and Report Generator launcher.");
