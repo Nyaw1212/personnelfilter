@@ -57,6 +57,7 @@ function includePlatformBundle() {
   // while preserving the same execution order used in Developer Mode.
   const platformModules = [
     "PlatformCoreJS",
+    "PlatformPerformanceEngineJS",
     "PlatformLegacyEngineAdaptersJS",
     "PlatformSelectionEngineV2JS",
     "PlatformFilterEngineV2JS",
