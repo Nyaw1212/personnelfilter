@@ -65,6 +65,7 @@ function appJsBundle() {
     "ReassignmentPluginV1GroupChangeFixJS.html",
     "ReassignmentPluginV1Phase3JS.html",
     "PlatformNameFormatEngineJS.html",
+    "ReassignmentPluginV1PolishJS.html",
     "PlatformReportLauncherUXJS.html",
     "PlatformUIControlBridgeFixJS.html",
     "PlatformKeyboardEngineJS.html",
@@ -95,4 +96,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with NameFormatEngine controls.");
+console.log("Built dev/index.html with glass-green reassignment polish.");
