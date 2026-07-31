@@ -12,7 +12,7 @@ function doGet() {
 }
 
 //----------------------------------
-// Include HTML File
+// Standard HTML/JavaScript include
 //----------------------------------
 
 function include(filename) {
@@ -22,20 +22,35 @@ function include(filename) {
 
   if (filename !== "AppJS") return content;
 
-  // Production now loads the same clean platform stack used by Developer Mode.
-  // Legacy reassignment patches remain in the Apps Script project only as
-  // rollback files and are intentionally not included here.
-  const productionModules = [
-    // Existing shared production modules that are still required.
+  // These existing client modules are still part of the base Personnel Filter.
+  // They are injected inside Index.html's original <script> element.
+  const sharedClientModules = [
     "GeneratedReportsJS",
     "GeneratedReportPreviewJS",
     "Stage1GeneratedReportEditorJS",
     "AOSelectionBulkControlsJS",
     "PerformanceClientJS",
     "TransferQueueJS",
-    "TransferQueueCancelPatchJS",
+    "TransferQueueCancelPatchJS"
+  ];
 
-    // Personnel Platform engines.
+  sharedClientModules.forEach(function(moduleName) {
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile(moduleName)
+      .getContent();
+  });
+
+  return content;
+}
+
+//----------------------------------
+// Personnel Platform production bundle
+//----------------------------------
+
+function includePlatformBundle() {
+  // These files contain plain browser JavaScript rather than complete HTML.
+  // Bundle them into one valid script element for Apps Script production.
+  const platformModules = [
     "PlatformCoreJS",
     "PlatformLegacyEngineAdaptersJS",
     "PlatformSelectionEngineV2JS",
@@ -46,8 +61,6 @@ function include(filename) {
     "PlatformGeneratorEngineJS",
     "PlatformReportEngineJS",
     "PlatformTransferQueueEngineJS",
-
-    // Production UI and plugins.
     "TransferQueuePluginV1JS",
     "PlatformReportPreviewUIJS",
     "PlatformReportQueueBridgeJS",
@@ -62,11 +75,15 @@ function include(filename) {
     "PlatformGlassGreenThemeJS"
   ];
 
-  productionModules.forEach(function(moduleName) {
-    content += "\n" + HtmlService
+  const source = platformModules.map(function(moduleName) {
+    return HtmlService
       .createHtmlOutputFromFile(moduleName)
       .getContent();
-  });
+  }).join("\n\n");
 
-  return content;
+  // Prevent a literal closing script sequence inside a module from ending the
+  // bundle early when the evaluated HTML is sent to the browser.
+  const safeSource = source.replace(/<\/script/gi, "<\\/script");
+
+  return "<script>\n" + safeSource + "\n<\/script>";
 }
