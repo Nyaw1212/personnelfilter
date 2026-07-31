@@ -1,0 +1,86 @@
+// Personnel Platform — shared glass-green action theme
+// Keeps yellow for counters/status badges while making clickable actions glass green.
+
+(function () {
+  "use strict";
+
+  if (document.getElementById("platformGlassGreenThemeStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "platformGlassGreenThemeStyles";
+  style.textContent = `
+    :root {
+      --pf-glass-green-bg: linear-gradient(180deg, rgba(46,125,80,.20), rgba(46,125,80,.11));
+      --pf-glass-green-hover: linear-gradient(180deg, rgba(46,125,80,.30), rgba(46,125,80,.18));
+      --pf-glass-green-border: rgba(46,125,80,.38);
+      --pf-glass-green-border-hover: rgba(46,125,80,.58);
+      --pf-glass-green-text: #174b2d;
+      --pf-glass-green-shadow: 0 7px 18px rgba(31,101,60,.12);
+    }
+
+    /* Main Personnel Filter actions */
+    .button-primary,
+    .button-ghost,
+    #clearRanksButton,
+    #applyNowButton,
+    #restoreFromBarButton,
+    .pf-report-launcher,
+    [data-rp1-launch],
+    .ao-row-add-button.is-added,
+    .ao-row-add-button[data-selected="true"] {
+      background: var(--pf-glass-green-bg) !important;
+      border-color: var(--pf-glass-green-border) !important;
+      color: var(--pf-glass-green-text) !important;
+      box-shadow: var(--pf-glass-green-shadow) !important;
+      backdrop-filter: blur(10px) saturate(125%);
+      -webkit-backdrop-filter: blur(10px) saturate(125%);
+      transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+
+    .button-primary:hover:not(:disabled),
+    .button-ghost:hover:not(:disabled),
+    #clearRanksButton:hover:not(:disabled),
+    #applyNowButton:hover:not(:disabled),
+    #restoreFromBarButton:hover:not(:disabled),
+    .pf-report-launcher:hover:not(:disabled),
+    [data-rp1-launch]:hover:not(:disabled),
+    .ao-row-add-button.is-added:hover:not(:disabled),
+    .ao-row-add-button[data-selected="true"]:hover:not(:disabled) {
+      background: var(--pf-glass-green-hover) !important;
+      border-color: var(--pf-glass-green-border-hover) !important;
+      box-shadow: 0 9px 22px rgba(31,101,60,.18) !important;
+      transform: translateY(-1px);
+    }
+
+    .button-primary:disabled,
+    .button-ghost:disabled,
+    #clearRanksButton:disabled,
+    #applyNowButton:disabled,
+    #restoreFromBarButton:disabled,
+    .pf-report-launcher:disabled,
+    [data-rp1-launch]:disabled {
+      background: rgba(46,125,80,.08) !important;
+      border-color: rgba(46,125,80,.18) !important;
+      color: rgba(23,75,45,.48) !important;
+      box-shadow: none !important;
+    }
+
+    /* Report chooser primary option */
+    .pf-report-type-choice.primary {
+      background: var(--pf-glass-green-bg) !important;
+      border-color: var(--pf-glass-green-border) !important;
+      color: var(--pf-glass-green-text) !important;
+      box-shadow: var(--pf-glass-green-shadow) !important;
+      backdrop-filter: blur(10px) saturate(125%);
+      -webkit-backdrop-filter: blur(10px) saturate(125%);
+    }
+
+    .pf-report-type-choice.primary:hover:not(:disabled) {
+      background: var(--pf-glass-green-hover) !important;
+      border-color: var(--pf-glass-green-border-hover) !important;
+    }
+  `;
+
+  document.head.appendChild(style);
+  console.info("Platform glass-green action theme active.");
+})();
