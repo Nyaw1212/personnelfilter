@@ -1,0 +1,194 @@
+//----------------------------------
+// Reassignment Engine — Renderer Adapter (Developer Mode pilot)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function button_(label, action, value, active) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.dataset.engineAction = action;
+    if (value !== undefined) button.dataset.value = value;
+    button.className = "re-engine-option";
+    button.classList.toggle("is-active", Boolean(active));
+    return button;
+  }
+
+  function renderDestinationPanel_() {
+    const engine = window.ReassignmentEngine;
+    const panel = document.querySelector(".reassignment-destination-panel");
+    if (!engine || !panel) return;
+
+    const campMode = engine.state.transferMode === "CAMP_TO_CAMP";
+    const selected = engine.state.destination.value;
+    const options = engine.getVisibleDestinations();
+
+    panel.replaceChildren();
+
+    const transferLabel = document.createElement("label");
+    transferLabel.className = "re-engine-eyebrow";
+    transferLabel.textContent = "Transfer Type";
+
+    const modes = document.createElement("div");
+    modes.className = "re-engine-mode-grid";
+    modes.append(
+      button_("Camp to Camp", "SET_TRANSFER_MODE", "CAMP_TO_CAMP", campMode),
+      button_("Office to Office", "SET_TRANSFER_MODE", "OFFICE_TO_OFFICE", !campMode)
+    );
+
+    const step = document.createElement("span");
+    step.className = "re-engine-step";
+    step.textContent = "STEP 2";
+
+    const title = document.createElement("h2");
+    title.textContent = campMode ? "Destination Camp" : "Destination Office";
+
+    const description = document.createElement("p");
+    description.textContent = campMode
+      ? "Choose the Camp where the selected personnel will go."
+      : "Choose the Office where the selected personnel will go.";
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "re-engine-search";
+    search.placeholder = "Search destination...";
+    search.value = engine.state.destinationSearch;
+    search.dataset.engineInput = "SET_DESTINATION_SEARCH";
+
+    const directoryLabel = document.createElement("label");
+    directoryLabel.className = "re-engine-eyebrow";
+    directoryLabel.textContent = campMode ? "Camps" : "Offices";
+
+    const directory = document.createElement("div");
+    directory.className = "re-engine-directory";
+
+    if (!options.length) {
+      const empty = document.createElement("div");
+      empty.className = "re-engine-empty";
+      empty.textContent = "No destinations match the search.";
+      directory.appendChild(empty);
+    } else {
+      options.forEach(value => {
+        directory.appendChild(
+          button_(value, "SET_DESTINATION", value, selected === value)
+        );
+      });
+    }
+
+    const assignSelected = document.createElement("button");
+    assignSelected.type = "button";
+    assignSelected.className = "button button-primary";
+    assignSelected.textContent = "Assign Selected";
+    assignSelected.dataset.engineAction = "ASSIGN_SELECTED";
+    assignSelected.disabled = !selected || !window.ReassignmentState?.selectedKeys?.size;
+
+    const assignVisible = document.createElement("button");
+    assignVisible.type = "button";
+    assignVisible.className = "button button-secondary";
+    assignVisible.textContent = "Add All Visible";
+    assignVisible.dataset.engineAction = "ASSIGN_VISIBLE";
+    assignVisible.disabled = !selected;
+
+    panel.append(
+      transferLabel,
+      modes,
+      step,
+      title,
+      description,
+      search,
+      directoryLabel,
+      directory,
+      assignSelected,
+      assignVisible
+    );
+  }
+
+  function renderHistoryControls_() {
+    const headerActions = document.querySelector(".reassignment-header-actions");
+    if (!headerActions || document.getElementById("reEngineUndo")) return;
+
+    const undo = document.createElement("button");
+    undo.id = "reEngineUndo";
+    undo.type = "button";
+    undo.textContent = "↶ Undo";
+    undo.dataset.engineAction = "UNDO";
+
+    const redo = document.createElement("button");
+    redo.id = "reEngineRedo";
+    redo.type = "button";
+    redo.textContent = "↷ Redo";
+    redo.dataset.engineAction = "REDO";
+
+    headerActions.prepend(undo, redo);
+  }
+
+  function updateHistoryControls_() {
+    const engine = window.ReassignmentEngine;
+    const undo = document.getElementById("reEngineUndo");
+    const redo = document.getElementById("reEngineRedo");
+    if (undo) undo.disabled = !engine.history.undo.length;
+    if (redo) redo.disabled = !engine.history.redo.length;
+  }
+
+  function injectStyles_() {
+    if (document.getElementById("reassignmentEnginePilotStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentEnginePilotStyles";
+    style.textContent = `
+      .reassignment-destination-panel{gap:10px!important}
+      .re-engine-eyebrow,.re-engine-step{display:block;color:#235b31;font-size:10px;font-weight:900;letter-spacing:.09em;text-transform:uppercase}
+      .re-engine-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+      .re-engine-option{width:100%;min-height:34px;padding:6px 9px;border:1px solid rgba(31,111,52,.24);border-radius:10px;background:#fff;color:#173c1f;font:inherit;font-size:11px;font-weight:700;text-align:left;cursor:pointer}
+      .re-engine-mode-grid .re-engine-option{text-align:center}
+      .re-engine-option.is-active{background:#245f34;color:#fff;border-color:#245f34}
+      .re-engine-search{width:100%;min-height:38px;padding:8px 10px;border:1px solid rgba(31,111,52,.22);border-radius:10px;background:#fff;font:inherit}
+      .re-engine-directory{display:flex;flex-direction:column;gap:6px;max-height:290px;overflow:auto;padding-right:2px}
+      .re-engine-empty{padding:10px;border:1px dashed rgba(31,111,52,.2);border-radius:9px;font-size:11px}
+      #reEngineUndo,#reEngineRedo{min-height:32px;padding:6px 10px;border:1px solid rgba(31,111,52,.2);border-radius:9px;background:#fff;color:#173c1f;font:inherit;font-size:11px;font-weight:800;cursor:pointer}
+      #reEngineUndo:disabled,#reEngineRedo:disabled{opacity:.45;cursor:not-allowed}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function renderEngineUI_() {
+    renderDestinationPanel_();
+    renderHistoryControls_();
+    updateHistoryControls_();
+  }
+
+  function install_() {
+    if (!window.ReassignmentEngine) return;
+
+    const originalRender = window.renderReassignmentWorkspace_;
+    if (typeof originalRender === "function" && !originalRender.engineWrapped) {
+      const wrapped = function () {
+        originalRender.apply(this, arguments);
+        renderEngineUI_();
+      };
+      wrapped.engineWrapped = true;
+      window.renderReassignmentWorkspace_ = wrapped;
+    }
+
+    window.ReassignmentEngine.subscribe(() => {
+      if (typeof window.renderReassignmentWorkspace_ === "function") {
+        window.renderReassignmentWorkspace_();
+      } else {
+        renderEngineUI_();
+      }
+    });
+
+    injectStyles_();
+    window.ReassignmentEngine.initialize();
+    renderEngineUI_();
+
+    console.info("ReassignmentEngine pilot active in Developer Mode.");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
