@@ -1,0 +1,106 @@
+// Personnel Platform — reusable DirectoryEngine
+// Owns the shared Camp and Office destination directory without legacy reassignment dependencies.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const DEFAULT_CAMPS = Object.freeze([
+    "NBP",
+    "MAXIMUM",
+    "MEDIUM",
+    "MINIMUM",
+    "RDC",
+  ]);
+
+  const DEFAULT_OFFICES = Object.freeze([
+    "CAMP COMMANDER",
+    "CASO",
+    "COMMAND CENTER",
+    "EAS",
+    "ESCORT",
+    "ESCORT GROUP",
+    "EXTERNAL AFFAIRS SECTION",
+    "EXTERNAL SECURITY SERVICES",
+    "IIS",
+    "IVSU",
+    "NBPH",
+    "OFFICE OF THE SUPERINTENDENT",
+    "SEPARATION CENTER",
+  ]);
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function sortedUnique(values) {
+    const map = new Map();
+    (values || []).forEach(value => {
+      const clean = text(value);
+      if (clean) map.set(clean.toUpperCase(), clean);
+    });
+    return [...map.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  function rosterRecords() {
+    return Array.isArray(window.PersonnelState?.records)
+      ? window.PersonnelState.records
+      : [];
+  }
+
+  const DirectoryEngine = {
+    version: "1.0.0",
+
+    camps(extra = []) {
+      return sortedUnique([
+        ...DEFAULT_CAMPS,
+        ...rosterRecords().map(row => row?.Camp ?? row?.CAMP ?? row?.camp),
+        ...(extra || []),
+      ]);
+    },
+
+    offices(extra = []) {
+      return sortedUnique([
+        ...DEFAULT_OFFICES,
+        ...rosterRecords().map(row => row?.Office ?? row?.OFFICE ?? row?.office),
+        ...(extra || []),
+      ]);
+    },
+
+    getDirectory(extra = {}) {
+      return {
+        camps: this.camps(extra.camps),
+        offices: this.offices(extra.offices),
+      };
+    },
+
+    status() {
+      const directory = this.getDirectory();
+      const report = {
+        version: this.version,
+        camps: directory.camps.length,
+        offices: directory.offices.length,
+        source: "defaults + personnel roster",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("directory")) platform.engines.replace("directory", DirectoryEngine);
+  else platform.engines.register("directory", DirectoryEngine);
+
+  window.$PF.directory = DirectoryEngine;
+
+  // Temporary compatibility facade for V1 modules while their direct lookup is
+  // migrated to $PF.directory. This is not the legacy ReassignmentEngine.
+  if (!window.ReassignmentEngine) window.ReassignmentEngine = {};
+  window.ReassignmentEngine.getDirectory = () => DirectoryEngine.getDirectory();
+  window.ReassignmentEngine.__platformDirectoryFacade = true;
+
+  console.info("DirectoryEngine v1.0.0 active. Legacy reassignment directory is detached.");
+})();
