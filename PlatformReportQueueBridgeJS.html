@@ -1,0 +1,100 @@
+// Personnel Platform — Report-to-TransferQueue bridge
+// A preview is only a draft. Transfer movements are queued only after
+// ReportEngine records a successful GENERATED result.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  let lastQueuedDraftId = "";
+  let lastAction = "";
+  let lastAt = "";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function removeManualQueueAction() {
+    document
+      .querySelectorAll('[data-pf-report-preview="queue"]')
+      .forEach(button => button.remove());
+  }
+
+  function queueGeneratedReport(event = {}) {
+    if (text(event.status).toUpperCase() !== "GENERATED") return null;
+
+    const draftId = text(event.id || event.draftId);
+    if (!draftId) return null;
+
+    const draft = report.get(draftId);
+    const plugin = window.$PF?.transferQueuePlugin;
+    if (!draft || !plugin?.enqueueDraft) return null;
+
+    const entry = plugin.enqueueDraft(draft);
+    lastQueuedDraftId = draftId;
+    lastAction = "QUEUED_AFTER_REPORT_SUCCESS";
+    lastAt = new Date().toISOString();
+
+    platform.events.emit("report:transfer-queued", {
+      reportDraftId: draftId,
+      queueEntry: entry,
+    });
+
+    console.info("Successful report added to Transfer Queue.", {
+      draftId,
+      queueEntryId: entry?.id,
+    });
+
+    return entry;
+  }
+
+  // The preview UI is rendered dynamically, so remove its old manual queue
+  // action after each preview render and whenever the dialog DOM changes.
+  platform.events.on("report:preview-ready", () => {
+    queueMicrotask(removeManualQueueAction);
+  });
+
+  const observer = new MutationObserver(removeManualQueueAction);
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  removeManualQueueAction();
+
+  platform.events.on("report:completed", queueGeneratedReport);
+
+  const ReportQueueBridge = {
+    version: "1.0.0",
+    mode: "SUCCESS_ONLY",
+    queueGeneratedReport,
+    removeManualQueueAction,
+    status() {
+      const state = {
+        version: this.version,
+        mode: this.mode,
+        manualQueueButton: Boolean(
+          document.querySelector('[data-pf-report-preview="queue"]')
+        ),
+        lastQueuedDraftId: lastQueuedDraftId || "—",
+        lastAction: lastAction || "—",
+        lastAt: lastAt || "—",
+      };
+      console.table(state);
+      return state;
+    },
+  };
+
+  if (platform.engines.has("reportQueueBridge")) {
+    platform.engines.replace("reportQueueBridge", ReportQueueBridge);
+  } else {
+    platform.engines.register("reportQueueBridge", ReportQueueBridge);
+  }
+
+  window.$PF.reportQueueBridge = ReportQueueBridge;
+  console.info(
+    "ReportQueueBridge v1.0.0 active. Transfer Queue receives GENERATED reports only."
+  );
+})();
