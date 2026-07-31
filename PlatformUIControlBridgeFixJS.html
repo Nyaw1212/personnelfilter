@@ -1,5 +1,5 @@
-// Personnel Platform — final UI control bridge
-// Routes legacy-rendered controls to clean engines and paints AO cell state directly.
+// Personnel Platform — passive UI control bridge
+// Leaves legacy AO buttons untouched and connects only clean platform entry points.
 
 (function () {
   "use strict";
@@ -7,137 +7,59 @@
   const platform = window.PersonnelPlatform;
   if (!platform) return;
 
-  function text(value) {
-    return String(value == null ? "" : value).trim();
-  }
-
   function selection() {
     return platform.engines.get("selection");
   }
 
-  function recordForCell(cell) {
-    const row = cell.closest("#previewTableBody tr");
-    const body = row?.parentElement;
-    if (!row || !body) return null;
-    const index = [...body.querySelectorAll(":scope > tr")].indexOf(row);
-    const records = Array.isArray(window.PersonnelState?.filteredRecords)
-      ? window.PersonnelState.filteredRecords
-      : [];
-    return index >= 0 ? records[index] || null : null;
+  function syncSelectionSoon() {
+    setTimeout(() => {
+      selection()?.syncFromLegacy?.();
+      window.$PF?.reportLauncher?.install?.();
+    }, 0);
   }
 
-  function keyForRecord(record) {
-    if (!record) return "";
-    if (typeof window.getAoPersonnelKey_ === "function") {
-      return window.getAoPersonnelKey_(record);
-    }
-    return `row:${record.__sheetRow || record.rowIndex || record["Full Name"] || ""}`;
-  }
-
-  function itemForRecord(record) {
-    return typeof window.normalizeAoPersonnel_ === "function"
-      ? window.normalizeAoPersonnel_(record)
-      : { record };
-  }
-
-  function paintCell(cell, isSelected) {
-    cell.classList.toggle("is-selected", isSelected);
-    cell.setAttribute("role", "button");
-    cell.setAttribute("tabindex", "0");
-    cell.setAttribute("aria-pressed", isSelected ? "true" : "false");
-    cell.textContent = isSelected ? "✓ Added" : "+ Add";
-  }
-
-  function paintAllCells() {
-    const engine = selection();
-    if (!engine) return;
-    document.querySelectorAll("#previewTableBody .ao-selection-cell").forEach(cell => {
-      const record = recordForCell(cell);
-      const key = keyForRecord(record);
-      if (key) paintCell(cell, engine.has("ao-cart", key));
-    });
-  }
-
-  function refreshCounters() {
-    if (typeof window.updateAoCartCount_ === "function") window.updateAoCartCount_();
-    if (typeof window.updateReportGeneratorButton_ === "function") window.updateReportGeneratorButton_();
-  }
-
-  function toggleCell(cell) {
-    const engine = selection();
-    const record = recordForCell(cell);
-    const key = keyForRecord(record);
-    if (!engine || !record || !key) return;
-
-    engine.toggle("ao-cart", key, itemForRecord(record));
-    paintCell(cell, engine.has("ao-cart", key));
-    refreshCounters();
-  }
-
+  // Observe legacy AO controls after their original handlers run. Do not prevent,
+  // repaint, rerender, or change PersonnelState here.
   document.addEventListener("click", event => {
-    const cell = event.target.closest?.("#previewTableBody .ao-selection-cell");
-    if (!cell) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    toggleCell(cell);
-  }, true);
+    const target = event.target.closest?.(
+      "#previewTableBody .ao-selection-cell, " +
+      "#addAllVisibleAoButton, #removeAllVisibleAoButton, #deselectAllAoButton"
+    );
+    if (target) syncSelectionSoon();
+  }, false);
 
-  document.addEventListener("keydown", event => {
-    const cell = event.target.closest?.("#previewTableBody .ao-selection-cell");
-    if (!cell || !["Enter", " "].includes(event.key)) return;
-    event.preventDefault();
-    toggleCell(cell);
-  }, true);
-
+  // Route the existing header button to the clean Transfer Queue plugin while
+  // preventing its legacy queue dialog from opening.
   document.addEventListener("click", event => {
     const button = event.target.closest?.("#openTransferQueueButton");
     if (!button) return;
     const plugin = window.$PF?.transferQueuePlugin;
     if (!plugin?.open) return;
+
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
     plugin.open();
   }, true);
 
-  platform.events.on("selection:changed", () => {
-    queueMicrotask(() => {
-      paintAllCells();
-      refreshCounters();
-      window.$PF?.reportLauncher?.install?.();
-    });
-  });
-
-  const originalRender = window.renderPreviewTable;
-  if (typeof originalRender === "function" && !originalRender.platformPaintPatched) {
-    function patchedRenderPreviewTable() {
-      const result = originalRender.apply(this, arguments);
-      queueMicrotask(paintAllCells);
-      return result;
-    }
-    patchedRenderPreviewTable.platformPaintPatched = true;
-    window.renderPreviewTable = patchedRenderPreviewTable;
-  }
-
-  queueMicrotask(paintAllCells);
-
   window.$PF.uiControlBridge = {
-    version: "1.2.0",
-    paint: paintAllCells,
+    version: "2.0.0",
+    mode: "PASSIVE",
+    syncSelection: syncSelectionSoon,
     status() {
       const result = {
         version: this.version,
-        selection: Boolean(selection()),
+        mode: this.mode,
+        selectionMode: selection()?.mode || "—",
         reportLauncher: Boolean(window.$PF?.reportLauncher),
         transferQueuePlugin: Boolean(window.$PF?.transferQueuePlugin),
         transferQueueButton: Boolean(document.getElementById("openTransferQueueButton")),
-        aoSelectionCells: document.querySelectorAll("#previewTableBody .ao-selection-cell").length,
+        aoInterception: false,
       };
       console.table(result);
       return result;
     },
   };
 
-  console.info("Platform UI control bridge v1.2.0 active.");
+  console.info("Platform UI control bridge v2.0.0 active in passive mode.");
 })();
