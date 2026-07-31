@@ -1,0 +1,155 @@
+// Personnel Platform — reusable TransferQueueEngine
+// Developer Mode foundation. Owns queued personnel-transfer requests only.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const entries = new Map();
+  let sequence = 0;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function clone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizeStatus(value) {
+    const status = text(value).toUpperCase();
+    return ["PENDING", "APPROVED", "APPLIED", "CANCELLED", "FAILED"].includes(status)
+      ? status
+      : "PENDING";
+  }
+
+  function makeId() {
+    return `TRQ-${Date.now()}-${++sequence}`;
+  }
+
+  function save(entry, action) {
+    entries.set(entry.id, entry);
+    platform.events.emit("transfer-queue:changed", { action, entry: clone(entry) });
+    platform.events.emit(`transfer-queue:changed:${entry.id}`, { action, entry: clone(entry) });
+    return clone(entry);
+  }
+
+  const TransferQueueEngine = {
+    version: "1.0.0",
+
+    enqueue(input = {}) {
+      const now = new Date().toISOString();
+      const entry = {
+        id: text(input.id) || makeId(),
+        sourcePlugin: text(input.sourcePlugin || input.pluginId),
+        reportDraftId: text(input.reportDraftId),
+        reportType: text(input.reportType).toUpperCase(),
+        status: normalizeStatus(input.status),
+        personnel: clone(Array.isArray(input.personnel) ? input.personnel : []),
+        metadata: clone(input.metadata || {}),
+        payload: clone(input.payload || {}),
+        note: text(input.note),
+        createdAt: input.createdAt || now,
+        updatedAt: now,
+      };
+      if (entries.has(entry.id)) throw new Error(`Transfer queue entry ${entry.id} already exists.`);
+      return save(entry, "ENQUEUE");
+    },
+
+    get(id) {
+      const entry = entries.get(text(id));
+      return entry ? clone(entry) : null;
+    },
+
+    list(options = {}) {
+      const status = text(options.status).toUpperCase();
+      return [...entries.values()]
+        .filter(entry => !status || entry.status === status)
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+        .map(clone);
+    },
+
+    update(id, patch = {}) {
+      const key = text(id);
+      const entry = entries.get(key);
+      if (!entry) throw new Error(`Transfer queue entry ${key || "—"} was not found.`);
+      const next = {
+        ...entry,
+        ...clone(patch),
+        id: entry.id,
+        status: patch.status == null ? entry.status : normalizeStatus(patch.status),
+        note: patch.note == null ? entry.note : text(patch.note),
+        updatedAt: new Date().toISOString(),
+      };
+      return save(next, "UPDATE");
+    },
+
+    approve(id, note = "") {
+      return this.update(id, { status: "APPROVED", note });
+    },
+
+    markApplied(id, result = {}) {
+      return this.update(id, { status: "APPLIED", result: clone(result) });
+    },
+
+    cancel(id, note = "") {
+      return this.update(id, { status: "CANCELLED", note });
+    },
+
+    fail(id, error) {
+      return this.update(id, {
+        status: "FAILED",
+        error: error?.message || text(error),
+      });
+    },
+
+    remove(id) {
+      const key = text(id);
+      const removed = entries.delete(key);
+      if (removed) platform.events.emit("transfer-queue:removed", { id: key });
+      return removed;
+    },
+
+    clear(options = {}) {
+      const status = text(options.status).toUpperCase();
+      if (!status) {
+        const count = entries.size;
+        entries.clear();
+        platform.events.emit("transfer-queue:cleared", { count, status: "ALL" });
+        return count;
+      }
+      let count = 0;
+      [...entries.entries()].forEach(([id, entry]) => {
+        if (entry.status === status) {
+          entries.delete(id);
+          count += 1;
+        }
+      });
+      platform.events.emit("transfer-queue:cleared", { count, status });
+      return count;
+    },
+
+    status() {
+      const values = [...entries.values()];
+      const report = {
+        version: this.version,
+        total: values.length,
+        pending: values.filter(item => item.status === "PENDING").length,
+        approved: values.filter(item => item.status === "APPROVED").length,
+        applied: values.filter(item => item.status === "APPLIED").length,
+        cancelled: values.filter(item => item.status === "CANCELLED").length,
+        failed: values.filter(item => item.status === "FAILED").length,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("transferQueue")) platform.engines.replace("transferQueue", TransferQueueEngine);
+  else platform.engines.register("transferQueue", TransferQueueEngine);
+
+  window.$PF.transferQueue = TransferQueueEngine;
+  console.info("TransferQueueEngine v1.0.0 active. Run $PF.transferQueue.status().");
+})();
