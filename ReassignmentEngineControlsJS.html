@@ -1,0 +1,66 @@
+//----------------------------------
+// Reassignment Engine — Controls (Developer Mode pilot)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function dispatchFromElement_(element) {
+    if (!element || !window.ReassignmentEngine) return;
+
+    window.ReassignmentEngine.dispatch({
+      type: element.dataset.engineAction,
+      value: element.dataset.value || "",
+      key: element.dataset.personKey || "",
+      groupId: element.dataset.groupId || "",
+    });
+  }
+
+  document.addEventListener(
+    "click",
+    event => {
+      const control = event.target.closest("[data-engine-action]");
+      if (!control) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dispatchFromElement_(control);
+    },
+    true
+  );
+
+  document.addEventListener("input", event => {
+    const input = event.target.closest("[data-engine-input]");
+    if (!input || !window.ReassignmentEngine) return;
+
+    window.ReassignmentEngine.dispatch({
+      type: input.dataset.engineInput,
+      value: input.value,
+    });
+  });
+
+  document.addEventListener("keydown", event => {
+    const target = event.target;
+    const typing = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+
+    if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      window.ReassignmentEngine?.dispatch({ type: "UNDO" });
+      return;
+    }
+
+    if (
+      (event.ctrlKey && event.key.toLowerCase() === "y") ||
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "z")
+    ) {
+      event.preventDefault();
+      window.ReassignmentEngine?.dispatch({ type: "REDO" });
+      return;
+    }
+
+    if (!typing && event.key === "Enter") {
+      event.preventDefault();
+      window.ReassignmentEngine?.dispatch({ type: "ASSIGN_SELECTED" });
+    }
+  });
+})();
