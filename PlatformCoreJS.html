@@ -1,0 +1,253 @@
+//----------------------------------
+// Personnel Platform Core — Developer Mode foundation
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function createEventBus_() {
+    const listeners = new Map();
+    return {
+      on(eventName, listener) {
+        const name = text_(eventName);
+        if (!name || typeof listener !== "function") return () => {};
+        if (!listeners.has(name)) listeners.set(name, new Set());
+        listeners.get(name).add(listener);
+        return () => listeners.get(name)?.delete(listener);
+      },
+      emit(eventName, payload) {
+        const name = text_(eventName);
+        (listeners.get(name) || []).forEach(listener => listener(payload));
+      },
+      clear(eventName) {
+        if (eventName) listeners.delete(text_(eventName));
+        else listeners.clear();
+      },
+    };
+  }
+
+  function createRegistry_(kind) {
+    const entries = new Map();
+    return {
+      register(id, value) {
+        const key = text_(id);
+        if (!key) throw new Error(`${kind} id is required.`);
+        if (!value) throw new Error(`${kind} "${key}" is required.`);
+        if (entries.has(key)) throw new Error(`${kind} "${key}" is already registered.`);
+        entries.set(key, value);
+        return value;
+      },
+      replace(id, value) {
+        const key = text_(id);
+        if (!key) throw new Error(`${kind} id is required.`);
+        entries.set(key, value);
+        return value;
+      },
+      get(id) {
+        return entries.get(text_(id));
+      },
+      require(id) {
+        const key = text_(id);
+        if (!entries.has(key)) throw new Error(`Missing ${kind.toLowerCase()} "${key}".`);
+        return entries.get(key);
+      },
+      has(id) {
+        return entries.has(text_(id));
+      },
+      list() {
+        return [...entries.keys()];
+      },
+    };
+  }
+
+  const EventBus = createEventBus_();
+  const EngineRegistry = createRegistry_("Engine");
+
+  const StateEngine = {
+    scopes: new Map(),
+    createScope(scopeId, initialState = {}) {
+      const id = text_(scopeId);
+      if (!id) throw new Error("State scope id is required.");
+      if (!this.scopes.has(id)) this.scopes.set(id, structuredClone(initialState));
+      return this.scopes.get(id);
+    },
+    get(scopeId) {
+      return this.scopes.get(text_(scopeId));
+    },
+    set(scopeId, nextState) {
+      const id = text_(scopeId);
+      this.scopes.set(id, nextState);
+      EventBus.emit("state:changed", { scopeId: id, state: nextState });
+      EventBus.emit(`state:changed:${id}`, nextState);
+      return nextState;
+    },
+    update(scopeId, updater) {
+      const id = text_(scopeId);
+      const current = this.get(id) || {};
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return this.set(id, next);
+    },
+    clear(scopeId) {
+      const id = text_(scopeId);
+      this.scopes.delete(id);
+      EventBus.emit("state:cleared", { scopeId: id });
+    },
+    list() {
+      return [...this.scopes.keys()];
+    },
+  };
+
+  const StoreEngine = {
+    key(namespace, key) {
+      return `personnelPlatform:${text_(namespace)}:${text_(key)}`;
+    },
+    save(namespace, key, value) {
+      localStorage.setItem(this.key(namespace, key), JSON.stringify(value));
+      return value;
+    },
+    load(namespace, key, fallback = null) {
+      try {
+        const raw = localStorage.getItem(this.key(namespace, key));
+        return raw === null ? fallback : JSON.parse(raw);
+      } catch (error) {
+        console.warn("StoreEngine load failed:", error);
+        return fallback;
+      }
+    },
+    remove(namespace, key) {
+      localStorage.removeItem(this.key(namespace, key));
+    },
+    clearNamespace(namespace) {
+      const prefix = `personnelPlatform:${text_(namespace)}:`;
+      Object.keys(localStorage)
+        .filter(key => key.startsWith(prefix))
+        .forEach(key => localStorage.removeItem(key));
+    },
+  };
+
+  const CommandBus = {
+    handlers: new Map(),
+    register(type, handler) {
+      const commandType = text_(type).toUpperCase();
+      if (!commandType || typeof handler !== "function") {
+        throw new Error("Command type and handler are required.");
+      }
+      this.handlers.set(commandType, handler);
+    },
+    dispatch(command) {
+      const type = text_(command?.type).toUpperCase();
+      const handler = this.handlers.get(type);
+      if (!handler) throw new Error(`No command handler registered for "${type}".`);
+      const result = handler(command);
+      EventBus.emit("command:dispatched", { command, result });
+      return result;
+    },
+    has(type) {
+      return this.handlers.has(text_(type).toUpperCase());
+    },
+    list() {
+      return [...this.handlers.keys()];
+    },
+  };
+
+  const PluginHost = {
+    plugins: new Map(),
+    register(plugin) {
+      const id = text_(plugin?.id);
+      if (!id) throw new Error("Plugin id is required.");
+      if (this.plugins.has(id)) throw new Error(`Plugin "${id}" is already registered.`);
+
+      const required = Array.isArray(plugin.requires) ? plugin.requires : [];
+      const missing = required.filter(engineId => !EngineRegistry.has(engineId));
+      if (missing.length) {
+        throw new Error(`Plugin "${id}" missing engines: ${missing.join(", ")}`);
+      }
+
+      const record = { plugin, active: false };
+      this.plugins.set(id, record);
+      plugin.install?.(this.context(id));
+      EventBus.emit("plugin:registered", { id });
+      return plugin;
+    },
+    activate(id) {
+      const key = text_(id);
+      const record = this.plugins.get(key);
+      if (!record) throw new Error(`Plugin "${key}" is not registered.`);
+      if (!record.active) {
+        record.plugin.activate?.(this.context(key));
+        record.active = true;
+        EventBus.emit("plugin:activated", { id: key });
+      }
+      return record.plugin;
+    },
+    deactivate(id) {
+      const key = text_(id);
+      const record = this.plugins.get(key);
+      if (!record) return;
+      if (record.active) {
+        record.plugin.deactivate?.(this.context(key));
+        record.active = false;
+        EventBus.emit("plugin:deactivated", { id: key });
+      }
+    },
+    get(id) {
+      return this.plugins.get(text_(id))?.plugin;
+    },
+    list() {
+      return [...this.plugins.entries()].map(([id, record]) => ({
+        id,
+        name: record.plugin.name || id,
+        version: record.plugin.version || "0.0.0",
+        active: record.active,
+        requires: record.plugin.requires || [],
+      }));
+    },
+    context(pluginId) {
+      return {
+        pluginId,
+        services: new Proxy({}, {
+          get(_target, property) {
+            return EngineRegistry.require(String(property));
+          },
+        }),
+        state: StateEngine,
+        store: StoreEngine,
+        commands: CommandBus,
+        events: EventBus,
+      };
+    },
+  };
+
+  EngineRegistry.register("state", StateEngine);
+  EngineRegistry.register("store", StoreEngine);
+  EngineRegistry.register("commands", CommandBus);
+  EngineRegistry.register("events", EventBus);
+
+  window.PersonnelPlatform = {
+    version: "0.1.0",
+    engines: EngineRegistry,
+    plugins: PluginHost,
+    commands: CommandBus,
+    events: EventBus,
+    state: StateEngine,
+    store: StoreEngine,
+    status() {
+      const report = {
+        version: this.version,
+        engines: EngineRegistry.list(),
+        plugins: PluginHost.list(),
+        scopes: StateEngine.list(),
+        commands: CommandBus.list(),
+      };
+      console.log("[PersonnelPlatform]", report);
+      return report;
+    },
+  };
+
+  window.$PF = window.PersonnelPlatform;
+  console.info("PersonnelPlatform core active. Run $PF.status().");
+})();
