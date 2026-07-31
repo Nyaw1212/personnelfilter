@@ -23,8 +23,8 @@
     }
   }
 
-  function recordForPreviewButton(button) {
-    const row = button.closest("#previewTableBody tr");
+  function recordForPreviewControl(control) {
+    const row = control.closest("#previewTableBody tr");
     const body = row?.parentElement;
     if (!row || !body) return null;
 
@@ -38,17 +38,26 @@
     return records[index] || null;
   }
 
-  // Capture before legacy row-button listeners. The SelectionEngine is canonical;
-  // the legacy AO cart is mirrored by SelectionEngine v2.
-  document.addEventListener("click", event => {
-    const button = event.target.closest?.("#previewTableBody tr button");
-    if (!button) return;
+  function isAoSelectionControl(node) {
+    if (!node) return false;
+    if (node.matches?.("button, [role='button']")) return true;
+    return node.classList?.contains("ao-selection-cell") || false;
+  }
 
-    const label = text(button.textContent).toLowerCase();
+  // The current table renderer places the AO action on the table cell itself,
+  // not always on a nested button. Capture the whole AO selection cell before
+  // legacy listeners and route the state change through SelectionEngine.
+  document.addEventListener("click", event => {
+    const control = event.target.closest?.(
+      "#previewTableBody .ao-selection-cell, #previewTableBody tr button"
+    );
+    if (!isAoSelectionControl(control)) return;
+
+    const label = text(control.textContent).toLowerCase();
     if (!label.includes("add") && !label.includes("added")) return;
 
     const selection = platform.engines.get("selection");
-    const record = recordForPreviewButton(button);
+    const record = recordForPreviewControl(control);
     if (!selection || !record) return;
 
     event.preventDefault();
@@ -63,7 +72,10 @@
       : { record };
 
     selection.toggle("ao-cart", key, item);
-    refreshPersonnelUI();
+
+    // SelectionEngine mirrors to PersonnelState synchronously. Render on the
+    // next microtask so the new Add/Added state is painted from canonical data.
+    queueMicrotask(refreshPersonnelUI);
   }, true);
 
   // The header button existed before the clean Transfer Queue plugin and still
@@ -89,7 +101,7 @@
   });
 
   window.$PF.uiControlBridge = {
-    version: "1.0.0",
+    version: "1.1.0",
     refresh: refreshPersonnelUI,
     status() {
       const result = {
@@ -98,11 +110,12 @@
         reportLauncher: Boolean(window.$PF?.reportLauncher),
         transferQueuePlugin: Boolean(window.$PF?.transferQueuePlugin),
         transferQueueButton: Boolean(document.getElementById("openTransferQueueButton")),
+        aoSelectionCells: document.querySelectorAll("#previewTableBody .ao-selection-cell").length,
       };
       console.table(result);
       return result;
     },
   };
 
-  console.info("Platform UI control bridge v1.0.0 active.");
+  console.info("Platform UI control bridge v1.1.0 active.");
 })();
