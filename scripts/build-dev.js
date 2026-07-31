@@ -69,6 +69,7 @@ function appJsBundle() {
     "PlatformTransferApplyLocalJS.html",
     "TransferQueuePluginV1JS.html",
     "PlatformReportPreviewUIJS.html",
+    "PlatformReportGenerationBridgeJS.html",
     "PlatformReportQueueBridgeJS.html",
     "ReassignmentPluginV1JS.html",
     "ReassignmentPluginV1GroupChangeFixJS.html",
