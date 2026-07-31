@@ -1,5 +1,5 @@
 // Personnel Platform — final UI control bridge
-// Keeps legacy-rendered Personnel Filter controls routed to clean platform engines/plugins.
+// Routes legacy-rendered controls to clean engines and paints AO cell state directly.
 
 (function () {
   "use strict";
@@ -11,102 +11,124 @@
     return String(value == null ? "" : value).trim();
   }
 
-  function refreshPersonnelUI() {
-    if (typeof window.renderPreviewTable === "function") {
-      window.renderPreviewTable();
-    }
-    if (typeof window.updateAoCartCount_ === "function") {
-      window.updateAoCartCount_();
-    }
-    if (typeof window.updateReportGeneratorButton_ === "function") {
-      window.updateReportGeneratorButton_();
-    }
+  function selection() {
+    return platform.engines.get("selection");
   }
 
-  function recordForPreviewControl(control) {
-    const row = control.closest("#previewTableBody tr");
+  function recordForCell(cell) {
+    const row = cell.closest("#previewTableBody tr");
     const body = row?.parentElement;
     if (!row || !body) return null;
-
-    const rows = [...body.querySelectorAll(":scope > tr")];
-    const index = rows.indexOf(row);
-    if (index < 0) return null;
-
+    const index = [...body.querySelectorAll(":scope > tr")].indexOf(row);
     const records = Array.isArray(window.PersonnelState?.filteredRecords)
       ? window.PersonnelState.filteredRecords
       : [];
-    return records[index] || null;
+    return index >= 0 ? records[index] || null : null;
   }
 
-  function isAoSelectionControl(node) {
-    if (!node) return false;
-    if (node.matches?.("button, [role='button']")) return true;
-    return node.classList?.contains("ao-selection-cell") || false;
+  function keyForRecord(record) {
+    if (!record) return "";
+    if (typeof window.getAoPersonnelKey_ === "function") {
+      return window.getAoPersonnelKey_(record);
+    }
+    return `row:${record.__sheetRow || record.rowIndex || record["Full Name"] || ""}`;
   }
 
-  // The current table renderer places the AO action on the table cell itself,
-  // not always on a nested button. Capture the whole AO selection cell before
-  // legacy listeners and route the state change through SelectionEngine.
+  function itemForRecord(record) {
+    return typeof window.normalizeAoPersonnel_ === "function"
+      ? window.normalizeAoPersonnel_(record)
+      : { record };
+  }
+
+  function paintCell(cell, isSelected) {
+    cell.classList.toggle("is-selected", isSelected);
+    cell.setAttribute("role", "button");
+    cell.setAttribute("tabindex", "0");
+    cell.setAttribute("aria-pressed", isSelected ? "true" : "false");
+    cell.textContent = isSelected ? "✓ Added" : "+ Add";
+  }
+
+  function paintAllCells() {
+    const engine = selection();
+    if (!engine) return;
+    document.querySelectorAll("#previewTableBody .ao-selection-cell").forEach(cell => {
+      const record = recordForCell(cell);
+      const key = keyForRecord(record);
+      if (key) paintCell(cell, engine.has("ao-cart", key));
+    });
+  }
+
+  function refreshCounters() {
+    if (typeof window.updateAoCartCount_ === "function") window.updateAoCartCount_();
+    if (typeof window.updateReportGeneratorButton_ === "function") window.updateReportGeneratorButton_();
+  }
+
+  function toggleCell(cell) {
+    const engine = selection();
+    const record = recordForCell(cell);
+    const key = keyForRecord(record);
+    if (!engine || !record || !key) return;
+
+    engine.toggle("ao-cart", key, itemForRecord(record));
+    paintCell(cell, engine.has("ao-cart", key));
+    refreshCounters();
+  }
+
   document.addEventListener("click", event => {
-    const control = event.target.closest?.(
-      "#previewTableBody .ao-selection-cell, #previewTableBody tr button"
-    );
-    if (!isAoSelectionControl(control)) return;
-
-    const label = text(control.textContent).toLowerCase();
-    if (!label.includes("add") && !label.includes("added")) return;
-
-    const selection = platform.engines.get("selection");
-    const record = recordForPreviewControl(control);
-    if (!selection || !record) return;
-
+    const cell = event.target.closest?.("#previewTableBody .ao-selection-cell");
+    if (!cell) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-
-    const key = typeof window.getAoPersonnelKey_ === "function"
-      ? window.getAoPersonnelKey_(record)
-      : `row:${record.__sheetRow || record.rowIndex || record["Full Name"] || Date.now()}`;
-    const item = typeof window.normalizeAoPersonnel_ === "function"
-      ? window.normalizeAoPersonnel_(record)
-      : { record };
-
-    selection.toggle("ao-cart", key, item);
-
-    // SelectionEngine mirrors to PersonnelState synchronously. Render on the
-    // next microtask so the new Add/Added state is painted from canonical data.
-    queueMicrotask(refreshPersonnelUI);
+    toggleCell(cell);
   }, true);
 
-  // The header button existed before the clean Transfer Queue plugin and still
-  // carries a legacy addEventListener. Capture and route it to Plugin V1.
+  document.addEventListener("keydown", event => {
+    const cell = event.target.closest?.("#previewTableBody .ao-selection-cell");
+    if (!cell || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    toggleCell(cell);
+  }, true);
+
   document.addEventListener("click", event => {
     const button = event.target.closest?.("#openTransferQueueButton");
     if (!button) return;
     const plugin = window.$PF?.transferQueuePlugin;
     if (!plugin?.open) return;
-
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
     plugin.open();
   }, true);
 
-  // Keep the report launcher attached to the live toolbar after table rerenders.
   platform.events.on("selection:changed", () => {
     queueMicrotask(() => {
+      paintAllCells();
+      refreshCounters();
       window.$PF?.reportLauncher?.install?.();
-      refreshPersonnelUI();
     });
   });
 
+  const originalRender = window.renderPreviewTable;
+  if (typeof originalRender === "function" && !originalRender.platformPaintPatched) {
+    function patchedRenderPreviewTable() {
+      const result = originalRender.apply(this, arguments);
+      queueMicrotask(paintAllCells);
+      return result;
+    }
+    patchedRenderPreviewTable.platformPaintPatched = true;
+    window.renderPreviewTable = patchedRenderPreviewTable;
+  }
+
+  queueMicrotask(paintAllCells);
+
   window.$PF.uiControlBridge = {
-    version: "1.1.0",
-    refresh: refreshPersonnelUI,
+    version: "1.2.0",
+    paint: paintAllCells,
     status() {
       const result = {
         version: this.version,
-        selection: Boolean(platform.engines.get("selection")),
+        selection: Boolean(selection()),
         reportLauncher: Boolean(window.$PF?.reportLauncher),
         transferQueuePlugin: Boolean(window.$PF?.transferQueuePlugin),
         transferQueueButton: Boolean(document.getElementById("openTransferQueueButton")),
@@ -117,5 +139,5 @@
     },
   };
 
-  console.info("Platform UI control bridge v1.1.0 active.");
+  console.info("Platform UI control bridge v1.2.0 active.");
 })();
