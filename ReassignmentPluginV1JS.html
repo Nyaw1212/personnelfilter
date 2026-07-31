@@ -1,0 +1,329 @@
+// Reassignment Plugin v1 — clean body built on AssignmentCore
+// Developer Mode only. Does not read or write legacy ReassignmentState.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const selection = platform?.engines?.get?.("selection");
+  if (!platform || !engine || !selection) return;
+
+  const PLUGIN_ID = "reassignment-v1";
+  const SCOPE = "reassignment-v1";
+  const ROOT_ID = "reassignmentPluginV1Root";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function personnelEntries() {
+    const items = selection.items?.("ao-cart") || new Map();
+    return [...items.entries()];
+  }
+
+  function personName(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName || "Unnamed Personnel");
+  }
+
+  function personRank(item) {
+    return text(item?.rank || item?.record?.Rank);
+  }
+
+  function personOffice(item) {
+    return text(item?.office || item?.record?.Office);
+  }
+
+  function personCamp(item) {
+    return text(item?.camp || item?.record?.Camp);
+  }
+
+  function directory() {
+    const records = Array.isArray(window.PersonnelState?.records) ? window.PersonnelState.records : [];
+    const camps = [...new Set(records.map(row => text(row.Camp)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const offices = [...new Set(records.map(row => text(row.Office)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return { camps, offices };
+  }
+
+  function state() {
+    return engine.get(SCOPE);
+  }
+
+  function participantMap() {
+    return new Map(state().participants || []);
+  }
+
+  function unassignedEntries() {
+    const assigned = new Set((state().assignments || []).map(([key]) => key));
+    return (state().participants || []).filter(([key]) => !assigned.has(key));
+  }
+
+  function installStyles() {
+    if (document.getElementById("reassignmentPluginV1Styles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1Styles";
+    style.textContent = `
+      #${ROOT_ID} { position: fixed; inset: 0; z-index: 99999; background: #eef8ef; color: #153c21; overflow: auto; font-family: inherit; }
+      #${ROOT_ID}[hidden] { display: none !important; }
+      .rp1-shell { min-height: 100%; padding: 14px; box-sizing: border-box; }
+      .rp1-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border:1px solid #c9decf; border-radius:16px; background:#f8fcf8; }
+      .rp1-title { margin:0; font-size:24px; }
+      .rp1-kicker { font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+      .rp1-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .rp1-btn { border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px 13px; font:inherit; font-weight:700; cursor:pointer; }
+      .rp1-btn.primary { background:#ffe600; border-color:#d9c700; }
+      .rp1-btn.active { background:#236b39; color:white; border-color:#236b39; }
+      .rp1-btn:disabled { opacity:.45; cursor:not-allowed; }
+      .rp1-grid { display:grid; grid-template-columns:minmax(290px, 1.05fr) minmax(230px,.72fr) minmax(420px,2fr); gap:12px; margin-top:12px; min-height:calc(100vh - 115px); }
+      .rp1-panel { border:1px solid #c9decf; border-radius:16px; background:#f8fcf8; padding:14px; min-width:0; }
+      .rp1-panel h2 { margin:4px 0 14px; font-size:20px; }
+      .rp1-toolbar { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+      .rp1-list { display:flex; flex-direction:column; gap:7px; }
+      .rp1-person { display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:10px; background:white; border:1px solid #e1eee4; cursor:pointer; }
+      .rp1-person-main { min-width:0; flex:1; }
+      .rp1-person-name { font-weight:800; line-height:1.15; }
+      .rp1-person-sub { font-size:11px; opacity:.72; margin-top:2px; }
+      .rp1-search { width:100%; box-sizing:border-box; border:1px solid #c5d9ca; border-radius:10px; padding:10px; margin-bottom:10px; font:inherit; }
+      .rp1-chip-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; max-height:430px; overflow:auto; padding-right:3px; }
+      .rp1-chip { text-align:left; border:1px solid #c5d9ca; border-radius:10px; background:#fff; padding:9px; font:inherit; font-weight:700; cursor:pointer; overflow-wrap:anywhere; }
+      .rp1-chip.active { background:#236b39; color:white; }
+      .rp1-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; align-content:start; }
+      .rp1-group { border:1px solid #c9decf; border-radius:14px; background:white; min-height:230px; padding:10px; }
+      .rp1-group-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:10px; }
+      .rp1-group-title { font-weight:900; }
+      .rp1-assigned { display:flex; justify-content:space-between; gap:8px; align-items:center; background:#e9f6ec; border-radius:9px; padding:8px; margin-bottom:7px; }
+      .rp1-empty { padding:18px; text-align:center; opacity:.65; border:1px dashed #bfd4c4; border-radius:12px; }
+      .rp1-dev-launch { position:fixed; right:18px; bottom:18px; z-index:99990; box-shadow:0 8px 24px rgba(0,0,0,.15); }
+      @media (max-width: 980px) { .rp1-grid { grid-template-columns:1fr; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function render() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    const current = state();
+    const people = participantMap();
+    const selected = new Set(current.selectedKeys || []);
+    const unassigned = unassignedEntries();
+    const groups = engine.groups(SCOPE);
+    const dirs = directory();
+    const options = current.transferMode === "CAMP_TO_CAMP" ? dirs.camps : dirs.offices;
+
+    root.innerHTML = `
+      <div class="rp1-shell">
+        <header class="rp1-header">
+          <div>
+            <div class="rp1-kicker">First clean plugin body</div>
+            <h1 class="rp1-title">Reassignment Workspace V1</h1>
+            <div>${current.assignments.length} of ${current.participants.length} assigned</div>
+          </div>
+          <div class="rp1-actions">
+            <button class="rp1-btn" data-rp1="undo" ${current.undo.length ? "" : "disabled"}>↶ Undo</button>
+            <button class="rp1-btn" data-rp1="redo" ${current.redo.length ? "" : "disabled"}>↷ Redo</button>
+            <button class="rp1-btn" data-rp1="reset">New Session</button>
+            <button class="rp1-btn" data-rp1="close">Back to Personnel Filter</button>
+          </div>
+        </header>
+
+        <main class="rp1-grid">
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Step 1</div>
+            <h2>To Be Assigned <small>${unassigned.length}</small></h2>
+            <div class="rp1-toolbar">
+              <button class="rp1-btn primary" data-rp1="select-all">Select All</button>
+              <button class="rp1-btn" data-rp1="clear-selection">Clear</button>
+            </div>
+            <div class="rp1-list">
+              ${unassigned.length ? unassigned.map(([key, item]) => `
+                <label class="rp1-person">
+                  <input type="checkbox" data-rp1-check="${escapeHtml(key)}" ${selected.has(key) ? "checked" : ""}>
+                  <span class="rp1-person-main">
+                    <div class="rp1-person-name">${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</div>
+                    <div class="rp1-person-sub">${escapeHtml(current.transferMode === "CAMP_TO_CAMP" ? personCamp(item) : personOffice(item))}</div>
+                  </span>
+                </label>
+              `).join("") : `<div class="rp1-empty">No unassigned personnel.</div>`}
+            </div>
+          </section>
+
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Transfer Type</div>
+            <div class="rp1-toolbar">
+              <button class="rp1-btn ${current.transferMode === "CAMP_TO_CAMP" ? "active" : ""}" data-rp1-mode="CAMP_TO_CAMP">Camp to Camp</button>
+              <button class="rp1-btn ${current.transferMode === "OFFICE_TO_OFFICE" ? "active" : ""}" data-rp1-mode="OFFICE_TO_OFFICE">Office to Office</button>
+            </div>
+            <div class="rp1-kicker">Step 2</div>
+            <h2>Destination ${current.transferMode === "CAMP_TO_CAMP" ? "Camp" : "Office"}</h2>
+            <input class="rp1-search" id="rp1DestinationSearch" placeholder="Search destination...">
+            <div class="rp1-chip-grid" id="rp1DestinationOptions">
+              ${options.map(option => `<button class="rp1-chip ${current.destination === option ? "active" : ""}" data-rp1-destination="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
+            </div>
+            <button class="rp1-btn primary" style="width:100%;margin-top:10px" data-rp1="assign" ${selected.size && current.destination ? "" : "disabled"}>Assign Selected</button>
+          </section>
+
+          <section class="rp1-panel">
+            <div class="rp1-kicker">Step 3</div>
+            <h2>Assigned Personnel</h2>
+            <div class="rp1-groups">
+              ${groups.length ? groups.map(group => `
+                <article class="rp1-group">
+                  <div class="rp1-group-head">
+                    <div>
+                      <div class="rp1-group-title">${escapeHtml(group.transferMode === "CAMP_TO_CAMP" ? "CAMP TO" : "OFFICE TO")} ${escapeHtml(group.destination)}</div>
+                      <small>${group.keys.length} personnel</small>
+                    </div>
+                  </div>
+                  ${group.keys.map(key => {
+                    const item = people.get(key) || {};
+                    return `<div class="rp1-assigned"><span>${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</span><button class="rp1-btn" data-rp1-remove="${escapeHtml(key)}">×</button></div>`;
+                  }).join("")}
+                </article>
+              `).join("") : `<div class="rp1-empty">No personnel assigned yet.</div>`}
+            </div>
+          </section>
+        </main>
+      </div>
+    `;
+  }
+
+  function syncParticipants() {
+    engine.setParticipants(SCOPE, personnelEntries());
+  }
+
+  function open() {
+    syncParticipants();
+    let root = document.getElementById(ROOT_ID);
+    if (!root) {
+      root = document.createElement("div");
+      root.id = ROOT_ID;
+      document.body.appendChild(root);
+    }
+    root.hidden = false;
+    document.body.style.overflow = "hidden";
+    render();
+  }
+
+  function close() {
+    const root = document.getElementById(ROOT_ID);
+    if (root) root.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function newSession() {
+    engine.reset(SCOPE, personnelEntries());
+    render();
+  }
+
+  document.addEventListener("click", event => {
+    const launch = event.target.closest("[data-rp1-launch]");
+    if (launch) {
+      event.preventDefault();
+      open();
+      return;
+    }
+
+    const root = event.target.closest(`#${ROOT_ID}`);
+    if (!root) return;
+
+    const modeButton = event.target.closest("[data-rp1-mode]");
+    if (modeButton) {
+      engine.setTransferMode(SCOPE, modeButton.dataset.rp1Mode);
+      render();
+      return;
+    }
+
+    const destination = event.target.closest("[data-rp1-destination]");
+    if (destination) {
+      engine.setDestination(SCOPE, destination.dataset.rp1Destination);
+      render();
+      return;
+    }
+
+    const remove = event.target.closest("[data-rp1-remove]");
+    if (remove) {
+      engine.removeAssignment(SCOPE, remove.dataset.rp1Remove);
+      render();
+      return;
+    }
+
+    const action = event.target.closest("[data-rp1]")?.dataset.rp1;
+    if (!action) return;
+    if (action === "close") close();
+    else if (action === "reset") newSession();
+    else if (action === "select-all") engine.selectAllUnassigned(SCOPE);
+    else if (action === "clear-selection") engine.clearSelection(SCOPE);
+    else if (action === "assign") {
+      try { engine.assignSelected(SCOPE); }
+      catch (error) { alert(error.message); }
+    }
+    else if (action === "undo") engine.undo(SCOPE);
+    else if (action === "redo") engine.redo(SCOPE);
+    render();
+  });
+
+  document.addEventListener("change", event => {
+    const checkbox = event.target.closest?.("[data-rp1-check]");
+    if (!checkbox) return;
+    engine.toggleSelection(SCOPE, checkbox.dataset.rp1Check);
+    render();
+  });
+
+  document.addEventListener("input", event => {
+    if (event.target.id !== "rp1DestinationSearch") return;
+    const query = text(event.target.value).toLowerCase();
+    document.querySelectorAll(`#rp1DestinationOptions [data-rp1-destination]`).forEach(button => {
+      button.hidden = query && !text(button.dataset.rp1Destination).toLowerCase().includes(query);
+    });
+  });
+
+  platform.events.on("selection:changed", event => {
+    if (event?.scopeId !== "ao-cart") return;
+    syncParticipants();
+    render();
+  });
+
+  const plugin = {
+    id: PLUGIN_ID,
+    name: "Reassignment V1",
+    version: "1.0.0",
+    requires: ["state", "events", "selection", "assignmentCore"],
+    install() {
+      installStyles();
+      engine.createScope(SCOPE);
+      syncParticipants();
+    },
+    activate() {},
+    deactivate() { close(); },
+    open,
+    close,
+    newSession,
+    report() { return engine.report(SCOPE); },
+  };
+
+  platform.plugins.register(plugin);
+  platform.plugins.activate(PLUGIN_ID);
+
+  installStyles();
+  const launcher = document.createElement("button");
+  launcher.type = "button";
+  launcher.className = "rp1-btn primary rp1-dev-launch";
+  launcher.dataset.rp1Launch = "true";
+  launcher.textContent = "Open Reassignment V1";
+  document.body.appendChild(launcher);
+
+  window.$PF.reassignmentV1 = plugin;
+  console.info("Reassignment Plugin V1 active. Run $PF.reassignmentV1.open().");
+})();
