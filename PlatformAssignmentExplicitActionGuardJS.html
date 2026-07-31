@@ -1,0 +1,78 @@
+// Personnel Platform — Assignment explicit-action guard
+// Developer Mode only: selecting a destination must never assign personnel.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const assignment = platform?.engines?.get?.("assignment");
+  if (!platform || !assignment) return;
+
+  function actionOf_(element) {
+    return String(element?.dataset?.engineAction || "").trim().toUpperCase();
+  }
+
+  function valueOf_(element) {
+    return String(element?.dataset?.value || "").trim();
+  }
+
+  function handleExplicitControl_(event) {
+    const control = event.target?.closest?.("[data-engine-action]");
+    if (!control) return;
+
+    const action = actionOf_(control);
+    if (action !== "SET_DESTINATION" && action !== "SET_TRANSFER_MODE") return;
+
+    // Run before the older document-level control delegates. This guarantees
+    // that a destination chip only changes the active destination and cannot
+    // fall through to a legacy click handler that performs an assignment.
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    const before = assignment.get();
+    const protectedAssignments = before.assignments;
+    const protectedSelection = before.selectedKeys;
+
+    if (action === "SET_DESTINATION") {
+      assignment.setDestination(valueOf_(control));
+    } else {
+      assignment.setTransferMode(valueOf_(control));
+    }
+
+    // Defensive invariant: mode/destination controls may not mutate either
+    // assignments or the current Step 1 checkbox selection.
+    const after = assignment.get();
+    const assignmentsChanged = JSON.stringify(after.assignments) !== JSON.stringify(protectedAssignments);
+    const selectionChanged = JSON.stringify(after.selectedKeys) !== JSON.stringify(protectedSelection);
+
+    if (assignmentsChanged || selectionChanged) {
+      const repaired = {
+        ...after,
+        assignments: protectedAssignments,
+        selectedKeys: protectedSelection,
+        updatedAt: new Date().toISOString(),
+      };
+      platform.state.set("assignment:reassignment", repaired);
+      platform.store.save("assignment", "reassignment", repaired);
+
+      if (window.ReassignmentState) {
+        window.ReassignmentState.assignments = new Map(protectedAssignments || []);
+        window.ReassignmentState.selectedKeys = new Set(protectedSelection || []);
+      }
+
+      window.ReassignmentEngine?.emit?.();
+      console.warn("Assignment explicit-action guard repaired an unexpected destination-side mutation.");
+    }
+  }
+
+  // Window capture runs before the existing document capture delegate.
+  window.addEventListener("click", handleExplicitControl_, true);
+
+  window.$PF.assignmentExplicitGuard = {
+    active: true,
+    rule: "Destination selection never assigns personnel",
+  };
+
+  console.info("Assignment explicit-action guard active. Personnel move only after Assign Selected/Add All Visible.");
+})();
