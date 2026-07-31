@@ -1,0 +1,158 @@
+//----------------------------------
+// Personnel Platform — Legacy engine adapters
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("PlatformLegacyEngineAdapters: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function registerOrReplace_(id, engine) {
+    if (platform.engines.has(id)) platform.engines.replace(id, engine);
+    else platform.engines.register(id, engine);
+  }
+
+  const FilterEngine = {
+    createScope(scopeId, initialFilters = {}) {
+      return platform.state.createScope(`filter:${scopeId}`, {
+        search: "",
+        rank: "",
+        office: "",
+        camp: "",
+        ...initialFilters,
+      });
+    },
+    get(scopeId) {
+      return this.createScope(scopeId);
+    },
+    set(scopeId, key, value) {
+      return platform.state.update(`filter:${scopeId}`, current => ({
+        ...current,
+        [key]: value,
+      }));
+    },
+    clear(scopeId) {
+      return platform.state.set(`filter:${scopeId}`, {
+        search: "",
+        rank: "",
+        office: "",
+        camp: "",
+      });
+    },
+    apply(scopeId, entries, selector) {
+      const filters = this.get(scopeId);
+      const query = text_(filters.search).toLowerCase();
+      return entries.filter(entry => {
+        const item = selector ? selector(entry) : entry;
+        const searchable = [item.name, item.rank, item.office, item.camp]
+          .map(text_)
+          .join(" ")
+          .toLowerCase();
+        return (!query || searchable.includes(query)) &&
+          (!filters.rank || text_(item.rank) === filters.rank) &&
+          (!filters.office || text_(item.office) === filters.office) &&
+          (!filters.camp || text_(item.camp) === filters.camp);
+      });
+    },
+  };
+
+  const SelectionEngine = {
+    createScope(scopeId) {
+      return platform.state.createScope(`selection:${scopeId}`, {
+        keys: [],
+        order: [],
+      });
+    },
+    get(scopeId) {
+      return this.createScope(scopeId);
+    },
+    selected(scopeId) {
+      return new Set(this.get(scopeId).keys || []);
+    },
+    toggle(scopeId, key) {
+      const value = text_(key);
+      return platform.state.update(`selection:${scopeId}`, current => {
+        const selected = new Set(current.keys || []);
+        const order = [...(current.order || [])];
+        if (selected.has(value)) selected.delete(value);
+        else {
+          selected.add(value);
+          if (!order.includes(value)) order.push(value);
+        }
+        return { keys: [...selected], order };
+      });
+    },
+    select(scopeId, keys) {
+      const values = [...new Set(keys.map(text_).filter(Boolean))];
+      return platform.state.update(`selection:${scopeId}`, current => ({
+        keys: values,
+        order: [...new Set([...(current.order || []), ...values])],
+      }));
+    },
+    clear(scopeId) {
+      return platform.state.set(`selection:${scopeId}`, { keys: [], order: [] });
+    },
+  };
+
+  const AssignmentEngine = {
+    legacy: window.ReassignmentEngine || null,
+    dispatch(command) {
+      if (!this.legacy?.dispatch) throw new Error("Legacy ReassignmentEngine is unavailable.");
+      return this.legacy.dispatch(command);
+    },
+    getState() {
+      return this.legacy?.state || {};
+    },
+    getDirectory() {
+      return this.legacy?.getDirectory?.() || { camps: [], offices: [] };
+    },
+    getAssignments() {
+      return window.ReassignmentState?.assignments instanceof Map
+        ? window.ReassignmentState.assignments
+        : new Map();
+    },
+    getSelectedKeys() {
+      return window.ReassignmentState?.selectedKeys instanceof Set
+        ? window.ReassignmentState.selectedKeys
+        : new Set();
+    },
+  };
+
+  const GeneratorEngine = {
+    build(type, context = {}) {
+      const generator = text_(type).toUpperCase();
+      platform.events.emit("generator:build", { type: generator, context });
+      if (generator === "REASSIGNMENT" && typeof window.buildReassignmentGeneratePayload_ === "function") {
+        return window.buildReassignmentGeneratePayload_(context);
+      }
+      throw new Error(`Generator "${generator}" is not registered.`);
+    },
+  };
+
+  const ReportEngine = {
+    preview(payload) {
+      platform.events.emit("report:preview", payload);
+      return payload;
+    },
+    generate(payload) {
+      platform.events.emit("report:generate", payload);
+      return payload;
+    },
+  };
+
+  registerOrReplace_("filter", FilterEngine);
+  registerOrReplace_("selection", SelectionEngine);
+  registerOrReplace_("assignment", AssignmentEngine);
+  registerOrReplace_("generator", GeneratorEngine);
+  registerOrReplace_("report", ReportEngine);
+
+  console.info("PersonnelPlatform reusable engine adapters registered.");
+})();
