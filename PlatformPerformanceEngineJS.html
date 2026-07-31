@@ -1,0 +1,146 @@
+<script>
+// Personnel Platform — Performance Engine V1
+// Lightweight production timing, long-task monitoring, and debug controls.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const samples = new Map();
+  const active = new Map();
+  const longTasks = [];
+  let debugEnabled = Boolean(document.querySelector('meta[name="dev-mode"]'));
+
+  function now() {
+    return window.performance?.now?.() ?? Date.now();
+  }
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function record(name, duration, metadata) {
+    const key = text(name) || "unnamed";
+    const list = samples.get(key) || [];
+    list.push({
+      duration: Math.max(0, Number(duration) || 0),
+      at: new Date().toISOString(),
+      metadata: metadata || null,
+    });
+    if (list.length > 50) list.splice(0, list.length - 50);
+    samples.set(key, list);
+    return list[list.length - 1];
+  }
+
+  function summarize(name, list) {
+    const values = list.map(item => item.duration);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+      name,
+      count: values.length,
+      lastMs: Number((values.at(-1) || 0).toFixed(2)),
+      averageMs: Number((values.length ? total / values.length : 0).toFixed(2)),
+      maxMs: Number((values.length ? Math.max(...values) : 0).toFixed(2)),
+    };
+  }
+
+  const PerformanceEngine = {
+    version: "1.0.0",
+
+    start(name, metadata) {
+      const key = text(name);
+      if (!key) return null;
+      active.set(key, { startedAt: now(), metadata: metadata || null });
+      return key;
+    },
+
+    stop(name, metadata) {
+      const key = text(name);
+      const timer = active.get(key);
+      if (!timer) return null;
+      active.delete(key);
+      return record(key, now() - timer.startedAt, metadata || timer.metadata);
+    },
+
+    measure(name, fn, metadata) {
+      const startedAt = now();
+      try {
+        const result = fn();
+        if (result && typeof result.then === "function") {
+          return result.finally(() => record(name, now() - startedAt, metadata));
+        }
+        record(name, now() - startedAt, metadata);
+        return result;
+      } catch (error) {
+        record(name, now() - startedAt, { ...(metadata || {}), failed: true });
+        throw error;
+      }
+    },
+
+    mark(name, duration, metadata) {
+      return record(name, duration, metadata);
+    },
+
+    status() {
+      const navigation = window.performance?.getEntriesByType?.("navigation")?.[0];
+      const state = {
+        version: this.version,
+        debug: debugEnabled,
+        metrics: samples.size,
+        activeTimers: active.size,
+        longTasks: longTasks.length,
+        domInteractiveMs: navigation ? Number(navigation.domInteractive.toFixed(2)) : 0,
+        loadCompleteMs: navigation ? Number(navigation.loadEventEnd.toFixed(2)) : 0,
+      };
+      console.table(state);
+      return state;
+    },
+
+    report() {
+      const rows = [...samples.entries()]
+        .map(([name, list]) => summarize(name, list))
+        .sort((a, b) => b.averageMs - a.averageMs);
+      console.table(rows);
+      return rows;
+    },
+
+    clear() {
+      samples.clear();
+      active.clear();
+      longTasks.splice(0);
+      return true;
+    },
+
+    debug: {
+      enable() { debugEnabled = true; return true; },
+      disable() { debugEnabled = false; return true; },
+      get enabled() { return debugEnabled; },
+      log(...args) { if (debugEnabled) console.info(...args); },
+    },
+  };
+
+  if (window.PerformanceObserver) {
+    try {
+      const observer = new PerformanceObserver(list => {
+        list.getEntries().forEach(entry => {
+          longTasks.push({
+            duration: Number(entry.duration.toFixed(2)),
+            startTime: Number(entry.startTime.toFixed(2)),
+          });
+          if (longTasks.length > 30) longTasks.splice(0, longTasks.length - 30);
+          record("browser.longTask", entry.duration);
+        });
+      });
+      observer.observe({ type: "longtask", buffered: true });
+    } catch (_) {
+      // Long Task API is not available in every Apps Script browser context.
+    }
+  }
+
+  window.$PF.performance = PerformanceEngine;
+  window.$PF.debug = PerformanceEngine.debug;
+  console.info("PerformanceEngine v1.0.0 active. Run $PF.performance.report().");
+})();
+</script>
