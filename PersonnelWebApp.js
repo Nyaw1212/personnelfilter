@@ -3,170 +3,70 @@
 //----------------------------------
 
 function doGet() {
-
-  const template =
-    HtmlService
-      .createTemplateFromFile(
-        "Index"
-      );
+  const template = HtmlService.createTemplateFromFile("Index");
 
   return template
     .evaluate()
-    .setTitle(
-      "Personnel Filter"
-    )
-    .setXFrameOptionsMode(
-      HtmlService
-        .XFrameOptionsMode
-        .ALLOWALL
-    );
-
+    .setTitle("Personnel Filter")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 //----------------------------------
 // Include HTML File
 //----------------------------------
 
-function include(
-  filename
-) {
-
+function include(filename) {
   let content = HtmlService
-    .createHtmlOutputFromFile(
-      filename
-    )
+    .createHtmlOutputFromFile(filename)
     .getContent();
 
-  if (filename === "AppJS") {
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentGenerateJS")
-      .getContent();
+  if (filename !== "AppJS") return content;
 
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentJS")
-      .getContent();
+  // Production now loads the same clean platform stack used by Developer Mode.
+  // Legacy reassignment patches remain in the Apps Script project only as
+  // rollback files and are intentionally not included here.
+  const productionModules = [
+    // Existing shared production modules that are still required.
+    "GeneratedReportsJS",
+    "GeneratedReportPreviewJS",
+    "Stage1GeneratedReportEditorJS",
+    "AOSelectionBulkControlsJS",
+    "PerformanceClientJS",
+    "TransferQueueJS",
+    "TransferQueueCancelPatchJS",
 
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentPatchJS")
-      .getContent();
+    // Personnel Platform engines.
+    "PlatformCoreJS",
+    "PlatformLegacyEngineAdaptersJS",
+    "PlatformSelectionEngineV2JS",
+    "PlatformFilterEngineV2JS",
+    "PlatformAssignmentCoreJS",
+    "PlatformDirectoryEngineJS",
+    "PlatformSortEngineJS",
+    "PlatformGeneratorEngineJS",
+    "PlatformReportEngineJS",
+    "PlatformTransferQueueEngineJS",
 
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentSourceOfficePatchJS")
-      .getContent();
+    // Production UI and plugins.
+    "TransferQueuePluginV1JS",
+    "PlatformReportPreviewUIJS",
+    "PlatformReportQueueBridgeJS",
+    "ReassignmentPluginV1JS",
+    "ReassignmentPluginV1GroupChangeFixJS",
+    "ReassignmentPluginV1Phase3JS",
+    "PlatformNameFormatEngineJS",
+    "ReassignmentPluginV1PolishJS",
+    "PlatformReportLauncherUXJS",
+    "PlatformUIControlBridgeFixJS",
+    "PlatformKeyboardEngineJS",
+    "PlatformGlassGreenThemeJS"
+  ];
 
+  productionModules.forEach(function(moduleName) {
     content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentClearPatchJS")
+      .createHtmlOutputFromFile(moduleName)
       .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentWorkspaceClearJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentFormPersistencePatchJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentPreviewPolishJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentLivePreviewFixJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("GeneratedReportsJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("GeneratedReportPreviewJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("Stage1GeneratedReportEditorJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("AOSelectionBulkControlsJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("Stage1WorkflowUXJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("PerformanceClientJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("Stage1WorkflowRuntimeFixJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("Stage1GenerateChoiceHardFixJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("Stage1ReportLauncherAndEscapeJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentLayoutChoiceJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("TransferQueueJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("TransferQueueCancelPatchJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentTodayDatePatchJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("DestinationCampChipsJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentDestinationCampFilterJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentCompactSourceUXJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentSourceSubtitleFixJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentNewReportResetFixJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentDestinationMasterAndGroupChangeJS")
-      .getContent();
-
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentDynamicDestinationDirectoryJS")
-      .getContent();
-
-    // Searchable merged Camp/Office directory and Step 3 group reassignment.
-    content += "\n" + HtmlService
-      .createHtmlOutputFromFile("ReassignmentDestinationDirectoryUXJS")
-      .getContent();
-  }
+  });
 
   return content;
 }
