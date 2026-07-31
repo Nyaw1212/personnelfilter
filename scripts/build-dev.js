@@ -60,6 +60,7 @@ function appJsBundle() {
     "PlatformTransferApplyLocalJS.html",
     "TransferQueuePluginV1JS.html",
     "PlatformReportPreviewUIJS.html",
+    "PlatformReportQueueBridgeJS.html",
     "ReassignmentPluginV1JS.html",
     "ReassignmentPluginV1GroupChangeFixJS.html",
     "ReassignmentPluginV1Phase3JS.html",
@@ -93,4 +94,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with KeyboardEngine shortcuts.");
+console.log("Built dev/index.html with success-only report queue bridge.");
