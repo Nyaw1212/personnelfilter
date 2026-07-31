@@ -19,9 +19,6 @@
   }
 
   function legacyState_() {
-    // PersonnelState is declared with a top-level lexical binding in the legacy
-    // bundle, so it is available as `PersonnelState` but not necessarily as
-    // `window.PersonnelState`.
     try {
       if (typeof PersonnelState !== "undefined" && PersonnelState) {
         return PersonnelState;
@@ -51,14 +48,17 @@
     let state = platform.state.get(STATE_SCOPE);
     if (state) return state;
 
-    const stored = platform.store.load(STORE_NAMESPACE, STORE_KEY, null);
-    const entries = normalizeEntries_(stored?.entries || legacyEntries_());
+    // Developer Mode intentionally starts with an empty AO selection. Previous
+    // test selections must not silently return after a refresh and look like
+    // buttons changed state by themselves.
+    const entries = [];
     state = {
       entries,
-      order: entries.map(([key]) => key),
+      order: [],
       updatedAt: new Date().toISOString(),
     };
     platform.state.createScope(STATE_SCOPE, state);
+    platform.store.save(STORE_NAMESPACE, STORE_KEY, state);
     return platform.state.get(STATE_SCOPE);
   }
 
@@ -78,7 +78,6 @@
       legacy.aoCart = new Map();
     }
 
-    // Preserve the same Map object because legacy listeners retain its reference.
     legacy.aoCart.clear();
     normalizeEntries_(state?.entries || []).forEach(([key, item]) => {
       legacy.aoCart.set(key, item);
@@ -112,7 +111,7 @@
   }
 
   const SelectionEngineV2 = {
-    version: "0.2.3",
+    version: "0.2.4",
     scopeId: SCOPE,
 
     get(scopeId = SCOPE) {
@@ -216,8 +215,6 @@
   ensureScope_();
   mirrorToLegacy_(SelectionEngineV2.get(SCOPE));
 
-  // Route the existing AO controls through the shared engine while preserving
-  // the current renderer and button behavior during migration.
   if (typeof window.togglePersonnelInAoCart_ === "function") {
     window.togglePersonnelInAoCart_ = function (record) {
       const key = window.getAoPersonnelKey_(record);
@@ -244,5 +241,5 @@
   }
 
   window.$PF.selection = SelectionEngineV2;
-  console.info("SelectionEngine v0.2.3 owns AO cart in Developer Mode. Run $PF.selection.report().");
+  console.info("SelectionEngine v0.2.4 starts each Developer Mode session with an empty AO cart.");
 })();
