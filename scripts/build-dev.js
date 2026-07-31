@@ -69,6 +69,7 @@ function appJsBundle() {
     "PlatformReportLauncherUXJS.html",
     "PlatformUIControlBridgeFixJS.html",
     "PlatformKeyboardEngineJS.html",
+    "PlatformGlassGreenThemeJS.html",
   ];
 
   return [
@@ -96,4 +97,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with glass-green reassignment polish.");
+console.log("Built dev/index.html with shared glass-green action theme.");
