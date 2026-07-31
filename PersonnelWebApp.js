@@ -23,7 +23,6 @@ function include(filename) {
   if (filename !== "AppJS") return content;
 
   // These existing client modules are still part of the base Personnel Filter.
-  // They are injected inside Index.html's original <script> element.
   const sharedClientModules = [
     "GeneratedReportsJS",
     "GeneratedReportPreviewJS",
@@ -39,6 +38,11 @@ function include(filename) {
       .createHtmlOutputFromFile(moduleName)
       .getContent();
   });
+
+  // Index.html places AppJS inside its original <script> element. Close that
+  // element, insert the Apps Script-safe platform bundle, then reopen it so
+  // Index.html's existing closing tag remains balanced.
+  content += "\n</script>\n" + includePlatformBundle() + "\n<script>\n";
 
   return content;
 }
@@ -81,9 +85,6 @@ function includePlatformBundle() {
       .getContent();
   }).join("\n\n");
 
-  // Prevent a literal closing script sequence inside a module from ending the
-  // bundle early when the evaluated HTML is sent to the browser.
   const safeSource = source.replace(/<\/script/gi, "<\\/script");
-
   return "<script>\n" + safeSource + "\n<\/script>";
 }
