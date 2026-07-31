@@ -1,0 +1,247 @@
+// Personnel Platform — reusable scoped AssignmentEngine core
+// Developer Mode foundation. No dependency on legacy reassignment state.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const MAX_HISTORY = 30;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function mode(value) {
+    return value === "CAMP_TO_CAMP" ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE";
+  }
+
+  function emptyState() {
+    return {
+      participants: [],
+      transferMode: "OFFICE_TO_OFFICE",
+      destination: "",
+      selectedKeys: [],
+      assignments: [],
+      undo: [],
+      redo: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function normalizeParticipants(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text(entry[0]);
+      if (key) map.set(key, entry[1]);
+    });
+    return [...map.entries()];
+  }
+
+  function normalizeAssignments(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text(entry[0]);
+      const value = entry[1] || {};
+      if (!key) return;
+      const transferMode = mode(value.transferMode || value.mode);
+      map.set(key, {
+        transferMode,
+        destination: text(value.destination || value.camp || value.office),
+      });
+    });
+    return [...map.entries()];
+  }
+
+  function unique(values) {
+    return [...new Set((values || []).map(text).filter(Boolean))];
+  }
+
+  function snapshot(state) {
+    return {
+      participants: normalizeParticipants(state.participants),
+      transferMode: mode(state.transferMode),
+      destination: text(state.destination),
+      selectedKeys: unique(state.selectedKeys),
+      assignments: normalizeAssignments(state.assignments),
+    };
+  }
+
+  function scopeKey(scopeId) {
+    return `assignment-core:${text(scopeId)}`;
+  }
+
+  const AssignmentCore = {
+    version: "1.0.0",
+
+    createScope(scopeId) {
+      const key = scopeKey(scopeId);
+      return platform.state.createScope(key, emptyState());
+    },
+
+    get(scopeId) {
+      return platform.state.get(scopeKey(scopeId)) || this.createScope(scopeId);
+    },
+
+    commit(scopeId, patch, action, options = {}) {
+      const current = this.get(scopeId);
+      const recordHistory = options.recordHistory !== false;
+      const next = {
+        ...current,
+        ...patch,
+        participants: normalizeParticipants(patch.participants ?? current.participants),
+        transferMode: mode(patch.transferMode ?? current.transferMode),
+        destination: text(patch.destination ?? current.destination),
+        selectedKeys: unique(patch.selectedKeys ?? current.selectedKeys),
+        assignments: normalizeAssignments(patch.assignments ?? current.assignments),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (recordHistory) {
+        next.undo = [...(current.undo || []), snapshot(current)].slice(-MAX_HISTORY);
+        next.redo = [];
+      }
+
+      platform.state.set(scopeKey(scopeId), next);
+      platform.events.emit("assignment-core:changed", { scopeId, action, state: next });
+      platform.events.emit(`assignment-core:changed:${scopeId}`, { action, state: next });
+      return next;
+    },
+
+    setParticipants(scopeId, entries) {
+      const participants = normalizeParticipants(entries);
+      const valid = new Set(participants.map(([key]) => key));
+      const state = this.get(scopeId);
+      const assignments = normalizeAssignments(state.assignments).filter(([key]) => valid.has(key));
+      const selectedKeys = unique(state.selectedKeys).filter(key => valid.has(key) && !assignments.some(([assigned]) => assigned === key));
+      return this.commit(scopeId, { participants, assignments, selectedKeys }, "SET_PARTICIPANTS", { recordHistory: false });
+    },
+
+    reset(scopeId, entries = []) {
+      const participants = normalizeParticipants(entries);
+      const next = { ...emptyState(), participants };
+      platform.state.set(scopeKey(scopeId), next);
+      platform.events.emit(`assignment-core:changed:${scopeId}`, { action: "RESET", state: next });
+      return next;
+    },
+
+    setTransferMode(scopeId, value) {
+      return this.commit(scopeId, { transferMode: mode(value), destination: "" }, "SET_TRANSFER_MODE");
+    },
+
+    setDestination(scopeId, value) {
+      return this.commit(scopeId, { destination: text(value) }, "SET_DESTINATION", { recordHistory: false });
+    },
+
+    toggleSelection(scopeId, key) {
+      const state = this.get(scopeId);
+      const selected = new Set(state.selectedKeys || []);
+      const assignments = new Map(state.assignments || []);
+      const value = text(key);
+      if (!value || assignments.has(value)) return state;
+      selected.has(value) ? selected.delete(value) : selected.add(value);
+      return this.commit(scopeId, { selectedKeys: [...selected] }, "TOGGLE_SELECTION", { recordHistory: false });
+    },
+
+    selectAllUnassigned(scopeId) {
+      const state = this.get(scopeId);
+      const assigned = new Set((state.assignments || []).map(([key]) => key));
+      const selectedKeys = (state.participants || []).map(([key]) => key).filter(key => !assigned.has(key));
+      return this.commit(scopeId, { selectedKeys }, "SELECT_ALL", { recordHistory: false });
+    },
+
+    clearSelection(scopeId) {
+      return this.commit(scopeId, { selectedKeys: [] }, "CLEAR_SELECTION", { recordHistory: false });
+    },
+
+    assignSelected(scopeId) {
+      const state = this.get(scopeId);
+      if (!state.destination) throw new Error("Choose a destination first.");
+      const participants = new Map(state.participants || []);
+      const assignments = new Map(state.assignments || []);
+      unique(state.selectedKeys).forEach(key => {
+        if (participants.has(key)) assignments.set(key, {
+          transferMode: mode(state.transferMode),
+          destination: text(state.destination),
+        });
+      });
+      return this.commit(scopeId, { assignments: [...assignments], selectedKeys: [] }, "ASSIGN_SELECTED");
+    },
+
+    removeAssignment(scopeId, key) {
+      const assignments = new Map(this.get(scopeId).assignments || []);
+      assignments.delete(text(key));
+      return this.commit(scopeId, { assignments: [...assignments] }, "REMOVE_ASSIGNMENT");
+    },
+
+    moveGroup(scopeId, groupId, destination) {
+      const [transferMode, oldDestination] = text(groupId).split("|");
+      const assignments = new Map(this.get(scopeId).assignments || []);
+      assignments.forEach((value, key) => {
+        if (value.transferMode === transferMode && value.destination === oldDestination) {
+          assignments.set(key, { transferMode, destination: text(destination) });
+        }
+      });
+      return this.commit(scopeId, { assignments: [...assignments] }, "MOVE_GROUP");
+    },
+
+    groups(scopeId) {
+      const groups = new Map();
+      (this.get(scopeId).assignments || []).forEach(([key, value]) => {
+        const id = `${value.transferMode}|${value.destination}`;
+        if (!groups.has(id)) groups.set(id, { id, transferMode: value.transferMode, destination: value.destination, keys: [] });
+        groups.get(id).keys.push(key);
+      });
+      return [...groups.values()];
+    },
+
+    undo(scopeId) {
+      const current = this.get(scopeId);
+      const previous = current.undo?.at(-1);
+      if (!previous) return current;
+      return this.commit(scopeId, {
+        ...previous,
+        undo: current.undo.slice(0, -1),
+        redo: [...(current.redo || []), snapshot(current)].slice(-MAX_HISTORY),
+      }, "UNDO", { recordHistory: false });
+    },
+
+    redo(scopeId) {
+      const current = this.get(scopeId);
+      const nextSnapshot = current.redo?.at(-1);
+      if (!nextSnapshot) return current;
+      return this.commit(scopeId, {
+        ...nextSnapshot,
+        undo: [...(current.undo || []), snapshot(current)].slice(-MAX_HISTORY),
+        redo: current.redo.slice(0, -1),
+      }, "REDO", { recordHistory: false });
+    },
+
+    report(scopeId) {
+      const state = this.get(scopeId);
+      const report = {
+        version: this.version,
+        scope: scopeId,
+        personnel: state.participants.length,
+        selected: state.selectedKeys.length,
+        assigned: state.assignments.length,
+        groups: this.groups(scopeId).length,
+        mode: state.transferMode,
+        destination: state.destination || "—",
+        undo: state.undo.length,
+        redo: state.redo.length,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("assignmentCore")) platform.engines.replace("assignmentCore", AssignmentCore);
+  else platform.engines.register("assignmentCore", AssignmentCore);
+
+  window.$PF.assignmentCore = AssignmentCore;
+  console.info("Reusable AssignmentCore v1.0.0 active.");
+})();
