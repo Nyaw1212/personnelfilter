@@ -14,6 +14,7 @@ const modules = [
   "PlatformKeyboardEngineJS.html",
   "PlatformLegacyEngineAdaptersJS.html",
   "PlatformNameFormatEngineJS.html",
+  "PlatformPerformanceEngineJS.html",
   "PlatformReportEngineJS.html",
   "PlatformReportGenerationBridgeJS.html",
   "PlatformReportLauncherUXJS.html",
