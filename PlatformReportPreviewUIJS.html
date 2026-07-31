@@ -1,0 +1,205 @@
+// Personnel Platform — ReportEngine summary preview UI
+// Local preview only. Shows the same quick-scan summary used by Apps Script
+// without generating or reading an actual Google Document.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  const BACKDROP_ID = "pfReportPreviewBackdrop";
+  const DIALOG_ID = "pfReportPreviewDialog";
+  let activeDraftId = "";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function displayDate(value) {
+    const raw = text(value);
+    if (!raw) return "—";
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  function fromValue(person) {
+    if (text(person.transferMode) === "CAMP_TO_CAMP") {
+      return text(person.fromCamp) || "—";
+    }
+    return text(person.fromOffice) || "—";
+  }
+
+  function toValue(person) {
+    if (text(person.transferMode) === "CAMP_TO_CAMP") {
+      return text(person.toCamp) || "—";
+    }
+    return text(person.toOffice) || "—";
+  }
+
+  function installStyles() {
+    if (document.getElementById("pfReportPreviewStyles")) return;
+    const style = document.createElement("style");
+    style.id = "pfReportPreviewStyles";
+    style.textContent = `
+      #${BACKDROP_ID} { position:fixed; inset:0; z-index:100200; background:rgba(8,31,15,.48); backdrop-filter:blur(6px); }
+      #${DIALOG_ID} { position:fixed; z-index:100201; top:50%; left:50%; transform:translate(-50%,-50%); width:min(1060px,95vw); max-height:92vh; overflow:auto; box-sizing:border-box; padding:20px; border:1px solid #c5d9ca; border-radius:18px; background:#f6fbf7; color:#153c21; box-shadow:0 30px 90px rgba(0,0,0,.35); }
+      #${BACKDROP_ID}[hidden], #${DIALOG_ID}[hidden] { display:none !important; }
+      .pf-rp-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+      .pf-rp-kicker { font-size:10px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; color:#26723d; }
+      .pf-rp-head h2 { margin:3px 0; font-size:24px; }
+      .pf-rp-head p { margin:0; opacity:.72; }
+      .pf-rp-close { border:0; background:transparent; font-size:28px; cursor:pointer; }
+      .pf-rp-meta { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin:17px 0; }
+      .pf-rp-meta article { min-height:68px; display:grid; gap:5px; align-content:start; padding:11px; border:1px solid #d5e6d9; border-radius:12px; background:white; }
+      .pf-rp-meta span { font-size:10px; font-weight:850; text-transform:uppercase; color:#2b6e3f; }
+      .pf-rp-meta strong { font-size:12px; overflow-wrap:anywhere; }
+      .pf-rp-table-wrap { max-height:455px; overflow:auto; border:1px solid #d2e3d6; border-radius:13px; background:white; }
+      .pf-rp-table { width:100%; border-collapse:collapse; font-size:12px; }
+      .pf-rp-table th { position:sticky; top:0; z-index:1; padding:10px; background:#e8f3ea; text-align:left; }
+      .pf-rp-table td { padding:10px; border-top:1px solid #e0ece3; vertical-align:top; }
+      .pf-rp-table th:first-child, .pf-rp-table td:first-child { width:56px; text-align:center; }
+      .pf-rp-table th:nth-child(3), .pf-rp-table th:nth-child(4), .pf-rp-table td:nth-child(3), .pf-rp-table td:nth-child(4) { width:22%; text-align:center; }
+      .pf-rp-actions { display:flex; justify-content:flex-end; gap:9px; flex-wrap:wrap; margin-top:15px; }
+      .pf-rp-btn { border:1px solid #c5d9ca; border-radius:10px; background:white; padding:9px 13px; font:inherit; font-weight:750; cursor:pointer; }
+      .pf-rp-btn.primary { background:#ffe600; border-color:#d8c700; }
+      .pf-rp-empty { padding:24px; text-align:center; opacity:.7; }
+      @media (max-width:760px) {
+        .pf-rp-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        #${DIALOG_ID} { padding:14px; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureUI() {
+    installStyles();
+    let backdrop = document.getElementById(BACKDROP_ID);
+    let dialog = document.getElementById(DIALOG_ID);
+    if (backdrop && dialog) return { backdrop, dialog };
+
+    backdrop = document.createElement("div");
+    backdrop.id = BACKDROP_ID;
+    backdrop.hidden = true;
+
+    dialog = document.createElement("section");
+    dialog.id = DIALOG_ID;
+    dialog.hidden = true;
+
+    document.body.append(backdrop, dialog);
+    backdrop.addEventListener("click", close);
+    return { backdrop, dialog };
+  }
+
+  function renderDraft(draft) {
+    const { backdrop, dialog } = ensureUI();
+    const preview = draft?.preview || report.preview(draft.id);
+    const metadata = preview.metadata || draft.metadata || {};
+    const personnel = Array.isArray(preview.personnel) ? preview.personnel : [];
+
+    activeDraftId = draft.id;
+    dialog.innerHTML = `
+      <header class="pf-rp-head">
+        <div>
+          <div class="pf-rp-kicker">Report summary preview</div>
+          <h2>${escapeHtml(preview.title || "Report Preview")}</h2>
+          <p>Revision ${escapeHtml(preview.revision || 1)} · ${personnel.length} personnel</p>
+        </div>
+        <button type="button" class="pf-rp-close" data-pf-report-preview="close" title="Close">×</button>
+      </header>
+
+      <section class="pf-rp-meta">
+        <article><span>Order Number</span><strong>${escapeHtml(metadata.orderNumber || "—")}</strong></article>
+        <article><span>Order Date</span><strong>${escapeHtml(displayDate(metadata.orderDate))}</strong></article>
+        <article><span>Signing Officer</span><strong>${escapeHtml(metadata.signingOfficer || "—")}</strong></article>
+        <article><span>Position</span><strong>${escapeHtml(metadata.signingPosition || "—")}</strong></article>
+        <article><span>File Reference</span><strong>${escapeHtml(metadata.fileReference || "—")}</strong></article>
+      </section>
+
+      <div class="pf-rp-table-wrap">
+        ${personnel.length ? `
+          <table class="pf-rp-table">
+            <thead><tr><th>No.</th><th>Rank / Name</th><th>From</th><th>To</th></tr></thead>
+            <tbody>
+              ${personnel.map((person, index) => `
+                <tr>
+                  <td>${escapeHtml(person.sequence || index + 1)}</td>
+                  <td>${escapeHtml([person.rank, person.fullName].filter(Boolean).join(" ") || "—")}</td>
+                  <td>${escapeHtml(fromValue(person))}</td>
+                  <td>${escapeHtml(toValue(person))}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        ` : `<div class="pf-rp-empty">No personnel rows are available for preview.</div>`}
+      </div>
+
+      <footer class="pf-rp-actions">
+        <button type="button" class="pf-rp-btn" data-pf-report-preview="back">Back to Reassignment</button>
+        <button type="button" class="pf-rp-btn primary" data-pf-report-preview="details">Continue to Report Details</button>
+      </footer>
+    `;
+
+    backdrop.hidden = false;
+    dialog.hidden = false;
+  }
+
+  function open(draftOrId) {
+    const draft = typeof draftOrId === "string"
+      ? report.get(draftOrId)
+      : draftOrId || report.last();
+    if (!draft) return null;
+    renderDraft(draft);
+    return draft;
+  }
+
+  function close() {
+    const backdrop = document.getElementById(BACKDROP_ID);
+    const dialog = document.getElementById(DIALOG_ID);
+    if (backdrop) backdrop.hidden = true;
+    if (dialog) dialog.hidden = true;
+  }
+
+  document.addEventListener("click", event => {
+    const action = event.target.closest?.("[data-pf-report-preview]")?.dataset.pfReportPreview;
+    if (!action) return;
+    if (action === "close" || action === "back") {
+      close();
+      return;
+    }
+    if (action === "details") {
+      const draft = report.get(activeDraftId);
+      close();
+      platform.events.emit("report:details-requested", { draft });
+      console.info("Report details requested.", draft);
+    }
+  });
+
+  platform.events.on("report:preview-ready", draft => {
+    open(draft);
+  });
+
+  window.$PF.reportPreview = {
+    version: "1.0.0",
+    open,
+    close,
+    get activeDraftId() { return activeDraftId; },
+  };
+
+  console.info("Report summary preview UI v1.0.0 active.");
+})();
