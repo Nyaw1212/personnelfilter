@@ -25,6 +25,7 @@ function appJsBundle() {
     "PlatformCoreJS.html",
     "PlatformLegacyEngineAdaptersJS.html",
     "PlatformSelectionEngineV2JS.html",
+    "PlatformFilterEngineV2JS.html",
     "ReassignmentPluginJS.html",
   ];
 
@@ -54,4 +55,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with ReassignmentEngine, PersonnelPlatform, and SelectionEngine v2 loaded.");
+console.log("Built dev/index.html with ReassignmentEngine, PersonnelPlatform, SelectionEngine v2, and FilterEngine v2 loaded.");
