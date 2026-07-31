@@ -15,6 +15,7 @@ const modules = [
   "PlatformLegacyEngineAdaptersJS.html",
   "PlatformNameFormatEngineJS.html",
   "PlatformReportEngineJS.html",
+  "PlatformReportGenerationBridgeJS.html",
   "PlatformReportLauncherUXJS.html",
   "PlatformReportPreviewUIJS.html",
   "PlatformReportQueueBridgeJS.html",
