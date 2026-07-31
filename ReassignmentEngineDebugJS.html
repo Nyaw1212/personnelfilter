@@ -1,0 +1,133 @@
+//----------------------------------
+// Reassignment Engine — Debug API (Developer Mode only)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const engine = window.ReassignmentEngine;
+  if (!engine) {
+    console.warn("ReassignmentEngineDebug: engine is not available.");
+    return;
+  }
+
+  const VERSION = "0.1.0";
+  const MAX_COMMANDS = 20;
+  const commandLog = [];
+  const originalDispatch = engine.dispatch.bind(engine);
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function assignments_() {
+    return window.ReassignmentState?.assignments instanceof Map
+      ? window.ReassignmentState.assignments
+      : new Map();
+  }
+
+  function selectedKeys_() {
+    return window.ReassignmentState?.selectedKeys instanceof Set
+      ? window.ReassignmentState.selectedKeys
+      : new Set();
+  }
+
+  function personnelCount_() {
+    return window.PersonnelState?.aoCart instanceof Map
+      ? window.PersonnelState.aoCart.size
+      : 0;
+  }
+
+  function groupCount_() {
+    const groups = new Set();
+    assignments_().forEach(value => {
+      const mode = text_(value?.mode) || (value?.camp ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE");
+      const destination = mode === "CAMP_TO_CAMP"
+        ? text_(value?.camp)
+        : text_(value?.office ?? value);
+      groups.add(`${mode}|${destination}`);
+    });
+    return groups.size;
+  }
+
+  function snapshotReport_() {
+    return {
+      status: "OK",
+      version: VERSION,
+      transferMode: engine.state?.transferMode || "UNKNOWN",
+      personnel: personnelCount_(),
+      selected: selectedKeys_().size,
+      assigned: assignments_().size,
+      groups: groupCount_(),
+      destination: text_(engine.state?.destination?.value) || "—",
+      undo: engine.history?.undo?.length || 0,
+      redo: engine.history?.redo?.length || 0,
+      lastCommand: commandLog.at(-1)?.type || "—",
+    };
+  }
+
+  engine.dispatch = function (command) {
+    const type = text_(command?.type).toUpperCase() || "UNKNOWN";
+    commandLog.push({
+      type,
+      time: new Date().toLocaleTimeString(),
+    });
+    if (commandLog.length > MAX_COMMANDS) commandLog.shift();
+    return originalDispatch(command);
+  };
+
+  engine.version = VERSION;
+
+  engine.status = function () {
+    const report = snapshotReport_();
+    const mode = report.transferMode === "CAMP_TO_CAMP"
+      ? "Camp→Camp"
+      : "Office→Office";
+    const line = `[ENGINE] ${report.status} | ${mode} | ${report.assigned}/${report.personnel} assigned | ${report.groups} group(s) | ${report.destination}`;
+    console.log(line);
+    return line;
+  };
+
+  engine.report = function () {
+    const report = snapshotReport_();
+    console.table(report);
+    return report;
+  };
+
+  engine.last = function (count = 5) {
+    const rows = commandLog.slice(-Math.max(1, Number(count) || 5));
+    console.table(rows);
+    return rows;
+  };
+
+  engine.check = function () {
+    const result = {
+      engine: Boolean(window.ReassignmentEngine),
+      controls: Boolean(window.ReassignmentEngineControls),
+      renderer: Boolean(window.ReassignmentEngineRenderer),
+      personnelState: Boolean(window.PersonnelState),
+      reassignmentState: Boolean(window.ReassignmentState),
+      directory: Boolean(engine.getDirectory()?.offices?.length || engine.getDirectory()?.camps?.length),
+    };
+    result.ok = Object.values(result).every(Boolean);
+    console.table(result);
+    return result;
+  };
+
+  engine.help = function () {
+    const commands = [
+      "$RE.status()",
+      "$RE.report()",
+      "$RE.check()",
+      "$RE.last()",
+      "$RE.state",
+      "$RE.dispatch({ type: 'UNDO' })",
+      "$RE.dispatch({ type: 'REDO' })",
+    ];
+    console.log(commands.join("\n"));
+    return commands;
+  };
+
+  window.$RE = engine;
+  console.info("ReassignmentEngine debug API active. Run $RE.status() or $RE.report().");
+})();
