@@ -57,6 +57,7 @@ function appJsBundle() {
     "PlatformGeneratorEngineJS.html",
     "PlatformReportEngineJS.html",
     "PlatformTransferQueueEngineJS.html",
+    "PlatformTransferApplyLocalJS.html",
     "TransferQueuePluginV1JS.html",
     "PlatformReportPreviewUIJS.html",
     "ReassignmentPluginV1JS.html",
@@ -91,4 +92,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with platform UI control bridge.");
+console.log("Built dev/index.html with local transfer apply adapter.");
