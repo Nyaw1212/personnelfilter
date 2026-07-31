@@ -20,6 +20,45 @@ window.addEventListener("DOMContentLoaded", () => {
   setLastSyncLabel("Auto Apply is off. Click Apply Now only when you want to sync the Sheet view.");
 });
 
+function personnelPerfMeasure_(name, callback, metadata) {
+  const engine = window.$PF?.performance;
+  return engine?.measure
+    ? engine.measure(name, callback, metadata)
+    : callback();
+}
+
+function normalizePersonnelRecord_(record) {
+  if (!record || typeof record !== "object") return Object.create(null);
+  if (record.__personnelNormalized) return record.__personnelNormalized;
+
+  const normalized = Object.create(null);
+  const columns = new Set([
+    ...PERSONNEL_APP_CONFIG.filterGroups.map(group => group.recordKey),
+    "Rank",
+  ]);
+
+  columns.forEach(column => {
+    normalized[column] = String(record[column] || "").trim();
+  });
+
+  normalized.searchText = PERSONNEL_APP_CONFIG.searchableColumns
+    .map(column => String(record[column] || "").trim().toLowerCase())
+    .join("\u0001");
+
+  try {
+    Object.defineProperty(record, "__personnelNormalized", {
+      value: normalized,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+  } catch (_) {
+    record.__personnelNormalized = normalized;
+  }
+
+  return normalized;
+}
+
 function installDebouncedPersonnelSearch_() {
   const original = document.getElementById("searchInput");
   if (!original || original.dataset.performancePatched === "true") return;
@@ -42,34 +81,30 @@ function installDebouncedPersonnelSearch_() {
 
 function patchPersonnelFiltering_() {
   filterPersonnelRecords = function () {
-    const searchTerm = String(PersonnelState.filters.search || "")
-      .trim()
-      .toLowerCase();
-    const groups = PERSONNEL_APP_CONFIG.filterGroups;
-    const selectedRanks = PersonnelState.filters.ranks;
+    return personnelPerfMeasure_("personnel.filter", () => {
+      const searchTerm = String(PersonnelState.filters.search || "")
+        .trim()
+        .toLowerCase();
+      const groups = PERSONNEL_APP_CONFIG.filterGroups;
+      const selectedRanks = PersonnelState.filters.ranks;
 
-    return PersonnelState.records.filter(record => {
-      for (const group of groups) {
-        const selected = PersonnelState.filters[group.key];
-        if (selected.size && !selected.has(String(record[group.recordKey] || "").trim())) {
+      return PersonnelState.records.filter(record => {
+        const normalized = normalizePersonnelRecord_(record);
+
+        for (const group of groups) {
+          const selected = PersonnelState.filters[group.key];
+          if (selected.size && !selected.has(normalized[group.recordKey])) {
+            return false;
+          }
+        }
+
+        if (selectedRanks.size && !selectedRanks.has(normalized.Rank)) {
           return false;
         }
-      }
 
-      if (selectedRanks.size && !selectedRanks.has(String(record.Rank || "").trim())) {
-        return false;
-      }
-
-      if (!searchTerm) return true;
-
-      if (!record.__personnelSearchText) {
-        record.__personnelSearchText = PERSONNEL_APP_CONFIG.searchableColumns
-          .map(column => String(record[column] || "").trim().toLowerCase())
-          .join("\u0001");
-      }
-
-      return record.__personnelSearchText.includes(searchTerm);
-    });
+        return !searchTerm || normalized.searchText.includes(searchTerm);
+      });
+    }, { records: PersonnelState.records.length });
   };
 
   const originalFilterAndRender = filterAndRenderPersonnel;
@@ -81,100 +116,104 @@ function patchPersonnelFiltering_() {
 
     window.requestAnimationFrame(() => {
       scheduled = false;
-      originalFilterAndRender();
+      personnelPerfMeasure_("personnel.filterAndRender", originalFilterAndRender);
     });
   };
 }
 
 function patchPersonnelAnalytics_() {
   analyzePersonnelDuplicates = function (records) {
-    const nameGroups = new Map();
-    const fields = ["Gender", "Category", "Camp", "Office", "Rank"];
-    const summaryMaps = new Map(fields.map(field => [field, new Map()]));
+    return personnelPerfMeasure_("personnel.analytics", () => {
+      const nameGroups = new Map();
+      const fields = ["Gender", "Category", "Camp", "Office", "Rank"];
+      const summaryMaps = new Map(fields.map(field => [field, new Map()]));
 
-    records.forEach(record => {
-      const displayName = String(record["Full Name"] || "").trim();
-      const normalizedName = normalizePersonnelName_(displayName);
+      records.forEach(record => {
+        const displayName = String(record["Full Name"] || "").trim();
+        const normalizedName = normalizePersonnelName_(displayName);
 
-      if (normalizedName) {
-        if (!nameGroups.has(normalizedName)) {
-          nameGroups.set(normalizedName, {
-            normalizedName,
-            displayName,
-            records: [],
-          });
+        if (normalizedName) {
+          if (!nameGroups.has(normalizedName)) {
+            nameGroups.set(normalizedName, {
+              normalizedName,
+              displayName,
+              records: [],
+            });
+          }
+          nameGroups.get(normalizedName).records.push(record);
         }
-        nameGroups.get(normalizedName).records.push(record);
-      }
 
-      fields.forEach(field => {
-        const value = String(record[field] || "").trim();
-        if (!value) return;
-        const counts = summaryMaps.get(field);
-        counts.set(value, (counts.get(value) || 0) + 1);
+        fields.forEach(field => {
+          const value = normalizePersonnelRecord_(record)[field] || String(record[field] || "").trim();
+          if (!value) return;
+          const counts = summaryMaps.get(field);
+          counts.set(value, (counts.get(value) || 0) + 1);
+        });
       });
-    });
 
-    const duplicateGroups = [...nameGroups.values()]
-      .filter(group => group.records.length > 1)
-      .sort((a, b) =>
-        b.records.length - a.records.length ||
-        a.displayName.localeCompare(b.displayName, undefined, {
-          sensitivity: "base",
-        })
-      );
-
-    const duplicateExtraRows = duplicateGroups.reduce(
-      (total, group) => total + group.records.length - 1,
-      0
-    );
-    const duplicateTotalRows = duplicateGroups.reduce(
-      (total, group) => total + group.records.length,
-      0
-    );
-
-    PersonnelState.__performanceAnalytics = {
-      records,
-      summaryMaps,
-    };
-
-    return {
-      uniqueCount: nameGroups.size,
-      duplicateNameCount: duplicateGroups.length,
-      duplicateExtraRows,
-      duplicateTotalRows,
-      duplicateGroups,
-    };
-  };
-
-  renderCountingReports_ = function (records) {
-    const fields = [
-      ["Gender", "genderReport"],
-      ["Category", "categoryReport"],
-      ["Camp", "campReport"],
-      ["Office", "officeReport"],
-      ["Rank", "rankReport"],
-    ];
-
-    const analytics = PersonnelState.__performanceAnalytics;
-    const maps = analytics && analytics.records === records
-      ? analytics.summaryMaps
-      : new Map(fields.map(([field]) => [field, new Map()]));
-
-    fields.forEach(([field, containerId]) => {
-      const items = [...(maps.get(field) || new Map()).entries()]
-        .map(([label, count]) => ({ label, count }))
+      const duplicateGroups = [...nameGroups.values()]
+        .filter(group => group.records.length > 1)
         .sort((a, b) =>
-          b.count - a.count ||
-          a.label.localeCompare(b.label, undefined, {
-            numeric: true,
+          b.records.length - a.records.length ||
+          a.displayName.localeCompare(b.displayName, undefined, {
             sensitivity: "base",
           })
         );
-      renderReportList_(containerId, items);
-    });
 
-    renderTypeBreakdown_(records);
+      const duplicateExtraRows = duplicateGroups.reduce(
+        (total, group) => total + group.records.length - 1,
+        0
+      );
+      const duplicateTotalRows = duplicateGroups.reduce(
+        (total, group) => total + group.records.length,
+        0
+      );
+
+      PersonnelState.__performanceAnalytics = {
+        records,
+        summaryMaps,
+      };
+
+      return {
+        uniqueCount: nameGroups.size,
+        duplicateNameCount: duplicateGroups.length,
+        duplicateExtraRows,
+        duplicateTotalRows,
+        duplicateGroups,
+      };
+    }, { records: records.length });
+  };
+
+  renderCountingReports_ = function (records) {
+    return personnelPerfMeasure_("personnel.summaryRender", () => {
+      const fields = [
+        ["Gender", "genderReport"],
+        ["Category", "categoryReport"],
+        ["Camp", "campReport"],
+        ["Office", "officeReport"],
+        ["Rank", "rankReport"],
+      ];
+
+      const analytics = PersonnelState.__performanceAnalytics;
+      const maps = analytics && analytics.records === records
+        ? analytics.summaryMaps
+        : new Map(fields.map(([field]) => [field, new Map()]));
+
+      fields.forEach(([field, containerId]) => {
+        const items = [...(maps.get(field) || new Map()).entries()]
+          .map(([label, count]) => ({ label, count }))
+          .sort((a, b) =>
+            b.count - a.count ||
+            a.label.localeCompare(b.label, undefined, {
+              numeric: true,
+              sensitivity: "base",
+            })
+          );
+        renderReportList_(containerId, items);
+      });
+
+      renderTypeBreakdown_(records);
+    }, { records: records.length });
   };
 }
 
