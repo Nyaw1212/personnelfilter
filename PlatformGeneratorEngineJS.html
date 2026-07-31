@@ -1,0 +1,150 @@
+// Personnel Platform — reusable GeneratorEngine
+// Developer Mode foundation. Orchestrates registered report generators.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const handlers = new Map();
+  const history = [];
+  let sequence = 0;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function normalizeType(value) {
+    return text(value).toUpperCase();
+  }
+
+  function clone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function record(entry) {
+    history.unshift(entry);
+    history.splice(50);
+    return entry;
+  }
+
+  const GeneratorEngine = {
+    version: "1.0.0",
+
+    register(reportType, handler, options = {}) {
+      const type = normalizeType(reportType);
+      if (!type) throw new Error("Generator report type is required.");
+      if (typeof handler !== "function") throw new TypeError(`Generator ${type} must be a function.`);
+      if (handlers.has(type) && options.replace !== true) {
+        throw new Error(`Generator ${type} is already registered.`);
+      }
+      handlers.set(type, handler);
+      platform.events.emit("generator:registered", { reportType: type });
+      return type;
+    },
+
+    unregister(reportType) {
+      const type = normalizeType(reportType);
+      const removed = handlers.delete(type);
+      if (removed) platform.events.emit("generator:unregistered", { reportType: type });
+      return removed;
+    },
+
+    has(reportType) {
+      return handlers.has(normalizeType(reportType));
+    },
+
+    list() {
+      return [...handlers.keys()].sort();
+    },
+
+    async generate(reportType, payload, context = {}) {
+      const type = normalizeType(reportType || payload?.reportType);
+      const handler = handlers.get(type);
+      if (!handler) throw new Error(`No generator is registered for ${type || "this report type"}.`);
+
+      const request = {
+        id: `GEN-${Date.now()}-${++sequence}`,
+        reportType: type,
+        pluginId: text(context.pluginId),
+        requestedAt: new Date().toISOString(),
+        payload: clone(payload),
+      };
+
+      platform.events.emit("generator:started", request);
+
+      try {
+        const output = await handler(clone(payload), {
+          ...context,
+          requestId: request.id,
+          reportType: type,
+          platform,
+        });
+        const completed = record({
+          ...request,
+          status: "COMPLETED",
+          completedAt: new Date().toISOString(),
+          output: clone(output),
+        });
+        platform.events.emit("generator:completed", completed);
+        return completed;
+      } catch (error) {
+        const failed = record({
+          ...request,
+          status: "FAILED",
+          completedAt: new Date().toISOString(),
+          error: error?.message || String(error),
+        });
+        platform.events.emit("generator:failed", failed);
+        throw error;
+      }
+    },
+
+    history(limit = 20) {
+      return history.slice(0, Math.max(0, Number(limit) || 0)).map(clone);
+    },
+
+    last() {
+      return history.length ? clone(history[0]) : null;
+    },
+
+    status() {
+      const report = {
+        version: this.version,
+        generators: this.list(),
+        history: history.length,
+        lastStatus: history[0]?.status || "—",
+        lastReportType: history[0]?.reportType || "—",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("generator")) platform.engines.replace("generator", GeneratorEngine);
+  else platform.engines.register("generator", GeneratorEngine);
+
+  // First adapter: accept the Reassignment V1 payload and return a normalized
+  // preview result. The real AOGEN/ReportEngine output handler will replace it.
+  GeneratorEngine.register("REASSIGNMENT", async payload => ({
+    stage: "PAYLOAD_READY",
+    reportType: "REASSIGNMENT",
+    personnelCount: Array.isArray(payload?.personnel) ? payload.personnel.length : 0,
+    payload,
+  }), { replace: true });
+
+  platform.events.on("generator:requested", event => {
+    GeneratorEngine.generate(event?.reportType, event?.payload, {
+      pluginId: event?.pluginId,
+      sourceEvent: event,
+    }).then(result => {
+      console.info("GeneratorEngine completed request.", result);
+    }).catch(error => {
+      console.error("GeneratorEngine request failed.", error);
+    });
+  });
+
+  window.$PF.generator = GeneratorEngine;
+  console.info("GeneratorEngine v1.0.0 active. Run $PF.generator.status().");
+})();
