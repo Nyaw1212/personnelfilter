@@ -7,8 +7,45 @@
   const platform = window.PersonnelPlatform;
   if (!platform) return;
 
+  const RANK_WEIGHTS = Object.freeze({
+    CCSUPT: 1,
+    CTCSUPT: 1.1,
+    CSSUPT: 2,
+    CTSSUPT: 2.1,
+    CSUPT: 3,
+    CTSUPT: 3.1,
+    CCINSP: 4,
+    CTCINSP: 4.1,
+    CSINSP: 5,
+    CTSINSP: 5.1,
+    CINSP: 6,
+    CTINSP: 6.1,
+    CSO4: 7,
+    CTSO4: 7.1,
+    CSO3: 8,
+    CTSO3: 8.1,
+    CSO2: 9,
+    CTSO2: 9.1,
+    CSO1: 10,
+    CTSO1: 10.1,
+    CO3: 11,
+    CTO3: 11.1,
+    CO2: 12,
+    CTO2: 12.1,
+    CO1: 13,
+    CTO1: 13.1,
+  });
+
   function text(value) {
     return String(value == null ? "" : value).trim();
+  }
+
+  function normalizeRank(value) {
+    return text(value).toUpperCase().replace(/\s+/g, "");
+  }
+
+  function rankWeight(value) {
+    return RANK_WEIGHTS[normalizeRank(value)] ?? 999;
   }
 
   function lastName(value) {
@@ -24,9 +61,15 @@
     });
   }
 
+  function compareRank(a, b) {
+    return rankWeight(a) - rankWeight(b) || compareText(a, b);
+  }
+
   const SortEngine = {
-    version: "1.0.0",
+    version: "1.1.0",
     modes: ["LIST", "RANK", "RANK_LAST_NAME", "LAST_NAME", "ASSIGNED_SEQUENCE"],
+    rankWeights: RANK_WEIGHTS,
+    rankWeight,
 
     sort(items, options = {}) {
       const mode = this.modes.includes(options.mode) ? options.mode : "LIST";
@@ -46,11 +89,13 @@
         const nameB = getName(b);
 
         if (mode === "RANK") {
-          return compareText(rankA, rankB) || compareText(nameA, nameB);
+          return compareRank(rankA, rankB) || compareText(nameA, nameB);
         }
 
         if (mode === "RANK_LAST_NAME") {
-          return compareText(rankA, rankB) || compareText(lastName(nameA), lastName(nameB)) || compareText(nameA, nameB);
+          return compareRank(rankA, rankB) ||
+            compareText(lastName(nameA), lastName(nameB)) ||
+            compareText(nameA, nameB);
         }
 
         if (mode === "LAST_NAME") {
@@ -72,5 +117,5 @@
   else platform.engines.register("sort", SortEngine);
 
   window.$PF.sort = SortEngine;
-  console.info("Reusable SortEngine v1.0.0 active.");
+  console.info("Reusable SortEngine v1.1.0 active with official rank hierarchy.");
 })();
