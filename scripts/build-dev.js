@@ -29,7 +29,9 @@ function appJsBundle() {
     "PlatformAssignmentEngineV2JS.html",
     "ReassignmentPluginJS.html",
     "PlatformAssignmentCoreJS.html",
+    "PlatformSortEngineJS.html",
     "ReassignmentPluginV1JS.html",
+    "ReassignmentPluginV1Phase3JS.html",
   ];
 
   return [
@@ -58,4 +60,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with clean Reassignment Plugin V1. Phase 2 is temporarily disabled.");
+console.log("Built dev/index.html with Reassignment V1.2, SortEngine, advisory validation, and payload bridge.");
