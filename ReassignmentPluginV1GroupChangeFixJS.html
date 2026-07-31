@@ -1,0 +1,70 @@
+// Reassignment V1 — robust group destination change bridge
+// Loaded before Phase 3 so it owns the Change button action.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const plugin = window.$PF?.reassignmentV1;
+  if (!platform || !engine || !plugin) return;
+
+  const SCOPE = "reassignment-v1";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function refreshPlugin() {
+    // Re-open performs a clean state-driven render without resetting assignments.
+    plugin.close();
+    plugin.open();
+  }
+
+  document.addEventListener("click", event => {
+    const button = event.target.closest?.("[data-rp1-group-change]");
+    if (!button) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    const group = button.closest(".rp1-group");
+    const select = group?.querySelector("[data-rp1-group-select]");
+    const destination = text(select?.value);
+    const keys = [...(group?.querySelectorAll("[data-rp1-remove]") || [])]
+      .map(node => text(node.dataset.rp1Remove))
+      .filter(Boolean);
+
+    if (!destination || !keys.length) return;
+
+    const current = engine.get(SCOPE);
+    const assignments = new Map(current.assignments || []);
+    let changed = 0;
+
+    keys.forEach(key => {
+      const assignment = assignments.get(key);
+      if (!assignment) return;
+      assignments.set(key, {
+        transferMode: assignment.transferMode,
+        destination,
+      });
+      changed += 1;
+    });
+
+    if (!changed) return;
+
+    engine.commit(SCOPE, {
+      assignments: [...assignments],
+    }, "MOVE_GROUP_BY_KEYS");
+
+    refreshPlugin();
+  }, true);
+
+  window.$PF.reassignmentV1GroupChangeFix = {
+    version: "1.0.0",
+    active: true,
+  };
+
+  console.info("Reassignment V1 group destination fix active.");
+})();
