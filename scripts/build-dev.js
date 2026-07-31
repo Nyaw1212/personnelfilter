@@ -17,6 +17,7 @@ function appJsBundle() {
     "ReassignmentEngineCoreJS.html",
     "ReassignmentEngineControlsJS.html",
     "ReassignmentEngineRendererJS.html",
+    "ReassignmentEngineDebugJS.html",
   ];
 
   return [
@@ -44,4 +45,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with Apps Script includes expanded and ReassignmentEngine pilot loaded.");
+console.log("Built dev/index.html with Apps Script includes expanded, ReassignmentEngine pilot, and diagnostics loaded.");
