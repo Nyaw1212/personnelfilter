@@ -1,0 +1,294 @@
+//----------------------------------
+// Reassignment Engine — Core (Developer Mode pilot)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "personnelFilterReassignmentEngineV1";
+  const DEFAULT_CAMPS = ["NBP", "MAXIMUM", "MEDIUM", "MINIMUM", "RDC"];
+  const DEFAULT_OFFICES = [
+    "CAMP COMMANDER",
+    "CASO",
+    "COMMAND CENTER",
+    "EAS",
+    "ESCORT",
+    "ESCORT GROUP",
+    "EXTERNAL AFFAIRS SECTION",
+    "EXTERNAL SECURITY SERVICES",
+    "IIS",
+    "IVSU",
+    "NBPH",
+    "OFFICE OF THE SUPERINTENDENT",
+    "SEPARATION CENTER",
+  ];
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function uniqueSorted_(values) {
+    return [...new Set(values.map(text_).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  function rosterDirectory_() {
+    const records = Array.isArray(window.PersonnelState?.records)
+      ? window.PersonnelState.records
+      : [];
+
+    return {
+      camps: uniqueSorted_([
+        ...DEFAULT_CAMPS,
+        ...records.map(record =>
+          record?.Camp ?? record?.CAMP ?? record?.camp ?? ""
+        ),
+      ]),
+      offices: uniqueSorted_([
+        ...DEFAULT_OFFICES,
+        ...records.map(record =>
+          record?.Office ?? record?.OFFICE ?? record?.office ?? ""
+        ),
+      ]),
+    };
+  }
+
+  function snapshot_() {
+    return {
+      transferMode: engine.state.transferMode,
+      destination: { ...engine.state.destination },
+      assignments: [...(window.ReassignmentState?.assignments || new Map()).entries()],
+      selectedKeys: [...(window.ReassignmentState?.selectedKeys || new Set())],
+    };
+  }
+
+  function restoreSnapshot_(snapshot) {
+    if (!snapshot || !window.ReassignmentState) return;
+
+    engine.state.transferMode = snapshot.transferMode || "OFFICE_TO_OFFICE";
+    engine.state.destination = {
+      type: snapshot.destination?.type || "OFFICE",
+      value: snapshot.destination?.value || "",
+    };
+    window.ReassignmentState.assignments = new Map(snapshot.assignments || []);
+    window.ReassignmentState.selectedKeys = new Set(snapshot.selectedKeys || []);
+    syncLegacyDestination_();
+  }
+
+  function syncLegacyDestination_() {
+    if (!window.ReassignmentState) return;
+
+    const campMode = engine.state.transferMode === "CAMP_TO_CAMP";
+    window.ReassignmentState.activeCamp = campMode
+      ? engine.state.destination.value
+      : "";
+    window.ReassignmentState.activeOffice = campMode
+      ? ""
+      : engine.state.destination.value;
+  }
+
+  function persist_() {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          schemaVersion: 1,
+          transferMode: engine.state.transferMode,
+          destination: engine.state.destination,
+        })
+      );
+    } catch (error) {
+      console.warn("ReassignmentEngine persistence failed:", error);
+    }
+
+    if (typeof window.saveReassignmentState_ === "function") {
+      window.saveReassignmentState_();
+    }
+  }
+
+  function load_() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      if (saved.transferMode === "CAMP_TO_CAMP" || saved.transferMode === "OFFICE_TO_OFFICE") {
+        engine.state.transferMode = saved.transferMode;
+      }
+      if (saved.destination && typeof saved.destination === "object") {
+        engine.state.destination = {
+          type: text_(saved.destination.type) ||
+            (engine.state.transferMode === "CAMP_TO_CAMP" ? "CAMP" : "OFFICE"),
+          value: text_(saved.destination.value),
+        };
+      }
+    } catch (error) {
+      console.warn("ReassignmentEngine restore failed:", error);
+    }
+
+    syncLegacyDestination_();
+  }
+
+  function recordHistory_() {
+    engine.history.undo.push(snapshot_());
+    if (engine.history.undo.length > 30) engine.history.undo.shift();
+    engine.history.redo = [];
+  }
+
+  function visibleUnassignedKeys_() {
+    const entries = [...(window.PersonnelState?.aoCart || new Map()).entries()]
+      .filter(([key]) => !window.ReassignmentState.assignments.has(key));
+
+    const filtered = typeof window.filterUnassigned_ === "function"
+      ? window.filterUnassigned_(entries)
+      : entries;
+
+    return filtered.map(([key]) => key);
+  }
+
+  function currentDestination_() {
+    const value = text_(engine.state.destination.value);
+    if (!value) return null;
+
+    return engine.state.transferMode === "CAMP_TO_CAMP"
+      ? { office: "", camp: value, mode: "CAMP_TO_CAMP" }
+      : { office: value, camp: "", mode: "OFFICE_TO_OFFICE" };
+  }
+
+  function assignKeys_(keys) {
+    const destination = currentDestination_();
+    if (!destination) {
+      alert(
+        engine.state.transferMode === "CAMP_TO_CAMP"
+          ? "Choose a destination Camp first."
+          : "Choose a destination Office first."
+      );
+      return false;
+    }
+
+    const cart = window.PersonnelState?.aoCart || new Map();
+    keys.forEach(key => {
+      if (cart.has(key)) {
+        window.ReassignmentState.assignments.set(key, { ...destination });
+      }
+    });
+    window.ReassignmentState.selectedKeys.clear();
+    return true;
+  }
+
+  const engine = {
+    state: {
+      transferMode: "OFFICE_TO_OFFICE",
+      destination: { type: "OFFICE", value: "" },
+      destinationSearch: "",
+    },
+    history: { undo: [], redo: [] },
+    listeners: new Set(),
+
+    initialize() {
+      load_();
+      this.emit();
+    },
+
+    getDirectory() {
+      return rosterDirectory_();
+    },
+
+    getVisibleDestinations() {
+      const directory = this.getDirectory();
+      const source = this.state.transferMode === "CAMP_TO_CAMP"
+        ? directory.camps
+        : directory.offices;
+      const query = text_(this.state.destinationSearch).toLowerCase();
+      return query
+        ? source.filter(value => value.toLowerCase().includes(query))
+        : source;
+    },
+
+    dispatch(command) {
+      const type = text_(command?.type).toUpperCase();
+      if (!type) return;
+
+      if (type === "UNDO") {
+        const previous = this.history.undo.pop();
+        if (!previous) return;
+        this.history.redo.push(snapshot_());
+        restoreSnapshot_(previous);
+        persist_();
+        this.emit();
+        return;
+      }
+
+      if (type === "REDO") {
+        const next = this.history.redo.pop();
+        if (!next) return;
+        this.history.undo.push(snapshot_());
+        restoreSnapshot_(next);
+        persist_();
+        this.emit();
+        return;
+      }
+
+      if (type === "SET_DESTINATION_SEARCH") {
+        this.state.destinationSearch = text_(command.value);
+        this.emit();
+        return;
+      }
+
+      recordHistory_();
+
+      if (type === "SET_TRANSFER_MODE") {
+        const mode = command.value === "CAMP_TO_CAMP"
+          ? "CAMP_TO_CAMP"
+          : "OFFICE_TO_OFFICE";
+        this.state.transferMode = mode;
+        this.state.destination = {
+          type: mode === "CAMP_TO_CAMP" ? "CAMP" : "OFFICE",
+          value: "",
+        };
+        syncLegacyDestination_();
+      } else if (type === "SET_DESTINATION") {
+        this.state.destination = {
+          type: this.state.transferMode === "CAMP_TO_CAMP" ? "CAMP" : "OFFICE",
+          value: text_(command.value),
+        };
+        syncLegacyDestination_();
+      } else if (type === "ASSIGN_SELECTED") {
+        if (!assignKeys_([...window.ReassignmentState.selectedKeys])) {
+          this.history.undo.pop();
+          return;
+        }
+      } else if (type === "ASSIGN_VISIBLE") {
+        if (!assignKeys_(visibleUnassignedKeys_())) {
+          this.history.undo.pop();
+          return;
+        }
+      } else if (type === "REMOVE_ASSIGNMENT") {
+        window.ReassignmentState.assignments.delete(text_(command.key));
+      } else {
+        this.history.undo.pop();
+        return;
+      }
+
+      persist_();
+      this.emit();
+    },
+
+    subscribe(listener) {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    },
+
+    emit() {
+      this.listeners.forEach(listener => listener(this));
+      document.dispatchEvent(
+        new CustomEvent("reassignment-engine:state", {
+          detail: {
+            transferMode: this.state.transferMode,
+            destination: { ...this.state.destination },
+          },
+        })
+      );
+    },
+  };
+
+  window.ReassignmentEngine = engine;
+})();
