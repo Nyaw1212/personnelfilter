@@ -1,5 +1,5 @@
-// Personnel Platform — reusable TransferQueueEngine
-// Developer Mode foundation. Owns queued personnel-transfer requests only.
+// Personnel Platform — TransferQueueEngine v2
+// Owns personnel movement lifecycle while remaining compatible with the V1 queue UI.
 
 (function () {
   "use strict";
@@ -10,52 +10,330 @@
   const entries = new Map();
   let sequence = 0;
 
+  const ACTIVE_STATUSES = new Set(["PENDING", "APPROVED"]);
+  const VALID_STATUSES = new Set([
+    "PENDING",
+    "APPROVED",
+    "APPLIED",
+    "CANCELLED",
+    "FAILED",
+  ]);
+
   function text(value) {
     return String(value == null ? "" : value).trim();
+  }
+
+  function upper(value) {
+    return text(value).toUpperCase();
   }
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
   }
 
-  function normalizeStatus(value) {
-    const status = text(value).toUpperCase();
-    return ["PENDING", "APPROVED", "APPLIED", "CANCELLED", "FAILED"].includes(status)
-      ? status
-      : "PENDING";
+  function nowIso() {
+    return new Date().toISOString();
   }
 
-  function makeId() {
-    return `TRQ-${Date.now()}-${++sequence}`;
+  function normalizeStatus(value, fallback = "PENDING") {
+    const status = upper(value);
+    return VALID_STATUSES.has(status) ? status : fallback;
+  }
+
+  function makeId(prefix = "TRQ") {
+    return `${prefix}-${Date.now()}-${++sequence}`;
+  }
+
+  function movementKey(person = {}, index = 0) {
+    return text(
+      person.personnelKey ||
+      person.key ||
+      person.id ||
+      person.__key ||
+      person.__sheetRow ||
+      person.rowIndex ||
+      person.sheetRow
+    ) || `person:${upper(person.fullName || person.name)}:${index + 1}`;
+  }
+
+  function assignmentFromPerson(person = {}) {
+    const mode = upper(person.transferMode || person.mode);
+    const original = person.originalAssignment || person.original || {};
+    const proposed = person.proposedAssignment || person.proposed || {};
+
+    return {
+      transferMode: mode || "OFFICE_TO_OFFICE",
+      originalAssignment: {
+        office: text(original.office || person.fromOffice || (mode !== "CAMP_TO_CAMP" ? person.from : "")),
+        camp: text(original.camp || person.fromCamp || (mode === "CAMP_TO_CAMP" ? person.from : "")),
+      },
+      proposedAssignment: {
+        office: text(proposed.office || person.toOffice || (mode !== "CAMP_TO_CAMP" ? person.to : "")),
+        camp: text(proposed.camp || person.toCamp || (mode === "CAMP_TO_CAMP" ? person.to : "")),
+      },
+    };
+  }
+
+  function normalizeMovement(person = {}, index = 0, context = {}) {
+    const assignment = assignmentFromPerson(person);
+    const createdAt = context.createdAt || nowIso();
+    const status = normalizeStatus(person.status || context.status);
+
+    return {
+      id: text(person.transferId || person.movementId) || makeId("TRM"),
+      personnelKey: movementKey(person, index),
+      rank: text(person.rank),
+      fullName: text(person.fullName || person.name),
+      transferMode: assignment.transferMode,
+      originalAssignment: assignment.originalAssignment,
+      proposedAssignment: assignment.proposedAssignment,
+      status,
+      note: text(person.note),
+      cautions: clone(person.cautions || []),
+      history: clone(person.history || [{
+        status,
+        at: createdAt,
+        by: text(context.createdBy),
+        note: "Transfer movement created.",
+      }]),
+      createdAt,
+      updatedAt: createdAt,
+      approvedAt: text(person.approvedAt),
+      cancelledAt: text(person.cancelledAt),
+      appliedAt: text(person.appliedAt),
+      failedAt: text(person.failedAt),
+      result: clone(person.result || null),
+      error: text(person.error),
+    };
+  }
+
+  function movementToLegacyPerson(movement) {
+    return {
+      personnelKey: movement.personnelKey,
+      rank: movement.rank,
+      fullName: movement.fullName,
+      transferMode: movement.transferMode,
+      fromOffice: movement.originalAssignment.office,
+      fromCamp: movement.originalAssignment.camp,
+      toOffice: movement.proposedAssignment.office,
+      toCamp: movement.proposedAssignment.camp,
+      from: movement.transferMode === "CAMP_TO_CAMP"
+        ? movement.originalAssignment.camp
+        : movement.originalAssignment.office,
+      to: movement.transferMode === "CAMP_TO_CAMP"
+        ? movement.proposedAssignment.camp
+        : movement.proposedAssignment.office,
+      status: movement.status,
+      cautions: clone(movement.cautions),
+    };
+  }
+
+  function aggregateStatus(movements, fallback = "PENDING") {
+    if (!movements.length) return fallback;
+    const statuses = new Set(movements.map(item => item.status));
+    if (statuses.size === 1) return movements[0].status;
+    if (statuses.has("FAILED")) return "FAILED";
+    if (statuses.has("PENDING")) return "PENDING";
+    if (statuses.has("APPROVED")) return "APPROVED";
+    if (statuses.has("APPLIED")) return "APPLIED";
+    return "CANCELLED";
+  }
+
+  function activeMovementForPersonnel(personnelKey, excludedEntryId = "") {
+    const key = text(personnelKey);
+    if (!key) return null;
+
+    for (const entry of entries.values()) {
+      if (entry.id === excludedEntryId) continue;
+      const movement = entry.movements.find(item =>
+        item.personnelKey === key && ACTIVE_STATUSES.has(item.status)
+      );
+      if (movement) return { entryId: entry.id, movement: clone(movement) };
+    }
+    return null;
+  }
+
+  function validateMovement(person = {}, options = {}) {
+    const movement = normalizeMovement(person, options.index || 0, options);
+    const errors = [];
+    const cautions = [];
+
+    if (!movement.personnelKey) {
+      errors.push({ code: "MISSING_PERSONNEL_KEY", message: "Personnel key is required." });
+    }
+    if (!movement.fullName) {
+      errors.push({ code: "MISSING_PERSONNEL_NAME", message: "Personnel name is required." });
+    }
+
+    const hasDestination = movement.transferMode === "CAMP_TO_CAMP"
+      ? Boolean(movement.proposedAssignment.camp)
+      : Boolean(movement.proposedAssignment.office);
+
+    if (!hasDestination) {
+      errors.push({ code: "MISSING_DESTINATION", message: "A proposed destination is required." });
+    }
+
+    const active = activeMovementForPersonnel(movement.personnelKey, options.excludeEntryId);
+    if (active) {
+      cautions.push({
+        code: "ALREADY_FLOATING",
+        message: `${movement.fullName || "This personnel"} already has an active transfer.`,
+        entryId: active.entryId,
+      });
+    }
+
+    const sameOffice = upper(movement.originalAssignment.office) === upper(movement.proposedAssignment.office);
+    const sameCamp = upper(movement.originalAssignment.camp) === upper(movement.proposedAssignment.camp);
+    if ((movement.transferMode === "CAMP_TO_CAMP" && sameCamp) ||
+        (movement.transferMode !== "CAMP_TO_CAMP" && sameOffice)) {
+      cautions.push({
+        code: "SAME_ASSIGNMENT",
+        message: "Current and proposed assignments are the same.",
+      });
+    }
+
+    if (!movement.originalAssignment.office && !movement.originalAssignment.camp) {
+      cautions.push({
+        code: "MISSING_ORIGINAL_ASSIGNMENT",
+        message: "The original assignment is incomplete.",
+      });
+    }
+
+    return {
+      valid: errors.length === 0,
+      canProceed: errors.length === 0,
+      errors,
+      cautions,
+      movement,
+    };
+  }
+
+  function appendHistory(movement, status, details = {}) {
+    const at = details.at || nowIso();
+    movement.history = Array.isArray(movement.history) ? movement.history : [];
+    movement.history.push({
+      status,
+      at,
+      by: text(details.by),
+      note: text(details.note),
+    });
+    movement.updatedAt = at;
+
+    if (status === "APPROVED") movement.approvedAt = at;
+    if (status === "CANCELLED") movement.cancelledAt = at;
+    if (status === "APPLIED") movement.appliedAt = at;
+    if (status === "FAILED") movement.failedAt = at;
   }
 
   function save(entry, action) {
+    entry.status = aggregateStatus(entry.movements, entry.status);
+    entry.personnel = entry.movements.map(movementToLegacyPerson);
+    entry.updatedAt = nowIso();
     entries.set(entry.id, entry);
-    platform.events.emit("transfer-queue:changed", { action, entry: clone(entry) });
-    platform.events.emit(`transfer-queue:changed:${entry.id}`, { action, entry: clone(entry) });
+
+    const payload = { action, entry: clone(entry) };
+    platform.events.emit("transfer-queue:changed", payload);
+    platform.events.emit(`transfer-queue:changed:${entry.id}`, payload);
     return clone(entry);
   }
 
-  const TransferQueueEngine = {
-    version: "1.0.0",
+  function transition(id, nextStatus, details = {}) {
+    const key = text(id);
+    const entry = entries.get(key);
+    if (!entry) throw new Error(`Transfer queue entry ${key || "—"} was not found.`);
 
-    enqueue(input = {}) {
-      const now = new Date().toISOString();
+    const target = normalizeStatus(nextStatus, "");
+    if (!target) throw new Error(`Unknown transfer status: ${nextStatus}`);
+
+    entry.movements.forEach(movement => {
+      const current = movement.status;
+      let allowed = false;
+
+      if (target === "APPROVED") allowed = current === "PENDING";
+      if (target === "CANCELLED") allowed = current === "PENDING" || current === "APPROVED" || current === "FAILED";
+      if (target === "APPLIED") allowed = current === "APPROVED" || current === "PENDING";
+      if (target === "FAILED") allowed = current !== "APPLIED" && current !== "CANCELLED";
+
+      if (!allowed) return;
+
+      movement.status = target;
+      movement.note = text(details.note || movement.note);
+      if (target === "APPLIED") movement.result = clone(details.result || {});
+      if (target === "FAILED") movement.error = text(details.error || details.note);
+      appendHistory(movement, target, details);
+    });
+
+    return save(entry, target);
+  }
+
+  const TransferQueueEngine = {
+    version: "2.0.0",
+    model: "PERSONNEL_MOVEMENT",
+    validationMode: "CAUTION_FIRST",
+
+    validateTransfer(input = {}, options = {}) {
+      return validateMovement(input, options);
+    },
+
+    validateBatch(input = {}) {
+      const personnel = Array.isArray(input.personnel) ? input.personnel : [];
+      const results = personnel.map((person, index) =>
+        validateMovement(person, { index, createdBy: input.createdBy })
+      );
+      return {
+        valid: results.every(result => result.valid),
+        canProceed: results.every(result => result.canProceed),
+        errors: results.flatMap(result => result.errors),
+        cautions: results.flatMap(result => result.cautions),
+        results,
+      };
+    },
+
+    enqueue(input = {}, options = {}) {
+      const now = nowIso();
+      const personnel = Array.isArray(input.personnel) ? input.personnel : [];
+      if (!personnel.length) throw new Error("At least one personnel movement is required.");
+
+      const validations = personnel.map((person, index) =>
+        validateMovement(person, { index, createdAt: now, createdBy: input.createdBy })
+      );
+      const errors = validations.flatMap(result => result.errors);
+      if (errors.length) {
+        const error = new Error(errors.map(item => item.message).join(" "));
+        error.validation = { errors, cautions: validations.flatMap(result => result.cautions) };
+        throw error;
+      }
+
+      const movements = validations.map(result => ({
+        ...result.movement,
+        cautions: clone(result.cautions),
+      }));
+
       const entry = {
         id: text(input.id) || makeId(),
         sourcePlugin: text(input.sourcePlugin || input.pluginId),
         reportDraftId: text(input.reportDraftId),
-        reportType: text(input.reportType).toUpperCase(),
-        status: normalizeStatus(input.status),
-        personnel: clone(Array.isArray(input.personnel) ? input.personnel : []),
+        reportType: upper(input.reportType || "TRANSFER"),
+        status: aggregateStatus(movements),
+        movements,
+        personnel: movements.map(movementToLegacyPerson),
         metadata: clone(input.metadata || {}),
         payload: clone(input.payload || {}),
         note: text(input.note),
+        cautions: clone(validations.flatMap(result => result.cautions)),
         createdAt: input.createdAt || now,
         updatedAt: now,
       };
-      if (entries.has(entry.id)) throw new Error(`Transfer queue entry ${entry.id} already exists.`);
-      return save(entry, "ENQUEUE");
+
+      if (entries.has(entry.id)) {
+        throw new Error(`Transfer queue entry ${entry.id} already exists.`);
+      }
+
+      return save(entry, options.proceedWithCautions ? "ENQUEUE_WITH_CAUTIONS" : "ENQUEUE");
+    },
+
+    enqueueTransfer(input = {}, options = {}) {
+      return this.enqueue({ ...input, personnel: [input.personnel || input] }, options);
     },
 
     get(id) {
@@ -64,45 +342,82 @@
     },
 
     list(options = {}) {
-      const status = text(options.status).toUpperCase();
+      const status = upper(options.status);
       return [...entries.values()]
         .filter(entry => !status || entry.status === status)
         .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
         .map(clone);
     },
 
+    movements(options = {}) {
+      const status = upper(options.status);
+      const personnelKey = text(options.personnelKey);
+      return [...entries.values()].flatMap(entry =>
+        entry.movements
+          .filter(item => !status || item.status === status)
+          .filter(item => !personnelKey || item.personnelKey === personnelKey)
+          .map(item => ({ ...clone(item), entryId: entry.id }))
+      );
+    },
+
+    floating() {
+      return this.movements().filter(item => ACTIVE_STATUSES.has(item.status));
+    },
+
+    floatingPersonnelKeys() {
+      return [...new Set(this.floating().map(item => item.personnelKey))];
+    },
+
+    isFloating(personnelKey) {
+      return this.floatingPersonnelKeys().includes(text(personnelKey));
+    },
+
+    approve(id, note = "", by = "") {
+      return transition(id, "APPROVED", { note, by });
+    },
+
+    apply(id, result = {}, by = "") {
+      return transition(id, "APPLIED", {
+        result,
+        by,
+        note: text(result.note) || "Transfer applied.",
+      });
+    },
+
+    markApplied(id, result = {}) {
+      return this.apply(id, result, text(result.appliedBy));
+    },
+
+    cancel(id, note = "", by = "") {
+      return transition(id, "CANCELLED", { note, by });
+    },
+
+    fail(id, error, by = "") {
+      return transition(id, "FAILED", {
+        error: error?.message || text(error),
+        note: error?.message || text(error),
+        by,
+      });
+    },
+
     update(id, patch = {}) {
       const key = text(id);
       const entry = entries.get(key);
       if (!entry) throw new Error(`Transfer queue entry ${key || "—"} was not found.`);
+
+      if (patch.status && normalizeStatus(patch.status) !== entry.status) {
+        return transition(id, patch.status, patch);
+      }
+
       const next = {
         ...entry,
         ...clone(patch),
         id: entry.id,
-        status: patch.status == null ? entry.status : normalizeStatus(patch.status),
-        note: patch.note == null ? entry.note : text(patch.note),
-        updatedAt: new Date().toISOString(),
+        movements: entry.movements,
+        personnel: entry.personnel,
+        status: entry.status,
       };
       return save(next, "UPDATE");
-    },
-
-    approve(id, note = "") {
-      return this.update(id, { status: "APPROVED", note });
-    },
-
-    markApplied(id, result = {}) {
-      return this.update(id, { status: "APPLIED", result: clone(result) });
-    },
-
-    cancel(id, note = "") {
-      return this.update(id, { status: "CANCELLED", note });
-    },
-
-    fail(id, error) {
-      return this.update(id, {
-        status: "FAILED",
-        error: error?.message || text(error),
-      });
     },
 
     remove(id) {
@@ -113,13 +428,14 @@
     },
 
     clear(options = {}) {
-      const status = text(options.status).toUpperCase();
+      const status = upper(options.status);
       if (!status) {
         const count = entries.size;
         entries.clear();
         platform.events.emit("transfer-queue:cleared", { count, status: "ALL" });
         return count;
       }
+
       let count = 0;
       [...entries.entries()].forEach(([id, entry]) => {
         if (entry.status === status) {
@@ -131,25 +447,46 @@
       return count;
     },
 
+    history(options = {}) {
+      return this.movements(options).flatMap(movement =>
+        movement.history.map(item => ({
+          ...clone(item),
+          entryId: movement.entryId,
+          movementId: movement.id,
+          personnelKey: movement.personnelKey,
+          fullName: movement.fullName,
+        }))
+      ).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    },
+
     status() {
       const values = [...entries.values()];
+      const movements = values.flatMap(entry => entry.movements);
       const report = {
         version: this.version,
+        model: this.model,
+        validation: this.validationMode,
+        batches: values.length,
+        movements: movements.length,
+        floating: movements.filter(item => ACTIVE_STATUSES.has(item.status)).length,
+        pending: movements.filter(item => item.status === "PENDING").length,
+        approved: movements.filter(item => item.status === "APPROVED").length,
+        applied: movements.filter(item => item.status === "APPLIED").length,
+        cancelled: movements.filter(item => item.status === "CANCELLED").length,
+        failed: movements.filter(item => item.status === "FAILED").length,
         total: values.length,
-        pending: values.filter(item => item.status === "PENDING").length,
-        approved: values.filter(item => item.status === "APPROVED").length,
-        applied: values.filter(item => item.status === "APPLIED").length,
-        cancelled: values.filter(item => item.status === "CANCELLED").length,
-        failed: values.filter(item => item.status === "FAILED").length,
       };
       console.table(report);
       return report;
     },
   };
 
-  if (platform.engines.has("transferQueue")) platform.engines.replace("transferQueue", TransferQueueEngine);
-  else platform.engines.register("transferQueue", TransferQueueEngine);
+  if (platform.engines.has("transferQueue")) {
+    platform.engines.replace("transferQueue", TransferQueueEngine);
+  } else {
+    platform.engines.register("transferQueue", TransferQueueEngine);
+  }
 
   window.$PF.transferQueue = TransferQueueEngine;
-  console.info("TransferQueueEngine v1.0.0 active. Run $PF.transferQueue.status().");
+  console.info("TransferQueueEngine v2.0.0 active. Run $PF.transferQueue.status().");
 })();
