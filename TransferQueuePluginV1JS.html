@@ -1,0 +1,204 @@
+// Personnel Platform — Transfer Queue Plugin V1
+// Clean local queue UI backed only by TransferQueueEngine.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const queue = platform?.engines?.get?.("transferQueue");
+  if (!platform || !queue) return;
+
+  const ROOT_ID = "transferQueuePluginV1Root";
+  const BACKDROP_ID = "transferQueuePluginV1Backdrop";
+  const selected = new Set();
+  let statusFilter = "ALL";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function fromValue(person) {
+    return text(person?.transferMode) === "CAMP_TO_CAMP"
+      ? text(person?.fromCamp) || "—"
+      : text(person?.fromOffice) || "—";
+  }
+
+  function toValue(person) {
+    return text(person?.transferMode) === "CAMP_TO_CAMP"
+      ? text(person?.toCamp) || "—"
+      : text(person?.toOffice) || "—";
+  }
+
+  function installStyles() {
+    if (document.getElementById("transferQueuePluginV1Styles")) return;
+    const style = document.createElement("style");
+    style.id = "transferQueuePluginV1Styles";
+    style.textContent = `
+      #${BACKDROP_ID}{position:fixed;inset:0;z-index:100300;background:rgba(8,31,15,.48);backdrop-filter:blur(6px)}
+      #${ROOT_ID}{position:fixed;z-index:100301;inset:3vh 2vw;overflow:auto;padding:18px;border:1px solid #c5d9ca;border-radius:18px;background:#f6fbf7;color:#153c21;box-shadow:0 30px 90px rgba(0,0,0,.35)}
+      #${BACKDROP_ID}[hidden],#${ROOT_ID}[hidden]{display:none!important}
+      .tq1-head,.tq1-toolbar,.tq1-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+      .tq1-head h2{margin:2px 0}.tq1-head p{margin:3px 0;opacity:.72}.tq1-kicker{font-size:10px;font-weight:900;letter-spacing:.12em;color:#26723d}
+      .tq1-btn{border:1px solid #c5d9ca;border-radius:10px;background:white;padding:9px 12px;font:inherit;font-weight:750;cursor:pointer}.tq1-btn.primary{background:#ffe600;border-color:#d8c700}.tq1-btn.danger{color:#982b2b;border-color:#e8bcbc}.tq1-btn:disabled{opacity:.45;cursor:not-allowed}
+      .tq1-toolbar{margin:14px 0}.tq1-filter{display:flex;gap:6px;flex-wrap:wrap}.tq1-filter button.is-active{background:#236b39;color:white}
+      .tq1-list{display:grid;gap:12px}.tq1-card{border:1px solid #cee1d2;border-radius:14px;background:white;overflow:hidden}.tq1-card-head{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:11px;background:#edf7ef}.tq1-card-head input{width:20px;height:20px}.tq1-status{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900;background:#fff0a6}.tq1-status.approved{background:#d8edff}.tq1-status.applied{background:#d6f1dc}.tq1-status.cancelled,.tq1-status.failed{background:#ffdcdc}
+      .tq1-meta{font-size:11px;opacity:.72}.tq1-table-wrap{overflow:auto}.tq1-table{width:100%;border-collapse:collapse;font-size:12px}.tq1-table th,.tq1-table td{padding:9px;border-top:1px solid #e2ece4;text-align:left}.tq1-table th{background:#f8fbf8}.tq1-table th:first-child,.tq1-table td:first-child{width:52px;text-align:center}.tq1-table th:nth-child(3),.tq1-table th:nth-child(4),.tq1-table td:nth-child(3),.tq1-table td:nth-child(4){width:22%;text-align:center}
+      .tq1-empty{padding:35px;text-align:center;border:1px dashed #bfd5c4;border-radius:14px;opacity:.7}.tq1-actions{justify-content:flex-end;margin-top:14px}.tq1-launcher{margin-left:8px}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureUI() {
+    installStyles();
+    let backdrop = document.getElementById(BACKDROP_ID);
+    let root = document.getElementById(ROOT_ID);
+    if (backdrop && root) return { backdrop, root };
+
+    backdrop = document.createElement("div");
+    backdrop.id = BACKDROP_ID;
+    backdrop.hidden = true;
+    root = document.createElement("section");
+    root.id = ROOT_ID;
+    root.hidden = true;
+    document.body.append(backdrop, root);
+    backdrop.addEventListener("click", close);
+    return { backdrop, root };
+  }
+
+  function entries() {
+    return queue.list(statusFilter === "ALL" ? {} : { status: statusFilter });
+  }
+
+  function render() {
+    const { root } = ensureUI();
+    const rows = entries();
+    const stats = queue.status();
+
+    root.innerHTML = `
+      <header class="tq1-head">
+        <div><div class="tq1-kicker">PERSONNEL MOVEMENT</div><h2>Transfer Queue</h2><p>Review, approve, and apply queued reassignment reports.</p></div>
+        <button class="tq1-btn" data-tq1="close">Close</button>
+      </header>
+      <div class="tq1-toolbar">
+        <div class="tq1-filter">
+          ${["ALL","PENDING","APPROVED","APPLIED","CANCELLED","FAILED"].map(value => `<button class="tq1-btn ${statusFilter === value ? "is-active" : ""}" data-tq1-filter="${value}">${value}</button>`).join("")}
+        </div>
+        <strong>${stats.total} total · ${selected.size} selected</strong>
+      </div>
+      <div class="tq1-list">
+        ${rows.length ? rows.map(entry => {
+          const personnel = Array.isArray(entry.personnel) ? entry.personnel : [];
+          const disabled = ["APPLIED","CANCELLED"].includes(entry.status);
+          return `<article class="tq1-card">
+            <div class="tq1-card-head">
+              <input type="checkbox" data-tq1-select="${escapeHtml(entry.id)}" ${selected.has(entry.id) ? "checked" : ""} ${disabled ? "disabled" : ""}>
+              <div><strong>${escapeHtml(entry.reportType || "TRANSFER")}</strong><div class="tq1-meta">${escapeHtml(entry.id)} · ${personnel.length} personnel · ${escapeHtml(entry.metadata?.orderNumber || "No order number")}</div></div>
+              <span class="tq1-status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
+            </div>
+            <div class="tq1-table-wrap"><table class="tq1-table"><thead><tr><th>No.</th><th>Rank / Name</th><th>From</th><th>To</th></tr></thead><tbody>
+              ${personnel.map((person,index)=>`<tr><td>${index+1}</td><td>${escapeHtml([person.rank,person.fullName].filter(Boolean).join(" ")||"—")}</td><td>${escapeHtml(fromValue(person))}</td><td>${escapeHtml(toValue(person))}</td></tr>`).join("")}
+            </tbody></table></div>
+          </article>`;
+        }).join("") : `<div class="tq1-empty">No transfer queue entries match this filter.</div>`}
+      </div>
+      <footer class="tq1-actions">
+        <button class="tq1-btn" data-tq1="select-pending">Select Pending</button>
+        <button class="tq1-btn danger" data-tq1="cancel" ${selected.size ? "" : "disabled"}>Cancel Selected</button>
+        <button class="tq1-btn" data-tq1="approve" ${selected.size ? "" : "disabled"}>Approve Selected</button>
+        <button class="tq1-btn primary" data-tq1="apply" ${selected.size ? "" : "disabled"}>Apply Selected</button>
+      </footer>`;
+  }
+
+  function open() {
+    const { backdrop, root } = ensureUI();
+    render();
+    backdrop.hidden = false;
+    root.hidden = false;
+  }
+
+  function close() {
+    const backdrop = document.getElementById(BACKDROP_ID);
+    const root = document.getElementById(ROOT_ID);
+    if (backdrop) backdrop.hidden = true;
+    if (root) root.hidden = true;
+  }
+
+  function enqueueDraft(draft) {
+    if (!draft) throw new Error("A report draft is required.");
+    const existing = queue.list().find(entry => entry.reportDraftId === draft.id);
+    if (existing) return existing;
+    const entry = queue.enqueue({
+      sourcePlugin: draft.pluginId,
+      reportDraftId: draft.id,
+      reportType: draft.reportType,
+      personnel: draft.preview?.personnel || draft.payload?.personnel || [],
+      metadata: draft.metadata || {},
+      payload: draft.payload || {},
+    });
+    platform.events.emit("transfer-queue:entry-created", entry);
+    return entry;
+  }
+
+  document.addEventListener("change", event => {
+    const id = event.target.closest?.("[data-tq1-select]")?.dataset.tq1Select;
+    if (!id) return;
+    event.target.checked ? selected.add(id) : selected.delete(id);
+    render();
+  });
+
+  document.addEventListener("click", event => {
+    const filter = event.target.closest?.("[data-tq1-filter]")?.dataset.tq1Filter;
+    if (filter) { statusFilter = filter; render(); return; }
+    const action = event.target.closest?.("[data-tq1]")?.dataset.tq1;
+    if (!action) return;
+    if (action === "close") close();
+    else if (action === "select-pending") {
+      queue.list({ status: "PENDING" }).forEach(entry => selected.add(entry.id));
+      render();
+    } else if (action === "approve") {
+      [...selected].forEach(id => { const item = queue.get(id); if (item && item.status === "PENDING") queue.approve(id); });
+      selected.clear(); render();
+    } else if (action === "apply") {
+      [...selected].forEach(id => { const item = queue.get(id); if (item && ["PENDING","APPROVED"].includes(item.status)) queue.markApplied(id, { localPreview: true }); });
+      selected.clear(); render();
+    } else if (action === "cancel") {
+      [...selected].forEach(id => { const item = queue.get(id); if (item && item.status !== "APPLIED") queue.cancel(id); });
+      selected.clear(); render();
+    }
+  });
+
+  platform.events.on("transfer-queue:changed", () => {
+    if (!document.getElementById(ROOT_ID)?.hidden) render();
+  });
+
+  const launcher = document.getElementById("openTransferQueueButton");
+  if (launcher) {
+    launcher.onclick = event => { event.preventDefault(); open(); };
+  } else {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tq1-btn tq1-launcher";
+    button.textContent = "Transfer Queue";
+    button.addEventListener("click", open);
+    document.body.appendChild(button);
+  }
+
+  window.$PF.transferQueuePlugin = {
+    version: "1.0.0",
+    open,
+    close,
+    render,
+    enqueueDraft,
+  };
+
+  console.info("Transfer Queue Plugin V1 active. Run $PF.transferQueuePlugin.open().");
+})();
