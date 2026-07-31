@@ -1,0 +1,183 @@
+// Reassignment Plugin V1 — Phase 2 controls
+// Adds Step 3 sorting and per-group destination changes to the clean plugin body.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  if (!platform || !engine || !window.$PF?.reassignmentV1) return;
+
+  const SCOPE = "reassignment-v1";
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SORT_KEY = "reassignment-v1:step3-sort";
+  let sortMode = sessionStorage.getItem(SORT_KEY) || "LIST";
+  let decorating = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function rankOf(item) {
+    return text(item?.rank || item?.record?.Rank);
+  }
+
+  function nameOf(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName);
+  }
+
+  function lastNameOf(item) {
+    const record = item?.record || {};
+    const explicit = text(record["Last Name"] || record.LastName || record.Surname);
+    if (explicit) return explicit;
+    const name = nameOf(item).replace(/\s+(JR\.?|SR\.?|II|III|IV)$/i, "").trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    return parts.at(-1) || "";
+  }
+
+  function directory() {
+    const shared = window.ReassignmentEngine?.getDirectory?.() || {};
+    const rows = Array.isArray(window.PersonnelState?.records) ? window.PersonnelState.records : [];
+    const camps = new Set([...(shared.camps || []), ...rows.map(row => text(row.Camp))]);
+    const offices = new Set([...(shared.offices || []), ...rows.map(row => text(row.Office))]);
+    return {
+      camps: [...camps].filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      offices: [...offices].filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    };
+  }
+
+  function compareKeys(a, b, state, people) {
+    const participantOrder = new Map((state.participants || []).map(([key], index) => [key, index]));
+    const assignmentOrder = new Map((state.assignments || []).map(([key], index) => [key, index]));
+    const itemA = people.get(a) || {};
+    const itemB = people.get(b) || {};
+
+    if (sortMode === "RANK") {
+      return rankOf(itemA).localeCompare(rankOf(itemB), undefined, { numeric: true, sensitivity: "base" }) ||
+        nameOf(itemA).localeCompare(nameOf(itemB), undefined, { sensitivity: "base" });
+    }
+
+    if (sortMode === "RANK_LAST") {
+      return rankOf(itemA).localeCompare(rankOf(itemB), undefined, { numeric: true, sensitivity: "base" }) ||
+        lastNameOf(itemA).localeCompare(lastNameOf(itemB), undefined, { sensitivity: "base" }) ||
+        nameOf(itemA).localeCompare(nameOf(itemB), undefined, { sensitivity: "base" });
+    }
+
+    if (sortMode === "ASSIGNED") {
+      return (assignmentOrder.get(a) ?? Number.MAX_SAFE_INTEGER) -
+        (assignmentOrder.get(b) ?? Number.MAX_SAFE_INTEGER);
+    }
+
+    return (participantOrder.get(a) ?? Number.MAX_SAFE_INTEGER) -
+      (participantOrder.get(b) ?? Number.MAX_SAFE_INTEGER);
+  }
+
+  function addSortControl(root) {
+    const step3 = [...root.querySelectorAll(".rp1-panel")]
+      .find(panel => /Step 3/i.test(panel.querySelector(".rp1-kicker")?.textContent || ""));
+    if (!step3) return;
+
+    const heading = step3.querySelector("h2");
+    if (!heading || step3.querySelector("#rp1Step3Sort")) return;
+
+    const row = document.createElement("div");
+    row.className = "rp1-step3-tools";
+    row.style.cssText = "display:flex;justify-content:space-between;gap:8px;align-items:center;margin:-4px 0 12px;flex-wrap:wrap";
+    row.innerHTML = `
+      <label style="font-size:12px;font-weight:800">Sort assigned personnel</label>
+      <select id="rp1Step3Sort" class="rp1-search" style="width:auto;min-width:190px;margin:0;padding:8px">
+        <option value="LIST">LIST sequence</option>
+        <option value="RANK">Rank</option>
+        <option value="RANK_LAST">Rank and last name</option>
+        <option value="ASSIGNED">As assigned</option>
+      </select>
+    `;
+    heading.insertAdjacentElement("afterend", row);
+    row.querySelector("select").value = sortMode;
+  }
+
+  function decorateGroups(root) {
+    const state = engine.get(SCOPE);
+    const people = new Map(state.participants || []);
+    const dirs = directory();
+
+    root.querySelectorAll(".rp1-group").forEach(groupEl => {
+      const assignedEls = [...groupEl.querySelectorAll(".rp1-assigned")];
+      const keys = assignedEls.map(el => el.querySelector("[data-rp1-remove]")?.dataset.rp1Remove).filter(Boolean);
+      if (!keys.length) return;
+
+      const assignment = new Map(state.assignments || []).get(keys[0]);
+      if (!assignment) return;
+      const groupId = `${assignment.transferMode}|${assignment.destination}`;
+
+      const head = groupEl.querySelector(".rp1-group-head");
+      if (head && !head.querySelector("[data-rp1-group-change]")) {
+        const control = document.createElement("div");
+        control.style.cssText = "display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end";
+        const options = assignment.transferMode === "CAMP_TO_CAMP" ? dirs.camps : dirs.offices;
+        control.innerHTML = `
+          <select class="rp1-search" data-rp1-group-select="${groupId}" style="width:150px;margin:0;padding:7px">
+            ${options.map(option => `<option value="${option.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}" ${option === assignment.destination ? "selected" : ""}>${option}</option>`).join("")}
+          </select>
+          <button type="button" class="rp1-btn" data-rp1-group-change="${groupId}" style="padding:7px 9px">Change</button>
+        `;
+        head.appendChild(control);
+      }
+
+      const ordered = keys.slice().sort((a, b) => compareKeys(a, b, state, people));
+      const byKey = new Map(assignedEls.map(el => [el.querySelector("[data-rp1-remove]")?.dataset.rp1Remove, el]));
+      ordered.forEach(key => {
+        const element = byKey.get(key);
+        if (element) groupEl.appendChild(element);
+      });
+    });
+  }
+
+  function decorate() {
+    if (decorating) return;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+    decorating = true;
+    try {
+      addSortControl(root);
+      decorateGroups(root);
+    } finally {
+      decorating = false;
+    }
+  }
+
+  document.addEventListener("change", event => {
+    if (event.target.id !== "rp1Step3Sort") return;
+    sortMode = event.target.value || "LIST";
+    sessionStorage.setItem(SORT_KEY, sortMode);
+    decorate();
+  });
+
+  document.addEventListener("click", event => {
+    const button = event.target.closest("[data-rp1-group-change]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const groupId = button.dataset.rp1GroupChange;
+    const select = document.querySelector(`[data-rp1-group-select="${CSS.escape(groupId)}"]`);
+    const destination = text(select?.value);
+    if (!destination) return;
+    engine.moveGroup(SCOPE, groupId, destination);
+  }, true);
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, () => {
+    queueMicrotask(decorate);
+  });
+
+  const observer = new MutationObserver(() => queueMicrotask(decorate));
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  window.$PF.reassignmentV1Phase2 = {
+    version: "1.1.0",
+    get sortMode() { return sortMode; },
+    decorate,
+  };
+
+  queueMicrotask(decorate);
+  console.info("Reassignment V1 Phase 2 active: group destination changes and Step 3 sorting.");
+})();
