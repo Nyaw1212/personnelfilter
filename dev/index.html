@@ -6026,1737 +6026,6 @@ function restoreApp() {
 
 
 //----------------------------------
-// Generated Reports History UI
-//----------------------------------
-
-const GeneratedReportsState = {
-  reports: [],
-  search: "",
-  loading: false,
-};
-
-document.addEventListener(
-  "DOMContentLoaded",
-  initializeGeneratedReportsModule_
-);
-
-function initializeGeneratedReportsModule_() {
-  addGeneratedReportsButton_();
-  buildGeneratedReportsDialog_();
-  injectGeneratedReportsStyles_();
-  refreshGeneratedReportsBadge_();
-
-  // After a successful report, return to the main Personnel Filter and
-  // keep access to the document through the success toast/history button.
-  const originalSuccessHandler = handleReassignmentGenerateSuccess_;
-  handleReassignmentGenerateSuccess_ = function(response) {
-    originalSuccessHandler(response);
-
-    if (!response || response.success !== true) return;
-
-    closeReassignmentGenerateDialog_();
-    closeReassignmentWorkspace_();
-    showGeneratedReportSuccessToast_(response);
-    refreshGeneratedReportsBadge_();
-  };
-}
-
-function addGeneratedReportsButton_() {
-  const actions = document.querySelector(".window-actions");
-  if (!actions || document.getElementById("openGeneratedReportsButton")) {
-    return;
-  }
-
-  const button = document.createElement("button");
-  button.id = "openGeneratedReportsButton";
-  button.type = "button";
-  button.className = "generated-reports-button";
-  button.innerHTML = `
-    <span>Generated Reports</span>
-    <strong id="generatedReportsBadge">0</strong>
-  `;
-  button.addEventListener("click", openGeneratedReportsDialog_);
-
-  actions.insertBefore(button, actions.firstChild);
-}
-
-function buildGeneratedReportsDialog_() {
-  if (document.getElementById("generatedReportsDialog")) return;
-
-  const backdrop = document.createElement("div");
-  backdrop.id = "generatedReportsBackdrop";
-  backdrop.className = "generated-reports-backdrop";
-  backdrop.hidden = true;
-
-  const dialog = document.createElement("section");
-  dialog.id = "generatedReportsDialog";
-  dialog.className = "generated-reports-dialog";
-  dialog.hidden = true;
-  dialog.innerHTML = `
-    <header class="generated-reports-header">
-      <div>
-        <span>REPORT HISTORY</span>
-        <h2>Generated Reports</h2>
-        <p>Review and reopen reports created from Personnel Filter.</p>
-      </div>
-      <button id="closeGeneratedReportsButton" type="button" title="Close">×</button>
-    </header>
-
-    <section class="generated-reports-summary">
-      <article><span>Total Reports</span><strong id="generatedReportsTotal">0</strong></article>
-      <article><span>Personnel Included</span><strong id="generatedReportsPersonnelTotal">0</strong></article>
-      <article><span>Latest Order</span><strong id="generatedReportsLatestOrder">—</strong></article>
-    </section>
-
-    <div class="generated-reports-toolbar">
-      <input id="generatedReportsSearch" type="search" placeholder="Search order number, officer, or report..." autocomplete="off">
-      <button id="refreshGeneratedReportsButton" class="button button-secondary" type="button">Refresh</button>
-    </div>
-
-    <div id="generatedReportsMessage" class="generated-reports-message">Loading reports...</div>
-    <div id="generatedReportsList" class="generated-reports-list"></div>
-  `;
-
-  document.body.append(backdrop, dialog);
-
-  backdrop.addEventListener("click", closeGeneratedReportsDialog_);
-  dialog
-    .querySelector("#closeGeneratedReportsButton")
-    .addEventListener("click", closeGeneratedReportsDialog_);
-  dialog
-    .querySelector("#refreshGeneratedReportsButton")
-    .addEventListener("click", loadGeneratedReports_);
-  dialog
-    .querySelector("#generatedReportsSearch")
-    .addEventListener("input", event => {
-      GeneratedReportsState.search = event.target.value.trim().toLowerCase();
-      renderGeneratedReports_();
-    });
-}
-
-function openGeneratedReportsDialog_() {
-  document.getElementById("generatedReportsBackdrop").hidden = false;
-  document.getElementById("generatedReportsDialog").hidden = false;
-  loadGeneratedReports_();
-}
-
-function closeGeneratedReportsDialog_() {
-  document.getElementById("generatedReportsBackdrop").hidden = true;
-  document.getElementById("generatedReportsDialog").hidden = true;
-}
-
-function loadGeneratedReports_() {
-  if (GeneratedReportsState.loading) return;
-  GeneratedReportsState.loading = true;
-
-  const message = document.getElementById("generatedReportsMessage");
-  message.hidden = false;
-  message.textContent = "Loading generated reports...";
-
-  google.script.run
-    .withSuccessHandler(response => {
-      GeneratedReportsState.loading = false;
-
-      if (!response || response.success !== true) {
-        message.textContent = response?.message || "Reports could not be loaded.";
-        return;
-      }
-
-      GeneratedReportsState.reports = Array.isArray(response.reports)
-        ? response.reports
-        : [];
-      updateGeneratedReportsSummary_(response.total);
-      renderGeneratedReports_();
-    })
-    .withFailureHandler(error => {
-      GeneratedReportsState.loading = false;
-      message.textContent = error?.message || "Reports could not be loaded.";
-    })
-    .getGeneratedReportSummaries(200);
-}
-
-function renderGeneratedReports_() {
-  const list = document.getElementById("generatedReportsList");
-  const message = document.getElementById("generatedReportsMessage");
-  if (!list || !message) return;
-
-  const query = GeneratedReportsState.search;
-  const reports = GeneratedReportsState.reports.filter(report => {
-    if (!query) return true;
-    return [
-      report.reportType,
-      report.orderNumber,
-      report.orderDate,
-      report.signingOfficer,
-      report.signingPosition,
-      report.outputName,
-      report.fileReference,
-    ].some(value => String(value || "").toLowerCase().includes(query));
-  });
-
-  list.replaceChildren();
-
-  if (!reports.length) {
-    message.hidden = false;
-    message.textContent = query
-      ? "No generated reports match your search."
-      : "No reports have been generated yet.";
-    return;
-  }
-
-  message.hidden = true;
-
-  reports.forEach(report => {
-    const card = document.createElement("article");
-    card.className = "generated-report-card";
-
-    const type = String(report.reportType || "REPORT").replaceAll("_", " ");
-    card.innerHTML = `
-      <div class="generated-report-main">
-        <div class="generated-report-title">
-          <span>${escapeGeneratedReportHtml_(type)}</span>
-          <h3>Order No. ${escapeGeneratedReportHtml_(report.orderNumber || "—")}</h3>
-        </div>
-        <div class="generated-report-meta">
-          <span><b>Order Date:</b> ${escapeGeneratedReportHtml_(report.orderDate || "—")}</span>
-          <span><b>Generated:</b> ${escapeGeneratedReportHtml_(report.generatedAt || "—")}</span>
-          <span><b>Personnel:</b> ${Number(report.personnelCount || 0).toLocaleString()}</span>
-        </div>
-        <div class="generated-report-officer">
-          <strong>${escapeGeneratedReportHtml_(report.signingOfficer || "No signing officer")}</strong>
-          <small>${escapeGeneratedReportHtml_(report.signingPosition || "")}</small>
-        </div>
-      </div>
-      <div class="generated-report-actions"></div>
-    `;
-
-    const actions = card.querySelector(".generated-report-actions");
-    if (report.url) {
-      const open = document.createElement("a");
-      open.className = "button button-primary generated-report-open";
-      open.href = report.url;
-      open.target = "_blank";
-      open.rel = "noopener noreferrer";
-      open.textContent = "Open Report";
-      actions.appendChild(open);
-    }
-
-    list.appendChild(card);
-  });
-}
-
-function updateGeneratedReportsSummary_(total) {
-  const reports = GeneratedReportsState.reports;
-  const personnelTotal = reports.reduce(
-    (sum, report) => sum + Number(report.personnelCount || 0),
-    0
-  );
-
-  document.getElementById("generatedReportsTotal").textContent =
-    Number(total || reports.length).toLocaleString();
-  document.getElementById("generatedReportsPersonnelTotal").textContent =
-    personnelTotal.toLocaleString();
-  document.getElementById("generatedReportsLatestOrder").textContent =
-    reports[0]?.orderNumber || "—";
-
-  const badge = document.getElementById("generatedReportsBadge");
-  if (badge) badge.textContent = Number(total || reports.length).toLocaleString();
-}
-
-function refreshGeneratedReportsBadge_() {
-  google.script.run
-    .withSuccessHandler(response => {
-      if (!response || response.success !== true) return;
-      const badge = document.getElementById("generatedReportsBadge");
-      if (badge) badge.textContent = Number(response.total || 0).toLocaleString();
-    })
-    .getGeneratedReportSummaries(1);
-}
-
-function showGeneratedReportSuccessToast_(response) {
-  document.getElementById("generatedReportSuccessToast")?.remove();
-
-  const toast = document.createElement("div");
-  toast.id = "generatedReportSuccessToast";
-  toast.className = "generated-report-success-toast";
-
-  const text = document.createElement("div");
-  text.innerHTML = `
-    <strong>Report generated successfully</strong>
-    <span>Order ${escapeGeneratedReportHtml_(response.outputName || "created")}</span>
-  `;
-  toast.appendChild(text);
-
-  if (response.url) {
-    const link = document.createElement("a");
-    link.href = response.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "Open Report";
-    toast.appendChild(link);
-  }
-
-  const history = document.createElement("button");
-  history.type = "button";
-  history.textContent = "View Reports";
-  history.addEventListener("click", () => {
-    toast.remove();
-    openGeneratedReportsDialog_();
-  });
-  toast.appendChild(history);
-
-  document.body.appendChild(toast);
-  window.setTimeout(() => toast.remove(), 12000);
-}
-
-function escapeGeneratedReportHtml_(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function injectGeneratedReportsStyles_() {
-  if (document.getElementById("generatedReportsStyles")) return;
-
-  const style = document.createElement("style");
-  style.id = "generatedReportsStyles";
-  style.textContent = `
-    .generated-reports-button { display:inline-flex; align-items:center; gap:8px; min-height:36px; padding:7px 11px; border:1px solid rgba(31,111,52,.2); border-radius:999px; background:rgba(255,255,255,.78); color:#174d28; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
-    .generated-reports-button strong { display:inline-grid; place-items:center; min-width:23px; height:23px; padding:0 6px; border-radius:999px; background:#ffe500; color:#183d23; font-size:10px; }
-    .generated-reports-backdrop { position:fixed; inset:0; z-index:17000; background:rgba(5,24,11,.5); backdrop-filter:blur(7px); }
-    .generated-reports-dialog { position:fixed; z-index:17001; top:50%; left:50%; width:min(1080px,95vw); max-height:90vh; overflow:auto; transform:translate(-50%,-50%); padding:22px; border:1px solid rgba(31,111,52,.2); border-radius:22px; background:#f5fbf6; box-shadow:0 30px 90px rgba(0,0,0,.34); }
-    .generated-reports-backdrop[hidden], .generated-reports-dialog[hidden] { display:none; }
-    .generated-reports-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-    .generated-reports-header span { font-size:11px; font-weight:900; letter-spacing:.12em; color:#26723d; }
-    .generated-reports-header h2 { margin:3px 0; font-size:24px; }
-    .generated-reports-header p { margin:0; opacity:.72; }
-    .generated-reports-header > button { border:0; background:transparent; font-size:26px; cursor:pointer; }
-    .generated-reports-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:18px 0; }
-    .generated-reports-summary article { display:grid; gap:5px; padding:14px; border:1px solid rgba(31,111,52,.15); border-radius:14px; background:#fff; }
-    .generated-reports-summary span { font-size:11px; font-weight:800; color:#2a663b; }
-    .generated-reports-summary strong { font-size:22px; }
-    .generated-reports-toolbar { display:flex; gap:10px; margin-bottom:14px; }
-    .generated-reports-toolbar input { flex:1; min-height:42px; padding:9px 12px; border:1px solid rgba(31,111,52,.2); border-radius:12px; background:#fff; font:inherit; }
-    .generated-reports-message { padding:18px; border:1px dashed rgba(31,111,52,.25); border-radius:14px; text-align:center; opacity:.75; }
-    .generated-reports-list { display:grid; gap:10px; }
-    .generated-report-card { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px; border:1px solid rgba(31,111,52,.14); border-radius:15px; background:#fff; }
-    .generated-report-main { display:grid; grid-template-columns:minmax(180px,1fr) minmax(280px,1.5fr) minmax(220px,1fr); align-items:center; gap:18px; flex:1; }
-    .generated-report-title span { font-size:10px; font-weight:900; letter-spacing:.1em; color:#26723d; }
-    .generated-report-title h3 { margin:4px 0 0; }
-    .generated-report-meta, .generated-report-officer { display:grid; gap:4px; font-size:12px; }
-    .generated-report-officer small { opacity:.7; }
-    .generated-report-open { text-decoration:none; white-space:nowrap; }
-    .generated-report-success-toast { position:fixed; z-index:18000; right:22px; bottom:22px; display:flex; align-items:center; gap:12px; max-width:min(620px,calc(100vw - 32px)); padding:14px 16px; border:1px solid rgba(31,111,52,.22); border-radius:16px; background:#f4fff6; box-shadow:0 18px 55px rgba(0,0,0,.24); }
-    .generated-report-success-toast > div { display:grid; gap:2px; margin-right:auto; }
-    .generated-report-success-toast span { font-size:11px; opacity:.72; }
-    .generated-report-success-toast a, .generated-report-success-toast button { padding:8px 10px; border:1px solid rgba(31,111,52,.22); border-radius:10px; background:#fff; color:#185c2b; font:inherit; font-size:11px; font-weight:850; text-decoration:none; cursor:pointer; white-space:nowrap; }
-    @media (max-width:800px) { .generated-reports-summary { grid-template-columns:1fr; } .generated-report-card { align-items:stretch; flex-direction:column; } .generated-report-main { grid-template-columns:1fr; } .generated-report-actions { align-self:stretch; } .generated-report-open { display:block; text-align:center; } }
-    @media (max-width:600px) { .generated-reports-button span { display:none; } .generated-report-success-toast { left:16px; right:16px; flex-wrap:wrap; } }
-  `;
-  document.head.appendChild(style);
-}
-
-
-//----------------------------------
-// Generated Report Quick Preview UI
-//----------------------------------
-
-const GeneratedReportPreviewState = {
-  loading: false,
-  report: null,
-};
-
-document.addEventListener("DOMContentLoaded", () => {
-  buildGeneratedReportPreviewDialog_();
-  injectGeneratedReportPreviewStyles_();
-  patchGeneratedReportsCardsWithPreview_();
-});
-
-function buildGeneratedReportPreviewDialog_() {
-  if (document.getElementById("generatedReportPreviewDialog")) return;
-
-  const backdrop = document.createElement("div");
-  backdrop.id = "generatedReportPreviewBackdrop";
-  backdrop.className = "generated-report-preview-backdrop";
-  backdrop.hidden = true;
-
-  const dialog = document.createElement("section");
-  dialog.id = "generatedReportPreviewDialog";
-  dialog.className = "generated-report-preview-dialog";
-  dialog.hidden = true;
-  dialog.innerHTML = `
-    <header class="generated-report-preview-header">
-      <div>
-        <span>QUICK SCAN</span>
-        <h2 id="generatedReportPreviewTitle">Report Preview</h2>
-        <p id="generatedReportPreviewSubtitle">Loading report details...</p>
-      </div>
-      <button id="closeGeneratedReportPreviewButton" type="button" title="Close">×</button>
-    </header>
-
-    <section class="generated-report-preview-meta" id="generatedReportPreviewMeta"></section>
-
-    <div id="generatedReportPreviewMessage" class="generated-report-preview-message">
-      Loading preview...
-    </div>
-
-    <div class="generated-report-preview-table-wrap" id="generatedReportPreviewTableWrap" hidden>
-      <table class="generated-report-preview-table">
-        <thead>
-          <tr>
-            <th>No.</th>
-            <th>Rank / Name</th>
-            <th>From</th>
-            <th>To</th>
-          </tr>
-        </thead>
-        <tbody id="generatedReportPreviewTableBody"></tbody>
-      </table>
-    </div>
-
-    <footer class="generated-report-preview-actions">
-      <button id="closeGeneratedReportPreviewFooterButton" class="button button-secondary" type="button">Close</button>
-      <a id="openGeneratedReportPreviewDocument" class="button button-primary" target="_blank" rel="noopener noreferrer" hidden>Open Full Report</a>
-    </footer>
-  `;
-
-  document.body.append(backdrop, dialog);
-
-  backdrop.addEventListener("click", closeGeneratedReportPreview_);
-  dialog.querySelector("#closeGeneratedReportPreviewButton")
-    .addEventListener("click", closeGeneratedReportPreview_);
-  dialog.querySelector("#closeGeneratedReportPreviewFooterButton")
-    .addEventListener("click", closeGeneratedReportPreview_);
-}
-
-function patchGeneratedReportsCardsWithPreview_() {
-  if (typeof renderGeneratedReports_ !== "function") return;
-
-  const originalRender = renderGeneratedReports_;
-
-  renderGeneratedReports_ = function () {
-    originalRender.apply(this, arguments);
-
-    const list = document.getElementById("generatedReportsList");
-    if (!list) return;
-
-    const query = String(GeneratedReportsState.search || "").trim().toLowerCase();
-    const reports = GeneratedReportsState.reports.filter(report => {
-      if (!query) return true;
-      return [
-        report.reportType,
-        report.orderNumber,
-        report.orderDate,
-        report.signingOfficer,
-        report.signingPosition,
-        report.outputName,
-        report.fileReference,
-      ].some(value => String(value || "").toLowerCase().includes(query));
-    });
-
-    const cards = [...list.querySelectorAll(".generated-report-card")];
-
-    cards.forEach((card, index) => {
-      const report = reports[index];
-      const actions = card.querySelector(".generated-report-actions");
-
-      if (!report || !actions || actions.querySelector(".generated-report-preview-button")) {
-        return;
-      }
-
-      const reference = report.documentId || report.url || "";
-      const preview = document.createElement("button");
-      preview.type = "button";
-      preview.className = "button button-secondary generated-report-preview-button";
-      preview.textContent = "Preview";
-      preview.disabled = !reference;
-      preview.title = reference
-        ? "Quickly preview the personnel included in this report"
-        : "This report has no Document ID or Google Docs URL";
-      preview.addEventListener("click", () => openGeneratedReportPreview_(report));
-
-      actions.insertBefore(preview, actions.firstChild);
-    });
-  };
-}
-
-function openGeneratedReportPreview_(report) {
-  const documentReference = report?.documentId || report?.url || "";
-  if (!report || !documentReference || GeneratedReportPreviewState.loading) return;
-
-  GeneratedReportPreviewState.loading = true;
-  GeneratedReportPreviewState.report = report;
-
-  const backdrop = document.getElementById("generatedReportPreviewBackdrop");
-  const dialog = document.getElementById("generatedReportPreviewDialog");
-  const message = document.getElementById("generatedReportPreviewMessage");
-  const tableWrap = document.getElementById("generatedReportPreviewTableWrap");
-  const body = document.getElementById("generatedReportPreviewTableBody");
-  const openLink = document.getElementById("openGeneratedReportPreviewDocument");
-
-  backdrop.hidden = false;
-  dialog.hidden = false;
-  tableWrap.hidden = true;
-  message.hidden = false;
-  message.textContent = "Loading report preview...";
-  body.replaceChildren();
-
-  document.getElementById("generatedReportPreviewTitle").textContent =
-    `Order No. ${report.orderNumber || "—"}`;
-  document.getElementById("generatedReportPreviewSubtitle").textContent =
-    `${report.reportType || "REPORT"} · ${report.orderDate || "No order date"}`;
-
-  renderGeneratedReportPreviewMeta_(report);
-
-  if (report.url) {
-    openLink.href = report.url;
-    openLink.hidden = false;
-  } else {
-    openLink.hidden = true;
-  }
-
-  google.script.run
-    .withSuccessHandler(response => {
-      GeneratedReportPreviewState.loading = false;
-
-      if (!response || response.success !== true) {
-        message.hidden = false;
-        message.textContent = response?.message || "Preview could not be loaded.";
-        return;
-      }
-
-      renderGeneratedReportPreviewRows_(response.rows || []);
-      message.hidden = Boolean(response.rows?.length);
-      message.textContent = response.message || "No personnel rows found.";
-      tableWrap.hidden = !response.rows?.length;
-    })
-    .withFailureHandler(error => {
-      GeneratedReportPreviewState.loading = false;
-      message.hidden = false;
-      message.textContent = error?.message || "Preview could not be loaded.";
-    })
-    .getGeneratedReportPreview(documentReference);
-}
-
-function closeGeneratedReportPreview_() {
-  if (GeneratedReportPreviewState.loading) return;
-  document.getElementById("generatedReportPreviewBackdrop").hidden = true;
-  document.getElementById("generatedReportPreviewDialog").hidden = true;
-}
-
-function renderGeneratedReportPreviewMeta_(report) {
-  const meta = document.getElementById("generatedReportPreviewMeta");
-  meta.replaceChildren();
-
-  [
-    ["Generated", report.generatedAt || "—"],
-    ["Signing Officer", report.signingOfficer || "—"],
-    ["Position", report.signingPosition || "—"],
-    ["Personnel", Number(report.personnelCount || 0).toLocaleString()],
-    ["File Reference", report.fileReference || "—"],
-  ].forEach(([label, value]) => {
-    const item = document.createElement("article");
-    const small = document.createElement("span");
-    const strong = document.createElement("strong");
-    small.textContent = label;
-    strong.textContent = value;
-    item.append(small, strong);
-    meta.appendChild(item);
-  });
-}
-
-function renderGeneratedReportPreviewRows_(rows) {
-  const body = document.getElementById("generatedReportPreviewTableBody");
-  body.replaceChildren();
-
-  rows.forEach(row => {
-    const tr = document.createElement("tr");
-    [row.number, row.rankName, row.from, row.to].forEach(value => {
-      const td = document.createElement("td");
-      td.textContent = String(value || "—");
-      tr.appendChild(td);
-    });
-    body.appendChild(tr);
-  });
-}
-
-function injectGeneratedReportPreviewStyles_() {
-  if (document.getElementById("generatedReportPreviewStyles")) return;
-
-  const style = document.createElement("style");
-  style.id = "generatedReportPreviewStyles";
-  style.textContent = `
-    .generated-report-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .generated-report-preview-button { min-width:82px; }
-    .generated-report-preview-backdrop { position:fixed; inset:0; z-index:17500; background:rgba(5,24,11,.55); backdrop-filter:blur(8px); }
-    .generated-report-preview-dialog { position:fixed; z-index:17501; top:50%; left:50%; width:min(1040px,95vw); max-height:90vh; overflow:auto; transform:translate(-50%,-50%); padding:22px; border:1px solid rgba(31,111,52,.2); border-radius:22px; background:#f5fbf6; box-shadow:0 30px 90px rgba(0,0,0,.38); }
-    .generated-report-preview-backdrop[hidden], .generated-report-preview-dialog[hidden] { display:none; }
-    .generated-report-preview-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-    .generated-report-preview-header span { font-size:10px; font-weight:900; letter-spacing:.12em; color:#26723d; }
-    .generated-report-preview-header h2 { margin:3px 0; font-size:24px; }
-    .generated-report-preview-header p { margin:0; opacity:.72; }
-    .generated-report-preview-header > button { border:0; background:transparent; font-size:26px; cursor:pointer; }
-    .generated-report-preview-meta { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:18px 0; }
-    .generated-report-preview-meta article { display:grid; gap:5px; min-height:72px; padding:12px; border:1px solid rgba(31,111,52,.15); border-radius:13px; background:#fff; }
-    .generated-report-preview-meta span { font-size:10px; font-weight:850; color:#2a663b; text-transform:uppercase; }
-    .generated-report-preview-meta strong { font-size:12px; overflow-wrap:anywhere; }
-    .generated-report-preview-message { padding:18px; border:1px dashed rgba(31,111,52,.25); border-radius:14px; text-align:center; opacity:.78; }
-    .generated-report-preview-table-wrap { max-height:430px; overflow:auto; border:1px solid rgba(31,111,52,.18); border-radius:14px; background:#fff; }
-    .generated-report-preview-table { width:100%; border-collapse:collapse; font-size:12px; }
-    .generated-report-preview-table th { position:sticky; top:0; z-index:1; padding:10px; background:#f0a97e; color:#1a2f20; text-align:left; }
-    .generated-report-preview-table td { padding:10px; border-top:1px solid rgba(31,111,52,.13); vertical-align:top; }
-    .generated-report-preview-table th:first-child, .generated-report-preview-table td:first-child { width:64px; text-align:center; }
-    .generated-report-preview-table th:nth-child(3), .generated-report-preview-table th:nth-child(4), .generated-report-preview-table td:nth-child(3), .generated-report-preview-table td:nth-child(4) { width:22%; text-align:center; }
-    .generated-report-preview-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
-    @media (max-width:760px) {
-      .generated-report-preview-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
-      .generated-report-preview-dialog { padding:16px; }
-    }
-  `;
-
-  document.head.appendChild(style);
-}
-
-
-//----------------------------------
-// Stage 1 Upgrade: Generated Report Editor
-//----------------------------------
-
-const Stage1ReportEditorState = {
-  loading: false,
-  sourceReport: null,
-};
-
-document.addEventListener("DOMContentLoaded", () => {
-  patchGeneratedReportsWithEditor_();
-  injectStage1ReportEditorStyles_();
-});
-
-function patchGeneratedReportsWithEditor_() {
-  if (typeof renderGeneratedReports_ !== "function") return;
-
-  const originalRender = renderGeneratedReports_;
-
-  renderGeneratedReports_ = function () {
-    originalRender.apply(this, arguments);
-
-    const list = document.getElementById("generatedReportsList");
-    if (!list) return;
-
-    const query = String(GeneratedReportsState.search || "").trim().toLowerCase();
-    const reports = GeneratedReportsState.reports.filter(report => {
-      if (!query) return true;
-      return [
-        report.reportType,
-        report.orderNumber,
-        report.orderDate,
-        report.signingOfficer,
-        report.signingPosition,
-        report.outputName,
-        report.fileReference,
-      ].some(value => String(value || "").toLowerCase().includes(query));
-    });
-
-    [...list.querySelectorAll(".generated-report-card")].forEach((card, index) => {
-      const report = reports[index];
-      const actions = card.querySelector(".generated-report-actions");
-
-      if (!report || !actions || actions.querySelector(".stage1-edit-report-button")) {
-        return;
-      }
-
-      const edit = document.createElement("button");
-      edit.type = "button";
-      edit.className = "button button-secondary stage1-edit-report-button";
-      edit.textContent = "Edit / Revise";
-      edit.title = "Load this report into the Reassignment Workspace and create a revised document";
-      edit.disabled = !report.documentId && !report.url;
-      edit.addEventListener("click", () => loadGeneratedReportForRevision_(report));
-
-      actions.insertBefore(edit, actions.firstChild);
-    });
-  };
-}
-
-function loadGeneratedReportForRevision_(report) {
-  if (Stage1ReportEditorState.loading || !report) return;
-
-  Stage1ReportEditorState.loading = true;
-  Stage1ReportEditorState.sourceReport = report;
-
-  const source = report.documentId || report.url || "";
-  const message = document.getElementById("generatedReportsMessage");
-  if (message) {
-    message.hidden = false;
-    message.textContent = `Loading Order No. ${report.orderNumber || "—"} for editing...`;
-  }
-
-  google.script.run
-    .withSuccessHandler(response => {
-      Stage1ReportEditorState.loading = false;
-
-      if (!response || response.success !== true) {
-        if (message) message.textContent = response?.message || "The report could not be loaded for editing.";
-        return;
-      }
-
-      hydrateReassignmentFromGeneratedReport_(report, response.rows || []);
-      closeGeneratedReportsDialog_();
-      openReassignmentWorkspace_();
-      showStage1RevisionBanner_(report);
-      populateRevisionOrderDetails_(report);
-    })
-    .withFailureHandler(error => {
-      Stage1ReportEditorState.loading = false;
-      if (message) message.textContent = error?.message || "The report could not be loaded for editing.";
-    })
-    .getGeneratedReportPreview(source);
-}
-
-function hydrateReassignmentFromGeneratedReport_(report, rows) {
-  PersonnelState.aoCart = new Map();
-  ReassignmentState.assignments = new Map();
-  ReassignmentState.selectedKeys = new Set();
-  ReassignmentState.activeOffice = "";
-
-  rows.forEach((row, index) => {
-    const parsed = splitGeneratedRankName_(row.rankName);
-    const key = `revision:${report.documentId || report.orderNumber || "report"}:${index + 1}`;
-
-    PersonnelState.aoCart.set(key, {
-      sourceRow: "",
-      rank: parsed.rank,
-      fullName: parsed.fullName,
-      office: String(row.from || "N/A").trim() || "N/A",
-      record: {
-        Rank: parsed.rank,
-        "Full Name": parsed.fullName,
-        Office: String(row.from || "N/A").trim() || "N/A",
-        Camp: "",
-      },
-    });
-
-    ReassignmentState.assignments.set(
-      key,
-      String(row.to || "").trim()
-    );
-  });
-
-  saveAoCart_();
-  if (typeof saveReassignmentState_ === "function") {
-    saveReassignmentState_();
-  }
-  updateAoCartCount_();
-}
-
-function splitGeneratedRankName_(value) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (!text) return { rank: "", fullName: "" };
-
-  const parts = text.split(" ");
-  const rank = parts.shift() || "";
-  const fullName = parts.join(" ").trim();
-
-  return {
-    rank,
-    fullName: fullName || text,
-  };
-}
-
-function populateRevisionOrderDetails_(report) {
-  const orderNumber = document.getElementById("reassignmentOrderNumber");
-  const orderDate = document.getElementById("reassignmentOrderDate");
-  const fileReference = document.getElementById("reassignmentFileReference");
-
-  if (orderNumber) {
-    orderNumber.value = buildNextRevisionNumber_(report.orderNumber);
-  }
-  if (orderDate) {
-    orderDate.value = normalizeRevisionDateForInput_(report.orderDate);
-  }
-  if (fileReference) {
-    fileReference.value = report.fileReference || fileReference.value || "";
-  }
-
-  const originalLoadDirectory = loadOfficeSigningDirectory_;
-  loadOfficeSigningDirectory_ = function () {
-    originalLoadDirectory();
-
-    window.setTimeout(() => {
-      matchRevisionSigningOfficer_(report);
-    }, 800);
-  };
-}
-
-function matchRevisionSigningOfficer_(report) {
-  const officer = String(report.signingOfficer || "").trim().toLowerCase();
-  if (!officer || !Array.isArray(ReassignmentGenerateState.directory)) return;
-
-  const match = ReassignmentGenerateState.directory.find(record =>
-    String(record.chiefName || "").trim().toLowerCase() === officer ||
-    String(record.deputyName || "").trim().toLowerCase() === officer
-  );
-
-  if (!match) return;
-
-  const role = String(match.deputyName || "").trim().toLowerCase() === officer
-    ? "DEPUTY"
-    : "CHIEF";
-
-  ReassignmentGenerateState.selectedOffice = match.office || "";
-  ReassignmentGenerateState.selectedRole = role;
-
-  const officeInput = document.getElementById("reassignmentSigningOffice");
-  const roleInput = document.getElementById("reassignmentSigningRole");
-  if (officeInput) officeInput.value = match.office || "";
-  if (roleInput) roleInput.value = role;
-  updateSigningOfficerPreview_();
-}
-
-function buildNextRevisionNumber_(orderNumber) {
-  const value = String(orderNumber || "").trim();
-  if (!value) return "REV 1";
-
-  const match = value.match(/\s+REV\s+(\d+)$/i);
-  if (match) {
-    return value.replace(/\s+REV\s+\d+$/i, ` REV ${Number(match[1]) + 1}`);
-  }
-
-  return `${value} REV 1`;
-}
-
-function normalizeRevisionDateForInput_(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return "";
-
-  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-}
-
-function showStage1RevisionBanner_(report) {
-  document.getElementById("stage1RevisionBanner")?.remove();
-
-  const workspace = document.getElementById("reassignmentWorkspace");
-  const header = workspace?.querySelector(".reassignment-header");
-  if (!workspace || !header) return;
-
-  const banner = document.createElement("div");
-  banner.id = "stage1RevisionBanner";
-  banner.className = "stage1-revision-banner";
-  banner.innerHTML = `
-    <div>
-      <strong>Editing generated report</strong>
-      <span>Order No. ${escapeGeneratedReportHtml_(report.orderNumber || "—")} · Saving will create a new revision document.</span>
-    </div>
-    <button type="button">Exit edit mode</button>
-  `;
-
-  banner.querySelector("button").addEventListener("click", () => {
-    Stage1ReportEditorState.sourceReport = null;
-    banner.remove();
-    closeReassignmentWorkspace_();
-  });
-
-  header.insertAdjacentElement("afterend", banner);
-}
-
-function injectStage1ReportEditorStyles_() {
-  if (document.getElementById("stage1ReportEditorStyles")) return;
-
-  const style = document.createElement("style");
-  style.id = "stage1ReportEditorStyles";
-  style.textContent = `
-    .stage1-edit-report-button { white-space:nowrap; }
-    .stage1-revision-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:12px 18px 0; padding:12px 14px; border:1px solid rgba(142,105,0,.25); border-radius:14px; background:#fff9cf; color:#423600; }
-    .stage1-revision-banner div { display:grid; gap:3px; }
-    .stage1-revision-banner strong { font-size:13px; }
-    .stage1-revision-banner span { font-size:11px; opacity:.8; }
-    .stage1-revision-banner button { min-height:34px; padding:7px 11px; border:1px solid rgba(66,54,0,.2); border-radius:10px; background:#fff; color:inherit; font:inherit; font-weight:800; cursor:pointer; white-space:nowrap; }
-  `;
-  document.head.appendChild(style);
-}
-
-
-//----------------------------------
-// AO Selection Bulk Controls
-//----------------------------------
-
-document.addEventListener("DOMContentLoaded", initializeAoBulkControls_);
-
-function initializeAoBulkControls_() {
-  addAoBulkSelectionButtons_();
-  injectAoBulkSelectionStyles_();
-}
-
-function addAoBulkSelectionButtons_() {
-  const toolbar = document.querySelector(".ao-selection-toolbar");
-
-  if (!toolbar || document.getElementById("deselectAllAoButton")) {
-    return;
-  }
-
-  const addAllButton = document.getElementById("addAllVisibleAoButton");
-
-  const removeVisibleButton = document.createElement("button");
-  removeVisibleButton.id = "removeAllVisibleAoButton";
-  removeVisibleButton.type = "button";
-  removeVisibleButton.className =
-    "button button-secondary ao-remove-visible-button";
-  removeVisibleButton.textContent = "− Remove All Visible";
-  removeVisibleButton.title =
-    "Remove only personnel currently visible under the active filters";
-  removeVisibleButton.addEventListener(
-    "click",
-    removeAllVisiblePersonnelFromAo_
-  );
-
-  const deselectAllButton = document.createElement("button");
-  deselectAllButton.id = "deselectAllAoButton";
-  deselectAllButton.type = "button";
-  deselectAllButton.className =
-    "button button-secondary ao-deselect-all-button";
-  deselectAllButton.textContent = "× Deselect All";
-  deselectAllButton.title =
-    "Clear the entire AO selection while keeping filters intact";
-  deselectAllButton.addEventListener(
-    "click",
-    deselectAllPersonnelFromAo_
-  );
-
-  if (addAllButton) {
-    addAllButton.insertAdjacentElement("afterend", removeVisibleButton);
-    removeVisibleButton.insertAdjacentElement("afterend", deselectAllButton);
-  } else {
-    toolbar.append(removeVisibleButton, deselectAllButton);
-  }
-}
-
-function removeAllVisiblePersonnelFromAo_() {
-  const records = Array.isArray(PersonnelState.filteredRecords)
-    ? PersonnelState.filteredRecords
-    : [];
-
-  records.forEach(record => {
-    PersonnelState.aoCart.delete(getAoPersonnelKey_(record));
-  });
-
-  pruneReassignmentSelectionAfterAoChange_();
-  persistAndRefreshAoBulkChange_();
-}
-
-function deselectAllPersonnelFromAo_() {
-  if (!PersonnelState.aoCart.size) {
-    return;
-  }
-
-  PersonnelState.aoCart.clear();
-
-  if (typeof ReassignmentState !== "undefined") {
-    ReassignmentState.assignments?.clear?.();
-    ReassignmentState.selectedKeys?.clear?.();
-
-    if (typeof saveReassignmentState_ === "function") {
-      saveReassignmentState_();
-    }
-  }
-
-  persistAndRefreshAoBulkChange_();
-}
-
-function pruneReassignmentSelectionAfterAoChange_() {
-  if (typeof ReassignmentState === "undefined") {
-    return;
-  }
-
-  const validKeys = new Set(PersonnelState.aoCart.keys());
-
-  ReassignmentState.assignments?.forEach?.((value, key) => {
-    if (!validKeys.has(key)) {
-      ReassignmentState.assignments.delete(key);
-    }
-  });
-
-  ReassignmentState.selectedKeys?.forEach?.(key => {
-    if (!validKeys.has(key)) {
-      ReassignmentState.selectedKeys.delete(key);
-    }
-  });
-
-  if (typeof saveReassignmentState_ === "function") {
-    saveReassignmentState_();
-  }
-}
-
-function persistAndRefreshAoBulkChange_() {
-  saveAoCart_();
-  updateAoCartCount_();
-
-  if (typeof updateReportGeneratorButton_ === "function") {
-    updateReportGeneratorButton_();
-  }
-
-  renderPreviewTable();
-
-  if (typeof renderReassignmentWorkspace_ === "function") {
-    renderReassignmentWorkspace_();
-  }
-}
-
-function injectAoBulkSelectionStyles_() {
-  if (document.getElementById("aoBulkSelectionStyles")) {
-    return;
-  }
-
-  const style = document.createElement("style");
-  style.id = "aoBulkSelectionStyles";
-  style.textContent = `
-    #removeAllVisibleAoButton,
-    #deselectAllAoButton {
-      white-space: nowrap;
-    }
-
-    #removeAllVisibleAoButton {
-      border-color: rgba(31,111,52,.24);
-      background: rgba(255,255,255,.9);
-    }
-
-    #deselectAllAoButton {
-      border-color: rgba(169,44,44,.28);
-      color: #8d2525;
-      background: #fff8f8;
-    }
-
-    #deselectAllAoButton:hover {
-      border-color: rgba(169,44,44,.5);
-      background: #fff1f1;
-    }
-  `;
-
-  document.head.appendChild(style);
-}
-
-
-//----------------------------------
-// Personnel Performance Client
-//----------------------------------
-
-const PERSONNEL_SEARCH_DEBOUNCE_MS = 250;
-
-window.addEventListener("DOMContentLoaded", () => {
-  PERSONNEL_APP_CONFIG.previewRowLimit = 100;
-  PersonnelState.autoApply = false;
-
-  const autoApplyToggle = document.getElementById("autoApplyToggle");
-  if (autoApplyToggle) autoApplyToggle.checked = false;
-
-  installDebouncedPersonnelSearch_();
-  patchPersonnelFiltering_();
-  patchPersonnelAnalytics_();
-  patchAoRowButtonsForFastUpdates_();
-
-  setSyncStatus("Preview only", "ready");
-  setLastSyncLabel("Auto Apply is off. Click Apply Now only when you want to sync the Sheet view.");
-});
-
-function installDebouncedPersonnelSearch_() {
-  const original = document.getElementById("searchInput");
-  if (!original || original.dataset.performancePatched === "true") return;
-
-  const replacement = original.cloneNode(true);
-  replacement.dataset.performancePatched = "true";
-  original.replaceWith(replacement);
-
-  let timer = null;
-  replacement.addEventListener("input", event => {
-    clearTimeout(timer);
-    const value = event.target.value;
-
-    timer = window.setTimeout(() => {
-      PersonnelState.filters.search = value;
-      handleFilterChange();
-    }, PERSONNEL_SEARCH_DEBOUNCE_MS);
-  });
-}
-
-function patchPersonnelFiltering_() {
-  filterPersonnelRecords = function () {
-    const searchTerm = String(PersonnelState.filters.search || "")
-      .trim()
-      .toLowerCase();
-    const groups = PERSONNEL_APP_CONFIG.filterGroups;
-    const selectedRanks = PersonnelState.filters.ranks;
-
-    return PersonnelState.records.filter(record => {
-      for (const group of groups) {
-        const selected = PersonnelState.filters[group.key];
-        if (selected.size && !selected.has(String(record[group.recordKey] || "").trim())) {
-          return false;
-        }
-      }
-
-      if (selectedRanks.size && !selectedRanks.has(String(record.Rank || "").trim())) {
-        return false;
-      }
-
-      if (!searchTerm) return true;
-
-      if (!record.__personnelSearchText) {
-        record.__personnelSearchText = PERSONNEL_APP_CONFIG.searchableColumns
-          .map(column => String(record[column] || "").trim().toLowerCase())
-          .join("\u0001");
-      }
-
-      return record.__personnelSearchText.includes(searchTerm);
-    });
-  };
-
-  const originalFilterAndRender = filterAndRenderPersonnel;
-  let scheduled = false;
-
-  filterAndRenderPersonnel = function () {
-    if (scheduled) return;
-    scheduled = true;
-
-    window.requestAnimationFrame(() => {
-      scheduled = false;
-      originalFilterAndRender();
-    });
-  };
-}
-
-function patchPersonnelAnalytics_() {
-  analyzePersonnelDuplicates = function (records) {
-    const nameGroups = new Map();
-    const fields = ["Gender", "Category", "Camp", "Office", "Rank"];
-    const summaryMaps = new Map(fields.map(field => [field, new Map()]));
-
-    records.forEach(record => {
-      const displayName = String(record["Full Name"] || "").trim();
-      const normalizedName = normalizePersonnelName_(displayName);
-
-      if (normalizedName) {
-        if (!nameGroups.has(normalizedName)) {
-          nameGroups.set(normalizedName, {
-            normalizedName,
-            displayName,
-            records: [],
-          });
-        }
-        nameGroups.get(normalizedName).records.push(record);
-      }
-
-      fields.forEach(field => {
-        const value = String(record[field] || "").trim();
-        if (!value) return;
-        const counts = summaryMaps.get(field);
-        counts.set(value, (counts.get(value) || 0) + 1);
-      });
-    });
-
-    const duplicateGroups = [...nameGroups.values()]
-      .filter(group => group.records.length > 1)
-      .sort((a, b) =>
-        b.records.length - a.records.length ||
-        a.displayName.localeCompare(b.displayName, undefined, {
-          sensitivity: "base",
-        })
-      );
-
-    const duplicateExtraRows = duplicateGroups.reduce(
-      (total, group) => total + group.records.length - 1,
-      0
-    );
-    const duplicateTotalRows = duplicateGroups.reduce(
-      (total, group) => total + group.records.length,
-      0
-    );
-
-    PersonnelState.__performanceAnalytics = {
-      records,
-      summaryMaps,
-    };
-
-    return {
-      uniqueCount: nameGroups.size,
-      duplicateNameCount: duplicateGroups.length,
-      duplicateExtraRows,
-      duplicateTotalRows,
-      duplicateGroups,
-    };
-  };
-
-  renderCountingReports_ = function (records) {
-    const fields = [
-      ["Gender", "genderReport"],
-      ["Category", "categoryReport"],
-      ["Camp", "campReport"],
-      ["Office", "officeReport"],
-      ["Rank", "rankReport"],
-    ];
-
-    const analytics = PersonnelState.__performanceAnalytics;
-    const maps = analytics && analytics.records === records
-      ? analytics.summaryMaps
-      : new Map(fields.map(([field]) => [field, new Map()]));
-
-    fields.forEach(([field, containerId]) => {
-      const items = [...(maps.get(field) || new Map()).entries()]
-        .map(([label, count]) => ({ label, count }))
-        .sort((a, b) =>
-          b.count - a.count ||
-          a.label.localeCompare(b.label, undefined, {
-            numeric: true,
-            sensitivity: "base",
-          })
-        );
-      renderReportList_(containerId, items);
-    });
-
-    renderTypeBreakdown_(records);
-  };
-}
-
-function patchAoRowButtonsForFastUpdates_() {
-  if (typeof createAoAddButton_ !== "function") return;
-
-  createAoAddButton_ = function (record) {
-    const key = getAoPersonnelKey_(record);
-    const button = document.createElement("button");
-
-    button.type = "button";
-    button.className = "ao-row-add-button";
-
-    const refreshButton = () => {
-      const isAdded = PersonnelState.aoCart.has(key);
-      button.classList.toggle("is-added", isAdded);
-      button.textContent = isAdded ? "✓ Added" : "+ Add";
-      button.title = isAdded
-        ? "Remove from AO selection"
-        : "Add to AO selection";
-    };
-
-    refreshButton();
-
-    button.addEventListener("click", () => {
-      togglePersonnelInAoCart_(record);
-      refreshButton();
-    });
-
-    return button;
-  };
-}
-
-
-//----------------------------------
-// Transfer Queue Client
-//----------------------------------
-
-(function () {
-  const ids = {
-    button: "openTransferQueueButton",
-    backdrop: "transferQueueBackdrop",
-    dialog: "transferQueueDialog",
-    body: "transferQueueTableBody",
-    message: "transferQueueMessage",
-    approve: "approveSelectedTransfersButton",
-  };
-
-  let selectedIds = new Set();
-  let latestPayload = null;
-
-  function install_() {
-    ensureButton_();
-    ensureDialog_();
-    patchPayloadCapture_();
-    patchGenerationSuccess_();
-
-    const observer = new MutationObserver(function () {
-      ensureButton_();
-      ensureDialog_();
-      patchPayloadCapture_();
-      patchGenerationSuccess_();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  }
-
-  function ensureButton_() {
-    if (document.getElementById(ids.button)) return;
-
-    const host =
-      document.querySelector(".app-header-actions") ||
-      document.querySelector(".header-actions") ||
-      document.querySelector("header") ||
-      document.body;
-
-    const button = document.createElement("button");
-    button.id = ids.button;
-    button.type = "button";
-    button.className = "button button-secondary transfer-queue-launcher";
-    button.textContent = "Transfer Queue";
-    button.addEventListener("click", openQueue_);
-    host.appendChild(button);
-  }
-
-  function ensureDialog_() {
-    if (document.getElementById(ids.dialog)) return;
-
-    const backdrop = document.createElement("div");
-    backdrop.id = ids.backdrop;
-    backdrop.className = "transfer-queue-backdrop";
-    backdrop.hidden = true;
-
-    const dialog = document.createElement("section");
-    dialog.id = ids.dialog;
-    dialog.className = "transfer-queue-dialog";
-    dialog.hidden = true;
-    dialog.innerHTML = `
-      <div class="transfer-queue-header">
-        <div>
-          <span>PERSONNEL MOVEMENT</span>
-          <h2>Transfer Queue</h2>
-          <p>Approve selected transfers and update Office and Camp in the LIST sheet.</p>
-        </div>
-        <button type="button" data-close title="Close">×</button>
-      </div>
-      <div id="${ids.message}" class="transfer-queue-message" hidden></div>
-      <div class="transfer-queue-toolbar">
-        <button type="button" data-select-all class="button button-secondary">Select pending</button>
-        <button type="button" data-refresh class="button button-secondary">Refresh</button>
-        <strong data-count>0 selected</strong>
-      </div>
-      <div class="transfer-queue-table-wrap">
-        <table class="transfer-queue-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Status</th>
-              <th>AO</th>
-              <th>Personnel</th>
-              <th>Previous Assignment</th>
-              <th>New Assignment</th>
-              <th>Document</th>
-            </tr>
-          </thead>
-          <tbody id="${ids.body}"></tbody>
-        </table>
-      </div>
-      <div class="transfer-queue-actions">
-        <button type="button" data-close class="button button-secondary">Close</button>
-        <button id="${ids.approve}" type="button" class="button button-primary">Approve & Apply Transfer</button>
-      </div>
-    `;
-
-    backdrop.addEventListener("click", closeQueue_);
-    dialog.querySelectorAll("[data-close]").forEach(button =>
-      button.addEventListener("click", closeQueue_)
-    );
-    dialog.querySelector("[data-refresh]").addEventListener("click", loadQueue_);
-    dialog.querySelector("[data-select-all]").addEventListener("click", selectAllPending_);
-    dialog.querySelector(`#${ids.approve}`).addEventListener("click", approveSelected_);
-
-    document.body.append(backdrop, dialog);
-    injectStyles_();
-  }
-
-  function openQueue_() {
-    ensureDialog_();
-    document.getElementById(ids.backdrop).hidden = false;
-    document.getElementById(ids.dialog).hidden = false;
-    selectedIds.clear();
-    updateSelectedCount_();
-    loadQueue_();
-  }
-
-  function closeQueue_() {
-    document.getElementById(ids.backdrop).hidden = true;
-    document.getElementById(ids.dialog).hidden = true;
-  }
-
-  function loadQueue_() {
-    showMessage_("Loading transfer queue...", "working");
-    google.script.run
-      .withSuccessHandler(renderQueue_)
-      .withFailureHandler(error => {
-        showMessage_(error?.message || "Unable to load transfer queue.", "error");
-      })
-      .getTransferQueueRecords();
-  }
-
-  function renderQueue_(response) {
-    const body = document.getElementById(ids.body);
-    body.replaceChildren();
-
-    if (!response || response.success !== true) {
-      showMessage_(response?.message || "Unable to load transfer queue.", "error");
-      return;
-    }
-
-    hideMessage_();
-    const records = Array.isArray(response.records) ? response.records : [];
-
-    if (!records.length) {
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 7;
-      cell.className = "transfer-queue-empty";
-      cell.textContent = "No transfers have been queued yet.";
-      row.appendChild(cell);
-      body.appendChild(row);
-      return;
-    }
-
-    records.forEach(record => {
-      const row = document.createElement("tr");
-      row.dataset.status = record.status || "";
-
-      const checkboxCell = document.createElement("td");
-      const hitbox = document.createElement("label");
-      hitbox.className = "transfer-queue-check-hitbox";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.value = record.transferId;
-      checkbox.disabled = String(record.status).toUpperCase() === "APPLIED";
-      checkbox.checked = selectedIds.has(record.transferId);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedIds.add(record.transferId);
-        else selectedIds.delete(record.transferId);
-        updateSelectedCount_();
-      });
-      hitbox.appendChild(checkbox);
-      checkboxCell.appendChild(hitbox);
-
-      const statusCell = document.createElement("td");
-      const status = document.createElement("span");
-      status.className = `transfer-status transfer-status-${String(record.status || "pending").toLowerCase()}`;
-      status.textContent = record.status || "PENDING";
-      statusCell.appendChild(status);
-      if (record.errorMessage) {
-        const error = document.createElement("small");
-        error.textContent = record.errorMessage;
-        statusCell.appendChild(error);
-      }
-
-      const aoCell = document.createElement("td");
-      aoCell.innerHTML = `<strong></strong><small></small>`;
-      aoCell.querySelector("strong").textContent = record.orderNumber || "—";
-      aoCell.querySelector("small").textContent = record.orderDate || "";
-
-      const personCell = document.createElement("td");
-      personCell.innerHTML = `<strong></strong><small></small>`;
-      personCell.querySelector("strong").textContent = [record.rank, record.fullName].filter(Boolean).join(" ");
-      personCell.querySelector("small").textContent = record.transferId || "";
-
-      const previousCell = assignmentCell_(record.previousOffice, record.previousCamp);
-      const newCell = assignmentCell_(record.newOffice, record.newCamp);
-
-      const documentCell = document.createElement("td");
-      if (record.documentUrl) {
-        const link = document.createElement("a");
-        link.href = record.documentUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = "Open AO";
-        documentCell.appendChild(link);
-      } else {
-        documentCell.textContent = "—";
-      }
-
-      row.append(
-        checkboxCell,
-        statusCell,
-        aoCell,
-        personCell,
-        previousCell,
-        newCell,
-        documentCell
-      );
-      body.appendChild(row);
-    });
-  }
-
-  function assignmentCell_(office, camp) {
-    const cell = document.createElement("td");
-    const strong = document.createElement("strong");
-    const small = document.createElement("small");
-    strong.textContent = office || "—";
-    small.textContent = camp || "—";
-    cell.append(strong, small);
-    return cell;
-  }
-
-  function selectAllPending_() {
-    document.querySelectorAll(`#${ids.body} input[type="checkbox"]:not(:disabled)`).forEach(box => {
-      box.checked = true;
-      selectedIds.add(box.value);
-    });
-    updateSelectedCount_();
-  }
-
-  function approveSelected_() {
-    if (!selectedIds.size) {
-      showMessage_("Select at least one pending transfer.", "error");
-      return;
-    }
-
-    if (!window.confirm(
-      `Approve and apply ${selectedIds.size} transfer(s)? This will update Office and Camp in LIST.`
-    )) return;
-
-    const button = document.getElementById(ids.approve);
-    button.disabled = true;
-    button.textContent = "Applying...";
-    showMessage_("Updating the LIST sheet...", "working");
-
-    google.script.run
-      .withSuccessHandler(response => {
-        button.disabled = false;
-        button.textContent = "Approve & Apply Transfer";
-        showMessage_(response?.message || "Transfer processing completed.", response?.success ? "success" : "error");
-        selectedIds.clear();
-        updateSelectedCount_();
-        loadQueue_();
-        if (typeof loadPersonnelData === "function") {
-          try { loadPersonnelData(); } catch (ignored) {}
-        }
-      })
-      .withFailureHandler(error => {
-        button.disabled = false;
-        button.textContent = "Approve & Apply Transfer";
-        showMessage_(error?.message || "Transfer processing failed.", "error");
-      })
-      .approveAndApplyTransfers([...selectedIds]);
-  }
-
-  function patchPayloadCapture_() {
-    if (
-      typeof window.buildReassignmentGeneratePayload_ !== "function" ||
-      window.buildReassignmentGeneratePayload_.transferQueueCapturePatched
-    ) return;
-
-    const original = window.buildReassignmentGeneratePayload_;
-    function patched() {
-      const payload = original.apply(this, arguments);
-      latestPayload = JSON.parse(JSON.stringify(payload));
-      return payload;
-    }
-    patched.transferQueueCapturePatched = true;
-    window.buildReassignmentGeneratePayload_ = patched;
-  }
-
-  function patchGenerationSuccess_() {
-    if (
-      typeof window.handleReassignmentGenerateSuccess_ !== "function" ||
-      window.handleReassignmentGenerateSuccess_.transferQueuePatched
-    ) return;
-
-    const original = window.handleReassignmentGenerateSuccess_;
-    function patched(response) {
-      original.apply(this, arguments);
-      if (!response || response.success !== true || !latestPayload) return;
-
-      google.script.run
-        .withSuccessHandler(queueResponse => {
-          if (queueResponse?.success) {
-            showReassignmentGenerateMessage_(
-              `${response.message || "Report generated."} ${queueResponse.message}`,
-              "success"
-            );
-          }
-        })
-        .withFailureHandler(error => {
-          console.warn("Unable to add transfers to queue:", error);
-        })
-        .enqueueTransferBatch(latestPayload, response);
-    }
-    patched.transferQueuePatched = true;
-    window.handleReassignmentGenerateSuccess_ = patched;
-  }
-
-  function updateSelectedCount_() {
-    const count = document.querySelector(`#${ids.dialog} [data-count]`);
-    if (count) count.textContent = `${selectedIds.size} selected`;
-  }
-
-  function showMessage_(text, type) {
-    const message = document.getElementById(ids.message);
-    message.className = `transfer-queue-message is-${type || "info"}`;
-    message.textContent = text;
-    message.hidden = false;
-  }
-
-  function hideMessage_() {
-    const message = document.getElementById(ids.message);
-    message.hidden = true;
-    message.textContent = "";
-  }
-
-  function injectStyles_() {
-    if (document.getElementById("transferQueueStyles")) return;
-    const style = document.createElement("style");
-    style.id = "transferQueueStyles";
-    style.textContent = `
-      .transfer-queue-launcher{margin-left:8px}
-      .transfer-queue-backdrop{position:fixed;inset:0;background:rgba(8,28,14,.48);z-index:12000}
-      .transfer-queue-dialog{position:fixed;z-index:12001;inset:5vh 3vw auto;max-height:90vh;overflow:auto;padding:20px;border-radius:18px;background:#f5fbf6;box-shadow:0 24px 70px rgba(0,0,0,.28)}
-      .transfer-queue-header,.transfer-queue-toolbar,.transfer-queue-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}
-      .transfer-queue-header h2{margin:2px 0}.transfer-queue-header p{margin:4px 0;color:#55705c}.transfer-queue-header>button{font-size:28px;border:0;background:transparent;cursor:pointer}
-      .transfer-queue-toolbar{margin:14px 0}.transfer-queue-table-wrap{overflow:auto;border:1px solid #cfe1d2;border-radius:14px;background:white}
-      .transfer-queue-table{width:100%;border-collapse:collapse;min-width:980px}.transfer-queue-table th,.transfer-queue-table td{padding:10px;border-bottom:1px solid #e6efe8;text-align:left;vertical-align:top}.transfer-queue-table th{position:sticky;top:0;background:#eaf5ec;z-index:1;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.transfer-queue-table td strong,.transfer-queue-table td small{display:block}.transfer-queue-table td small{margin-top:3px;color:#68776b}
-      .transfer-queue-check-hitbox{display:grid;place-items:center;width:42px;height:42px;margin:-8px;cursor:pointer}.transfer-queue-check-hitbox input{width:20px;height:20px;cursor:pointer}
-      .transfer-status{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900}.transfer-status-pending{background:#fff1a8}.transfer-status-applied{background:#ccefd4;color:#155b25}.transfer-status-error{background:#ffd8d8;color:#8c2222}
-      .transfer-queue-actions{justify-content:flex-end;margin-top:14px}.transfer-queue-message{margin:12px 0;padding:10px 12px;border-radius:10px}.transfer-queue-message.is-success{background:#dff5e3}.transfer-queue-message.is-error{background:#ffe2e2}.transfer-queue-message.is-working{background:#fff5bf}.transfer-queue-empty{text-align:center!important;padding:30px!important;color:#69766c}
-    `;
-    document.head.appendChild(style);
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install_, { once: true });
-  } else {
-    install_();
-  }
-})();
-
-
-//----------------------------------
-// Transfer Queue Cancel Action
-//----------------------------------
-
-(function () {
-  const DIALOG_ID = "transferQueueDialog";
-  const CANCEL_ID = "cancelSelectedTransfersButton";
-
-  function ensureCancelButton_() {
-    const dialog = document.getElementById(DIALOG_ID);
-    if (!dialog || document.getElementById(CANCEL_ID)) return;
-
-    const actions = dialog.querySelector(".transfer-queue-actions");
-    const approve = document.getElementById(
-      "approveSelectedTransfersButton"
-    );
-
-    if (!actions || !approve) return;
-
-    const button = document.createElement("button");
-    button.id = CANCEL_ID;
-    button.type = "button";
-    button.className = "button button-secondary transfer-queue-cancel-action";
-    button.textContent = "Cancel Transfer";
-    button.addEventListener("click", cancelSelectedTransfers_);
-
-    actions.insertBefore(button, approve);
-  }
-
-  function selectedTransferIds_() {
-    return [
-      ...document.querySelectorAll(
-        `#${DIALOG_ID} #transferQueueTableBody input[type="checkbox"]:checked:not(:disabled)`
-      ),
-    ]
-      .map(box => String(box.value || "").trim())
-      .filter(Boolean);
-  }
-
-  function setQueueMessage_(text, type) {
-    const message = document.getElementById("transferQueueMessage");
-    if (!message) return;
-
-    message.className =
-      `transfer-queue-message is-${type || "info"}`;
-    message.textContent = text;
-    message.hidden = false;
-  }
-
-  function refreshQueue_() {
-    const refresh = document.querySelector(
-      `#${DIALOG_ID} [data-refresh]`
-    );
-    if (refresh) refresh.click();
-  }
-
-  function cancelSelectedTransfers_() {
-    const ids = selectedTransferIds_();
-
-    if (!ids.length) {
-      setQueueMessage_(
-        "Select at least one pending transfer to cancel.",
-        "error"
-      );
-      return;
-    }
-
-    if (!window.confirm(
-      `Cancel ${ids.length} selected transfer(s)? This will not update the LIST sheet.`
-    )) {
-      return;
-    }
-
-    const button = document.getElementById(CANCEL_ID);
-    button.disabled = true;
-    button.textContent = "Cancelling...";
-    setQueueMessage_("Cancelling selected transfers...", "working");
-
-    google.script.run
-      .withSuccessHandler(response => {
-        button.disabled = false;
-        button.textContent = "Cancel Transfer";
-        setQueueMessage_(
-          response?.message || "Transfer cancellation completed.",
-          response?.success ? "success" : "error"
-        );
-        refreshQueue_();
-      })
-      .withFailureHandler(error => {
-        button.disabled = false;
-        button.textContent = "Cancel Transfer";
-        setQueueMessage_(
-          error?.message || "Transfer cancellation failed.",
-          "error"
-        );
-      })
-      .cancelTransferQueueRecords(ids);
-  }
-
-  function install_() {
-    ensureCancelButton_();
-
-    const observer = new MutationObserver(ensureCancelButton_);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  }
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .transfer-queue-cancel-action{
-      border-color:rgba(169,44,44,.30)!important;
-      background:#fff8f8!important;
-      color:#8d2525!important;
-    }
-  `;
-  document.head.appendChild(style);
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install_, {
-      once: true,
-    });
-  } else {
-    install_();
-  }
-})();
-
-
-//----------------------------------
 // Personnel Platform Core — Developer Mode foundation
 //----------------------------------
 
@@ -8010,7 +6279,6 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("PersonnelPlatform core active. Run $PF.status().");
 })();
 
-
 //----------------------------------
 // Personnel Platform — Legacy engine adapters
 //----------------------------------
@@ -8170,7 +6438,6 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("PersonnelPlatform reusable engine adapters registered.");
 })();
 
-
 //----------------------------------
 // Personnel Platform — SelectionEngine adapter
 // Developer Mode: the legacy Personnel Filter owns the AO cart.
@@ -8305,7 +6572,6 @@ function patchAoRowButtonsForFastUpdates_() {
 
   console.info("SelectionEngine v0.3.0 mirrors the legacy AO cart without controlling its UI.");
 })();
-
 
 //----------------------------------
 // Personnel Platform — FilterEngine v0.2 migration
@@ -8611,7 +6877,6 @@ function patchAoRowButtonsForFastUpdates_() {
     "FilterEngine v0.2 owns personnel filters in Developer Mode. Run $PF.filter.report()."
   );
 })();
-
 
 // Personnel Platform — reusable scoped AssignmentEngine core
 // Developer Mode foundation. No dependency on legacy reassignment state.
@@ -9090,7 +7355,6 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("Reusable SortEngine v1.1.0 active with official rank hierarchy.");
 })();
 
-
 // Personnel Platform — reusable GeneratorEngine
 // Developer Mode foundation. Orchestrates registered report generators.
 
@@ -9241,7 +7505,6 @@ function patchAoRowButtonsForFastUpdates_() {
   window.$PF.generator = GeneratorEngine;
   console.info("GeneratorEngine v1.0.0 active. Run $PF.generator.status().");
 })();
-
 
 // Personnel Platform — reusable ReportEngine
 // Developer Mode foundation. Owns report drafts, metadata, preview, results, and revisions.
@@ -9494,9 +7757,8 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("ReportEngine v1.0.0 active. Run $PF.report.status().");
 })();
 
-
-// Personnel Platform — reusable TransferQueueEngine
-// Developer Mode foundation. Owns queued personnel-transfer requests only.
+// Personnel Platform — TransferQueueEngine v2
+// Owns personnel movement lifecycle while remaining compatible with the V1 queue UI.
 
 (function () {
   "use strict";
@@ -9507,52 +7769,330 @@ function patchAoRowButtonsForFastUpdates_() {
   const entries = new Map();
   let sequence = 0;
 
+  const ACTIVE_STATUSES = new Set(["PENDING", "APPROVED"]);
+  const VALID_STATUSES = new Set([
+    "PENDING",
+    "APPROVED",
+    "APPLIED",
+    "CANCELLED",
+    "FAILED",
+  ]);
+
   function text(value) {
     return String(value == null ? "" : value).trim();
+  }
+
+  function upper(value) {
+    return text(value).toUpperCase();
   }
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
   }
 
-  function normalizeStatus(value) {
-    const status = text(value).toUpperCase();
-    return ["PENDING", "APPROVED", "APPLIED", "CANCELLED", "FAILED"].includes(status)
-      ? status
-      : "PENDING";
+  function nowIso() {
+    return new Date().toISOString();
   }
 
-  function makeId() {
-    return `TRQ-${Date.now()}-${++sequence}`;
+  function normalizeStatus(value, fallback = "PENDING") {
+    const status = upper(value);
+    return VALID_STATUSES.has(status) ? status : fallback;
+  }
+
+  function makeId(prefix = "TRQ") {
+    return `${prefix}-${Date.now()}-${++sequence}`;
+  }
+
+  function movementKey(person = {}, index = 0) {
+    return text(
+      person.personnelKey ||
+      person.key ||
+      person.id ||
+      person.__key ||
+      person.__sheetRow ||
+      person.rowIndex ||
+      person.sheetRow
+    ) || `person:${upper(person.fullName || person.name)}:${index + 1}`;
+  }
+
+  function assignmentFromPerson(person = {}) {
+    const mode = upper(person.transferMode || person.mode);
+    const original = person.originalAssignment || person.original || {};
+    const proposed = person.proposedAssignment || person.proposed || {};
+
+    return {
+      transferMode: mode || "OFFICE_TO_OFFICE",
+      originalAssignment: {
+        office: text(original.office || person.fromOffice || (mode !== "CAMP_TO_CAMP" ? person.from : "")),
+        camp: text(original.camp || person.fromCamp || (mode === "CAMP_TO_CAMP" ? person.from : "")),
+      },
+      proposedAssignment: {
+        office: text(proposed.office || person.toOffice || (mode !== "CAMP_TO_CAMP" ? person.to : "")),
+        camp: text(proposed.camp || person.toCamp || (mode === "CAMP_TO_CAMP" ? person.to : "")),
+      },
+    };
+  }
+
+  function normalizeMovement(person = {}, index = 0, context = {}) {
+    const assignment = assignmentFromPerson(person);
+    const createdAt = context.createdAt || nowIso();
+    const status = normalizeStatus(person.status || context.status);
+
+    return {
+      id: text(person.transferId || person.movementId) || makeId("TRM"),
+      personnelKey: movementKey(person, index),
+      rank: text(person.rank),
+      fullName: text(person.fullName || person.name),
+      transferMode: assignment.transferMode,
+      originalAssignment: assignment.originalAssignment,
+      proposedAssignment: assignment.proposedAssignment,
+      status,
+      note: text(person.note),
+      cautions: clone(person.cautions || []),
+      history: clone(person.history || [{
+        status,
+        at: createdAt,
+        by: text(context.createdBy),
+        note: "Transfer movement created.",
+      }]),
+      createdAt,
+      updatedAt: createdAt,
+      approvedAt: text(person.approvedAt),
+      cancelledAt: text(person.cancelledAt),
+      appliedAt: text(person.appliedAt),
+      failedAt: text(person.failedAt),
+      result: clone(person.result || null),
+      error: text(person.error),
+    };
+  }
+
+  function movementToLegacyPerson(movement) {
+    return {
+      personnelKey: movement.personnelKey,
+      rank: movement.rank,
+      fullName: movement.fullName,
+      transferMode: movement.transferMode,
+      fromOffice: movement.originalAssignment.office,
+      fromCamp: movement.originalAssignment.camp,
+      toOffice: movement.proposedAssignment.office,
+      toCamp: movement.proposedAssignment.camp,
+      from: movement.transferMode === "CAMP_TO_CAMP"
+        ? movement.originalAssignment.camp
+        : movement.originalAssignment.office,
+      to: movement.transferMode === "CAMP_TO_CAMP"
+        ? movement.proposedAssignment.camp
+        : movement.proposedAssignment.office,
+      status: movement.status,
+      cautions: clone(movement.cautions),
+    };
+  }
+
+  function aggregateStatus(movements, fallback = "PENDING") {
+    if (!movements.length) return fallback;
+    const statuses = new Set(movements.map(item => item.status));
+    if (statuses.size === 1) return movements[0].status;
+    if (statuses.has("FAILED")) return "FAILED";
+    if (statuses.has("PENDING")) return "PENDING";
+    if (statuses.has("APPROVED")) return "APPROVED";
+    if (statuses.has("APPLIED")) return "APPLIED";
+    return "CANCELLED";
+  }
+
+  function activeMovementForPersonnel(personnelKey, excludedEntryId = "") {
+    const key = text(personnelKey);
+    if (!key) return null;
+
+    for (const entry of entries.values()) {
+      if (entry.id === excludedEntryId) continue;
+      const movement = entry.movements.find(item =>
+        item.personnelKey === key && ACTIVE_STATUSES.has(item.status)
+      );
+      if (movement) return { entryId: entry.id, movement: clone(movement) };
+    }
+    return null;
+  }
+
+  function validateMovement(person = {}, options = {}) {
+    const movement = normalizeMovement(person, options.index || 0, options);
+    const errors = [];
+    const cautions = [];
+
+    if (!movement.personnelKey) {
+      errors.push({ code: "MISSING_PERSONNEL_KEY", message: "Personnel key is required." });
+    }
+    if (!movement.fullName) {
+      errors.push({ code: "MISSING_PERSONNEL_NAME", message: "Personnel name is required." });
+    }
+
+    const hasDestination = movement.transferMode === "CAMP_TO_CAMP"
+      ? Boolean(movement.proposedAssignment.camp)
+      : Boolean(movement.proposedAssignment.office);
+
+    if (!hasDestination) {
+      errors.push({ code: "MISSING_DESTINATION", message: "A proposed destination is required." });
+    }
+
+    const active = activeMovementForPersonnel(movement.personnelKey, options.excludeEntryId);
+    if (active) {
+      cautions.push({
+        code: "ALREADY_FLOATING",
+        message: `${movement.fullName || "This personnel"} already has an active transfer.`,
+        entryId: active.entryId,
+      });
+    }
+
+    const sameOffice = upper(movement.originalAssignment.office) === upper(movement.proposedAssignment.office);
+    const sameCamp = upper(movement.originalAssignment.camp) === upper(movement.proposedAssignment.camp);
+    if ((movement.transferMode === "CAMP_TO_CAMP" && sameCamp) ||
+        (movement.transferMode !== "CAMP_TO_CAMP" && sameOffice)) {
+      cautions.push({
+        code: "SAME_ASSIGNMENT",
+        message: "Current and proposed assignments are the same.",
+      });
+    }
+
+    if (!movement.originalAssignment.office && !movement.originalAssignment.camp) {
+      cautions.push({
+        code: "MISSING_ORIGINAL_ASSIGNMENT",
+        message: "The original assignment is incomplete.",
+      });
+    }
+
+    return {
+      valid: errors.length === 0,
+      canProceed: errors.length === 0,
+      errors,
+      cautions,
+      movement,
+    };
+  }
+
+  function appendHistory(movement, status, details = {}) {
+    const at = details.at || nowIso();
+    movement.history = Array.isArray(movement.history) ? movement.history : [];
+    movement.history.push({
+      status,
+      at,
+      by: text(details.by),
+      note: text(details.note),
+    });
+    movement.updatedAt = at;
+
+    if (status === "APPROVED") movement.approvedAt = at;
+    if (status === "CANCELLED") movement.cancelledAt = at;
+    if (status === "APPLIED") movement.appliedAt = at;
+    if (status === "FAILED") movement.failedAt = at;
   }
 
   function save(entry, action) {
+    entry.status = aggregateStatus(entry.movements, entry.status);
+    entry.personnel = entry.movements.map(movementToLegacyPerson);
+    entry.updatedAt = nowIso();
     entries.set(entry.id, entry);
-    platform.events.emit("transfer-queue:changed", { action, entry: clone(entry) });
-    platform.events.emit(`transfer-queue:changed:${entry.id}`, { action, entry: clone(entry) });
+
+    const payload = { action, entry: clone(entry) };
+    platform.events.emit("transfer-queue:changed", payload);
+    platform.events.emit(`transfer-queue:changed:${entry.id}`, payload);
     return clone(entry);
   }
 
-  const TransferQueueEngine = {
-    version: "1.0.0",
+  function transition(id, nextStatus, details = {}) {
+    const key = text(id);
+    const entry = entries.get(key);
+    if (!entry) throw new Error(`Transfer queue entry ${key || "—"} was not found.`);
 
-    enqueue(input = {}) {
-      const now = new Date().toISOString();
+    const target = normalizeStatus(nextStatus, "");
+    if (!target) throw new Error(`Unknown transfer status: ${nextStatus}`);
+
+    entry.movements.forEach(movement => {
+      const current = movement.status;
+      let allowed = false;
+
+      if (target === "APPROVED") allowed = current === "PENDING";
+      if (target === "CANCELLED") allowed = current === "PENDING" || current === "APPROVED" || current === "FAILED";
+      if (target === "APPLIED") allowed = current === "APPROVED" || current === "PENDING";
+      if (target === "FAILED") allowed = current !== "APPLIED" && current !== "CANCELLED";
+
+      if (!allowed) return;
+
+      movement.status = target;
+      movement.note = text(details.note || movement.note);
+      if (target === "APPLIED") movement.result = clone(details.result || {});
+      if (target === "FAILED") movement.error = text(details.error || details.note);
+      appendHistory(movement, target, details);
+    });
+
+    return save(entry, target);
+  }
+
+  const TransferQueueEngine = {
+    version: "2.0.0",
+    model: "PERSONNEL_MOVEMENT",
+    validationMode: "CAUTION_FIRST",
+
+    validateTransfer(input = {}, options = {}) {
+      return validateMovement(input, options);
+    },
+
+    validateBatch(input = {}) {
+      const personnel = Array.isArray(input.personnel) ? input.personnel : [];
+      const results = personnel.map((person, index) =>
+        validateMovement(person, { index, createdBy: input.createdBy })
+      );
+      return {
+        valid: results.every(result => result.valid),
+        canProceed: results.every(result => result.canProceed),
+        errors: results.flatMap(result => result.errors),
+        cautions: results.flatMap(result => result.cautions),
+        results,
+      };
+    },
+
+    enqueue(input = {}, options = {}) {
+      const now = nowIso();
+      const personnel = Array.isArray(input.personnel) ? input.personnel : [];
+      if (!personnel.length) throw new Error("At least one personnel movement is required.");
+
+      const validations = personnel.map((person, index) =>
+        validateMovement(person, { index, createdAt: now, createdBy: input.createdBy })
+      );
+      const errors = validations.flatMap(result => result.errors);
+      if (errors.length) {
+        const error = new Error(errors.map(item => item.message).join(" "));
+        error.validation = { errors, cautions: validations.flatMap(result => result.cautions) };
+        throw error;
+      }
+
+      const movements = validations.map(result => ({
+        ...result.movement,
+        cautions: clone(result.cautions),
+      }));
+
       const entry = {
         id: text(input.id) || makeId(),
         sourcePlugin: text(input.sourcePlugin || input.pluginId),
         reportDraftId: text(input.reportDraftId),
-        reportType: text(input.reportType).toUpperCase(),
-        status: normalizeStatus(input.status),
-        personnel: clone(Array.isArray(input.personnel) ? input.personnel : []),
+        reportType: upper(input.reportType || "TRANSFER"),
+        status: aggregateStatus(movements),
+        movements,
+        personnel: movements.map(movementToLegacyPerson),
         metadata: clone(input.metadata || {}),
         payload: clone(input.payload || {}),
         note: text(input.note),
+        cautions: clone(validations.flatMap(result => result.cautions)),
         createdAt: input.createdAt || now,
         updatedAt: now,
       };
-      if (entries.has(entry.id)) throw new Error(`Transfer queue entry ${entry.id} already exists.`);
-      return save(entry, "ENQUEUE");
+
+      if (entries.has(entry.id)) {
+        throw new Error(`Transfer queue entry ${entry.id} already exists.`);
+      }
+
+      return save(entry, options.proceedWithCautions ? "ENQUEUE_WITH_CAUTIONS" : "ENQUEUE");
+    },
+
+    enqueueTransfer(input = {}, options = {}) {
+      return this.enqueue({ ...input, personnel: [input.personnel || input] }, options);
     },
 
     get(id) {
@@ -9561,45 +8101,82 @@ function patchAoRowButtonsForFastUpdates_() {
     },
 
     list(options = {}) {
-      const status = text(options.status).toUpperCase();
+      const status = upper(options.status);
       return [...entries.values()]
         .filter(entry => !status || entry.status === status)
         .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
         .map(clone);
     },
 
+    movements(options = {}) {
+      const status = upper(options.status);
+      const personnelKey = text(options.personnelKey);
+      return [...entries.values()].flatMap(entry =>
+        entry.movements
+          .filter(item => !status || item.status === status)
+          .filter(item => !personnelKey || item.personnelKey === personnelKey)
+          .map(item => ({ ...clone(item), entryId: entry.id }))
+      );
+    },
+
+    floating() {
+      return this.movements().filter(item => ACTIVE_STATUSES.has(item.status));
+    },
+
+    floatingPersonnelKeys() {
+      return [...new Set(this.floating().map(item => item.personnelKey))];
+    },
+
+    isFloating(personnelKey) {
+      return this.floatingPersonnelKeys().includes(text(personnelKey));
+    },
+
+    approve(id, note = "", by = "") {
+      return transition(id, "APPROVED", { note, by });
+    },
+
+    apply(id, result = {}, by = "") {
+      return transition(id, "APPLIED", {
+        result,
+        by,
+        note: text(result.note) || "Transfer applied.",
+      });
+    },
+
+    markApplied(id, result = {}) {
+      return this.apply(id, result, text(result.appliedBy));
+    },
+
+    cancel(id, note = "", by = "") {
+      return transition(id, "CANCELLED", { note, by });
+    },
+
+    fail(id, error, by = "") {
+      return transition(id, "FAILED", {
+        error: error?.message || text(error),
+        note: error?.message || text(error),
+        by,
+      });
+    },
+
     update(id, patch = {}) {
       const key = text(id);
       const entry = entries.get(key);
       if (!entry) throw new Error(`Transfer queue entry ${key || "—"} was not found.`);
+
+      if (patch.status && normalizeStatus(patch.status) !== entry.status) {
+        return transition(id, patch.status, patch);
+      }
+
       const next = {
         ...entry,
         ...clone(patch),
         id: entry.id,
-        status: patch.status == null ? entry.status : normalizeStatus(patch.status),
-        note: patch.note == null ? entry.note : text(patch.note),
-        updatedAt: new Date().toISOString(),
+        movements: entry.movements,
+        personnel: entry.personnel,
+        status: entry.status,
       };
       return save(next, "UPDATE");
-    },
-
-    approve(id, note = "") {
-      return this.update(id, { status: "APPROVED", note });
-    },
-
-    markApplied(id, result = {}) {
-      return this.update(id, { status: "APPLIED", result: clone(result) });
-    },
-
-    cancel(id, note = "") {
-      return this.update(id, { status: "CANCELLED", note });
-    },
-
-    fail(id, error) {
-      return this.update(id, {
-        status: "FAILED",
-        error: error?.message || text(error),
-      });
     },
 
     remove(id) {
@@ -9610,13 +8187,14 @@ function patchAoRowButtonsForFastUpdates_() {
     },
 
     clear(options = {}) {
-      const status = text(options.status).toUpperCase();
+      const status = upper(options.status);
       if (!status) {
         const count = entries.size;
         entries.clear();
         platform.events.emit("transfer-queue:cleared", { count, status: "ALL" });
         return count;
       }
+
       let count = 0;
       [...entries.entries()].forEach(([id, entry]) => {
         if (entry.status === status) {
@@ -9628,27 +8206,236 @@ function patchAoRowButtonsForFastUpdates_() {
       return count;
     },
 
+    history(options = {}) {
+      return this.movements(options).flatMap(movement =>
+        movement.history.map(item => ({
+          ...clone(item),
+          entryId: movement.entryId,
+          movementId: movement.id,
+          personnelKey: movement.personnelKey,
+          fullName: movement.fullName,
+        }))
+      ).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    },
+
     status() {
       const values = [...entries.values()];
+      const movements = values.flatMap(entry => entry.movements);
       const report = {
         version: this.version,
+        model: this.model,
+        validation: this.validationMode,
+        batches: values.length,
+        movements: movements.length,
+        floating: movements.filter(item => ACTIVE_STATUSES.has(item.status)).length,
+        pending: movements.filter(item => item.status === "PENDING").length,
+        approved: movements.filter(item => item.status === "APPROVED").length,
+        applied: movements.filter(item => item.status === "APPLIED").length,
+        cancelled: movements.filter(item => item.status === "CANCELLED").length,
+        failed: movements.filter(item => item.status === "FAILED").length,
         total: values.length,
-        pending: values.filter(item => item.status === "PENDING").length,
-        approved: values.filter(item => item.status === "APPROVED").length,
-        applied: values.filter(item => item.status === "APPLIED").length,
-        cancelled: values.filter(item => item.status === "CANCELLED").length,
-        failed: values.filter(item => item.status === "FAILED").length,
       };
       console.table(report);
       return report;
     },
   };
 
-  if (platform.engines.has("transferQueue")) platform.engines.replace("transferQueue", TransferQueueEngine);
-  else platform.engines.register("transferQueue", TransferQueueEngine);
+  if (platform.engines.has("transferQueue")) {
+    platform.engines.replace("transferQueue", TransferQueueEngine);
+  } else {
+    platform.engines.register("transferQueue", TransferQueueEngine);
+  }
 
   window.$PF.transferQueue = TransferQueueEngine;
-  console.info("TransferQueueEngine v1.0.0 active. Run $PF.transferQueue.status().");
+  console.info("TransferQueueEngine v2.0.0 active. Run $PF.transferQueue.status().");
+})();
+
+// Personnel Platform — local transfer apply adapter
+// Developer Mode only: applies approved queue movements to PersonnelState.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const queue = platform?.engines?.get?.("transferQueue");
+  if (!platform || !queue || queue.localApplyInstalled) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function key(value) {
+    return text(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function legacyState() {
+    try {
+      if (typeof PersonnelState !== "undefined" && PersonnelState) return PersonnelState;
+    } catch (ignored) {}
+    return window.PersonnelState || null;
+  }
+
+  function rowFromPersonnelKey(personnelKey) {
+    const match = /^row:(.+)$/i.exec(text(personnelKey));
+    return match ? text(match[1]) : "";
+  }
+
+  function findRecord(records, movement) {
+    const row = rowFromPersonnelKey(movement.personnelKey);
+    if (row) {
+      const rowMatch = records.find(record => text(record.__sheetRow) === row);
+      if (rowMatch) return rowMatch;
+    }
+
+    const nameKey = key(movement.fullName);
+    let matches = records.filter(record => key(record["Full Name"]) === nameKey);
+
+    const originalOffice = key(movement.originalAssignment?.office);
+    const originalCamp = key(movement.originalAssignment?.camp);
+
+    if (originalOffice) {
+      const officeMatches = matches.filter(record => key(record.Office) === originalOffice);
+      if (officeMatches.length) matches = officeMatches;
+    }
+
+    if (originalCamp) {
+      const campMatches = matches.filter(record => key(record.Camp) === originalCamp);
+      if (campMatches.length) matches = campMatches;
+    }
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function updateAoCart(state, record) {
+    if (!(state.aoCart instanceof Map)) return;
+
+    for (const [cartKey, item] of state.aoCart.entries()) {
+      const sourceRow = text(item?.sourceRow || item?.record?.__sheetRow);
+      const sameRow = sourceRow && sourceRow === text(record.__sheetRow);
+      const sameName = key(item?.fullName || item?.record?.["Full Name"]) === key(record["Full Name"]);
+      if (!sameRow && !sameName) continue;
+
+      state.aoCart.set(cartKey, {
+        ...item,
+        office: text(record.Office),
+        camp: text(record.Camp),
+        record: { ...(item?.record || {}), ...record },
+      });
+    }
+
+    if (typeof saveAoCart_ === "function") saveAoCart_();
+  }
+
+  function refreshPersonnelFilter(state) {
+    if (typeof filterPersonnelRecords === "function") {
+      state.filteredRecords = filterPersonnelRecords();
+    }
+
+    if (typeof renderPreviewTable === "function") renderPreviewTable();
+    if (typeof renderActiveFilterSummary === "function") renderActiveFilterSummary();
+    if (typeof updateAoCartCount_ === "function") updateAoCartCount_();
+
+    platform.events.emit("personnel:local-transfers-applied", {
+      records: state.records,
+      filteredRecords: state.filteredRecords,
+    });
+  }
+
+  function applyEntryToLocalState(entry) {
+    const state = legacyState();
+    if (!state || !Array.isArray(state.records)) {
+      throw new Error("PersonnelState records are unavailable in Developer Mode.");
+    }
+
+    const applied = [];
+    const cautions = [];
+
+    (entry.movements || []).forEach(movement => {
+      if (!["PENDING", "APPROVED"].includes(text(movement.status).toUpperCase())) return;
+
+      const record = findRecord(state.records, movement);
+      if (!record) {
+        cautions.push({
+          code: "PERSONNEL_NOT_MATCHED",
+          personnelKey: movement.personnelKey,
+          fullName: movement.fullName,
+          message: `${movement.fullName || "Personnel"} was not uniquely matched in the local roster.`,
+        });
+        return;
+      }
+
+      const mode = text(movement.transferMode).toUpperCase();
+      const proposed = movement.proposedAssignment || {};
+
+      if (mode === "CAMP_TO_CAMP") {
+        if (text(proposed.camp)) record.Camp = text(proposed.camp);
+        if (text(proposed.office)) record.Office = text(proposed.office);
+      } else {
+        if (text(proposed.office)) record.Office = text(proposed.office);
+        if (text(proposed.camp)) record.Camp = text(proposed.camp);
+      }
+
+      updateAoCart(state, record);
+      applied.push({
+        personnelKey: movement.personnelKey,
+        fullName: movement.fullName,
+        office: text(record.Office),
+        camp: text(record.Camp),
+      });
+    });
+
+    refreshPersonnelFilter(state);
+
+    return {
+      localPreview: true,
+      appliedCount: applied.length,
+      cautionCount: cautions.length,
+      applied,
+      cautions,
+      note: cautions.length
+        ? `${applied.length} local transfer(s) applied with ${cautions.length} caution(s).`
+        : `${applied.length} local transfer(s) applied.`,
+    };
+  }
+
+  const originalApply = queue.apply.bind(queue);
+
+  queue.apply = function (id, result = {}, by = "") {
+    const entry = queue.get(id);
+    if (!entry) throw new Error(`Transfer queue entry ${text(id) || "—"} was not found.`);
+
+    const localResult = applyEntryToLocalState(entry);
+    const mergedResult = { ...result, ...localResult };
+    return originalApply(id, mergedResult, by || text(result.appliedBy));
+  };
+
+  queue.markApplied = function (id, result = {}) {
+    return queue.apply(id, result, text(result.appliedBy));
+  };
+
+  queue.applyLocal = function (id, options = {}) {
+    return queue.apply(id, { ...options, localPreview: true }, text(options.appliedBy));
+  };
+
+  queue.localApplyInstalled = true;
+  queue.localApplyVersion = "1.0.0";
+
+  window.$PF.transferApplyLocal = {
+    version: "1.0.0",
+    apply: id => queue.applyLocal(id),
+    status() {
+      const report = {
+        version: this.version,
+        active: true,
+        queueVersion: queue.version,
+        mode: "DEVELOPER_LOCAL_STATE",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  console.info("Local Transfer Apply adapter v1.0.0 active.");
 })();
 
 // Personnel Platform — Transfer Queue Plugin V1
@@ -9856,9 +8643,8 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("Transfer Queue Plugin V1 active. Run $PF.transferQueuePlugin.open().");
 })();
 
-// Personnel Platform — ReportEngine summary preview UI
-// Local preview only. Shows the same quick-scan summary used by Apps Script
-// without generating or reading an actual Google Document.
+// Personnel Platform — Report Designer V1
+// Two-column live metadata editor and personnel preview.
 
 (function () {
   "use strict";
@@ -9870,6 +8656,7 @@ function patchAoRowButtonsForFastUpdates_() {
   const BACKDROP_ID = "pfReportPreviewBackdrop";
   const DIALOG_ID = "pfReportPreviewDialog";
   let activeDraftId = "";
+  let generating = false;
 
   function text(value) {
     return String(value == null ? "" : value).trim();
@@ -9884,16 +8671,10 @@ function patchAoRowButtonsForFastUpdates_() {
       .replaceAll("'", "&#039;");
   }
 
-  function displayDate(value) {
-    const raw = text(value);
-    if (!raw) return "—";
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return date.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+  function todayValue() {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
   }
 
   function fromValue(person) {
@@ -9915,33 +8696,22 @@ function patchAoRowButtonsForFastUpdates_() {
     const style = document.createElement("style");
     style.id = "pfReportPreviewStyles";
     style.textContent = `
-      #${BACKDROP_ID} { position:fixed; inset:0; z-index:100200; background:rgba(8,31,15,.48); backdrop-filter:blur(6px); }
-      #${DIALOG_ID} { position:fixed; z-index:100201; top:50%; left:50%; transform:translate(-50%,-50%); width:min(1060px,95vw); max-height:92vh; overflow:auto; box-sizing:border-box; padding:20px; border:1px solid #c5d9ca; border-radius:18px; background:#f6fbf7; color:#153c21; box-shadow:0 30px 90px rgba(0,0,0,.35); }
-      #${BACKDROP_ID}[hidden], #${DIALOG_ID}[hidden] { display:none !important; }
-      .pf-rp-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
-      .pf-rp-kicker { font-size:10px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; color:#26723d; }
-      .pf-rp-head h2 { margin:3px 0; font-size:24px; }
-      .pf-rp-head p { margin:0; opacity:.72; }
-      .pf-rp-close { border:0; background:transparent; font-size:28px; cursor:pointer; }
-      .pf-rp-meta { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin:17px 0; }
-      .pf-rp-meta article { min-height:68px; display:grid; gap:5px; align-content:start; padding:11px; border:1px solid #d5e6d9; border-radius:12px; background:white; }
-      .pf-rp-meta span { font-size:10px; font-weight:850; text-transform:uppercase; color:#2b6e3f; }
-      .pf-rp-meta strong { font-size:12px; overflow-wrap:anywhere; }
-      .pf-rp-table-wrap { max-height:455px; overflow:auto; border:1px solid #d2e3d6; border-radius:13px; background:white; }
-      .pf-rp-table { width:100%; border-collapse:collapse; font-size:12px; }
-      .pf-rp-table th { position:sticky; top:0; z-index:1; padding:10px; background:#e8f3ea; text-align:left; }
-      .pf-rp-table td { padding:10px; border-top:1px solid #e0ece3; vertical-align:top; }
-      .pf-rp-table th:first-child, .pf-rp-table td:first-child { width:56px; text-align:center; }
-      .pf-rp-table th:nth-child(3), .pf-rp-table th:nth-child(4), .pf-rp-table td:nth-child(3), .pf-rp-table td:nth-child(4) { width:22%; text-align:center; }
-      .pf-rp-actions { display:flex; justify-content:flex-end; gap:9px; flex-wrap:wrap; margin-top:15px; }
-      .pf-rp-btn { border:1px solid #c5d9ca; border-radius:10px; background:white; padding:9px 13px; font:inherit; font-weight:750; cursor:pointer; }
-      .pf-rp-btn.primary { background:#ffe600; border-color:#d8c700; }
-      .pf-rp-btn.queue { background:#236b39; border-color:#236b39; color:white; }
-      .pf-rp-empty { padding:24px; text-align:center; opacity:.7; }
-      @media (max-width:760px) {
-        .pf-rp-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
-        #${DIALOG_ID} { padding:14px; }
-      }
+      #${BACKDROP_ID}{position:fixed;inset:0;z-index:100200;background:rgba(8,31,15,.48);backdrop-filter:blur(7px)}
+      #${DIALOG_ID}{position:fixed;z-index:100201;top:50%;left:50%;transform:translate(-50%,-50%);width:min(1220px,96vw);max-height:94vh;overflow:auto;box-sizing:border-box;padding:20px;border:1px solid rgba(83,145,98,.34);border-radius:18px;background:rgba(246,251,247,.97);color:#153c21;box-shadow:0 30px 90px rgba(0,0,0,.35)}
+      #${BACKDROP_ID}[hidden],#${DIALOG_ID}[hidden]{display:none!important}
+      .pf-rp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}
+      .pf-rp-kicker{font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:#26723d}
+      .pf-rp-head h2{margin:3px 0;font-size:24px}.pf-rp-head p{margin:0;opacity:.72}.pf-rp-close{border:0;background:transparent;font-size:28px;cursor:pointer}
+      .pf-rp-layout{display:grid;grid-template-columns:minmax(270px,.78fr) minmax(520px,1.8fr);gap:14px;align-items:stretch}
+      .pf-rp-panel{border:1px solid rgba(93,155,109,.28);border-radius:15px;background:rgba(255,255,255,.72);backdrop-filter:blur(12px);padding:14px;min-width:0}
+      .pf-rp-panel-title{margin:0 0 12px;font-size:13px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#236b39}
+      .pf-rp-fields{display:grid;gap:12px}.pf-rp-field{display:grid;gap:5px}.pf-rp-field label{font-size:10px;font-weight:900;text-transform:uppercase;color:#2b6e3f}
+      .pf-rp-input{width:100%;box-sizing:border-box;border:1px solid rgba(83,145,98,.33);border-radius:10px;background:rgba(255,255,255,.82);padding:10px 11px;font:inherit;color:#153c21;outline:none}.pf-rp-input:focus{border-color:#3f8a55;box-shadow:0 0 0 3px rgba(61,139,83,.12)}
+      .pf-rp-hint{font-size:10px;opacity:.62;margin-top:3px}
+      .pf-rp-preview-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.pf-rp-count{font-size:11px;font-weight:800;padding:5px 8px;border-radius:999px;background:rgba(45,124,75,.1);border:1px solid rgba(45,124,75,.2)}
+      .pf-rp-table-wrap{max-height:530px;overflow:auto;border:1px solid #d2e3d6;border-radius:13px;background:white}.pf-rp-table{width:100%;border-collapse:collapse;font-size:12px}.pf-rp-table th{position:sticky;top:0;z-index:1;padding:10px;background:#e8f3ea;text-align:left}.pf-rp-table td{padding:10px;border-top:1px solid #e0ece3;vertical-align:top}.pf-rp-table th:first-child,.pf-rp-table td:first-child{width:56px;text-align:center}.pf-rp-table th:nth-child(3),.pf-rp-table th:nth-child(4),.pf-rp-table td:nth-child(3),.pf-rp-table td:nth-child(4){width:22%;text-align:center}.pf-rp-empty{padding:24px;text-align:center;opacity:.7}
+      .pf-rp-actions{display:flex;justify-content:flex-end;gap:9px;flex-wrap:wrap;margin-top:15px}.pf-rp-btn{border:1px solid rgba(72,133,89,.34);border-radius:10px;background:rgba(255,255,255,.72);padding:9px 13px;font:inherit;font-weight:750;cursor:pointer;backdrop-filter:blur(10px)}.pf-rp-btn.primary{background:linear-gradient(180deg,rgba(55,137,78,.24),rgba(55,137,78,.14));border-color:rgba(45,119,66,.42);color:#174d2b;box-shadow:0 6px 18px rgba(41,105,59,.1)}.pf-rp-btn:hover:not(:disabled){background:rgba(55,137,78,.2)}.pf-rp-btn:disabled{opacity:.45;cursor:not-allowed}
+      @media(max-width:860px){.pf-rp-layout{grid-template-columns:1fr}.pf-rp-table-wrap{max-height:420px}#${DIALOG_ID}{padding:14px}}
     `;
     document.head.appendChild(style);
   }
@@ -9965,64 +8735,60 @@ function patchAoRowButtonsForFastUpdates_() {
     return { backdrop, dialog };
   }
 
-  function renderDraft(draft) {
+  function ensureDefaultDate(draft) {
+    if (text(draft?.metadata?.orderDate)) return draft;
+    return report.setMetadata(draft.id, { orderDate: todayValue() });
+  }
+
+  function renderDraft(inputDraft) {
     const { backdrop, dialog } = ensureUI();
+    const draft = ensureDefaultDate(inputDraft);
     const preview = draft?.preview || report.preview(draft.id);
-    const metadata = preview.metadata || draft.metadata || {};
+    const metadata = draft.metadata || preview.metadata || {};
     const personnel = Array.isArray(preview.personnel) ? preview.personnel : [];
 
     activeDraftId = draft.id;
     dialog.innerHTML = `
       <header class="pf-rp-head">
         <div>
-          <div class="pf-rp-kicker">Report summary preview</div>
-          <h2>${escapeHtml(preview.title || "Report Preview")}</h2>
-          <p>Revision ${escapeHtml(preview.revision || 1)} · ${personnel.length} personnel</p>
+          <div class="pf-rp-kicker">Report Designer V1</div>
+          <h2>${escapeHtml(preview.title || "Report Designer")}</h2>
+          <p>Revision ${escapeHtml(preview.revision || 1)} · ${personnel.length} personnel · Live draft</p>
         </div>
         <button type="button" class="pf-rp-close" data-pf-report-preview="close" title="Close">×</button>
       </header>
 
-      <section class="pf-rp-meta">
-        <article><span>Order Number</span><strong>${escapeHtml(metadata.orderNumber || "—")}</strong></article>
-        <article><span>Order Date</span><strong>${escapeHtml(displayDate(metadata.orderDate))}</strong></article>
-        <article><span>Signing Officer</span><strong>${escapeHtml(metadata.signingOfficer || "—")}</strong></article>
-        <article><span>Position</span><strong>${escapeHtml(metadata.signingPosition || "—")}</strong></article>
-        <article><span>File Reference</span><strong>${escapeHtml(metadata.fileReference || "—")}</strong></article>
-      </section>
+      <div class="pf-rp-layout">
+        <section class="pf-rp-panel">
+          <h3 class="pf-rp-panel-title">Report Details</h3>
+          <div class="pf-rp-fields">
+            <div class="pf-rp-field"><label for="pfRpOrderNumber">Order Number</label><input id="pfRpOrderNumber" class="pf-rp-input" data-pf-report-field="orderNumber" value="${escapeHtml(metadata.orderNumber)}" placeholder="Enter order number"></div>
+            <div class="pf-rp-field"><label for="pfRpOrderDate">Order Date</label><input id="pfRpOrderDate" type="date" class="pf-rp-input" data-pf-report-field="orderDate" value="${escapeHtml(metadata.orderDate || todayValue())}"><div class="pf-rp-hint">Defaults to today's date.</div></div>
+            <div class="pf-rp-field"><label for="pfRpSigningOfficer">Signing Officer</label><input id="pfRpSigningOfficer" class="pf-rp-input" data-pf-report-field="signingOfficer" value="${escapeHtml(metadata.signingOfficer)}" placeholder="Enter signing officer"></div>
+            <div class="pf-rp-field"><label for="pfRpSigningPosition">Position</label><input id="pfRpSigningPosition" class="pf-rp-input" data-pf-report-field="signingPosition" value="${escapeHtml(metadata.signingPosition)}" placeholder="Enter position"></div>
+            <div class="pf-rp-field"><label for="pfRpFileReference">File Reference</label><input id="pfRpFileReference" class="pf-rp-input" data-pf-report-field="fileReference" value="${escapeHtml(metadata.fileReference)}" placeholder="Enter file reference"></div>
+          </div>
+        </section>
 
-      <div class="pf-rp-table-wrap">
-        ${personnel.length ? `
-          <table class="pf-rp-table">
-            <thead><tr><th>No.</th><th>Rank / Name</th><th>From</th><th>To</th></tr></thead>
-            <tbody>
-              ${personnel.map((person, index) => `
-                <tr>
-                  <td>${escapeHtml(person.sequence || index + 1)}</td>
-                  <td>${escapeHtml([person.rank, person.fullName].filter(Boolean).join(" ") || "—")}</td>
-                  <td>${escapeHtml(fromValue(person))}</td>
-                  <td>${escapeHtml(toValue(person))}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        ` : `<div class="pf-rp-empty">No personnel rows are available for preview.</div>`}
+        <section class="pf-rp-panel">
+          <div class="pf-rp-preview-head"><h3 class="pf-rp-panel-title" style="margin:0">Personnel Preview</h3><span class="pf-rp-count">${personnel.length} personnel</span></div>
+          <div class="pf-rp-table-wrap">
+            ${personnel.length ? `<table class="pf-rp-table"><thead><tr><th>No.</th><th>Rank / Name</th><th>From</th><th>To</th></tr></thead><tbody>${personnel.map((person,index)=>`<tr><td>${escapeHtml(person.sequence || index + 1)}</td><td>${escapeHtml([person.rank,person.fullName].filter(Boolean).join(" ") || "—")}</td><td>${escapeHtml(fromValue(person))}</td><td>${escapeHtml(toValue(person))}</td></tr>`).join("")}</tbody></table>` : `<div class="pf-rp-empty">No personnel rows are available for preview.</div>`}
+          </div>
+        </section>
       </div>
 
       <footer class="pf-rp-actions">
         <button type="button" class="pf-rp-btn" data-pf-report-preview="back">Back to Reassignment</button>
-        <button type="button" class="pf-rp-btn queue" data-pf-report-preview="queue">Add to Transfer Queue</button>
-        <button type="button" class="pf-rp-btn primary" data-pf-report-preview="details">Continue to Report Details</button>
-      </footer>
-    `;
+        <button type="button" class="pf-rp-btn primary" data-pf-report-preview="generate" ${generating ? "disabled" : ""}>${generating ? "Generating…" : "Generate Report"}</button>
+      </footer>`;
 
     backdrop.hidden = false;
     dialog.hidden = false;
   }
 
   function open(draftOrId) {
-    const draft = typeof draftOrId === "string"
-      ? report.get(draftOrId)
-      : draftOrId || report.last();
+    const draft = typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId || report.last();
     if (!draft) return null;
     renderDraft(draft);
     return draft;
@@ -10035,43 +8801,175 @@ function patchAoRowButtonsForFastUpdates_() {
     if (dialog) dialog.hidden = true;
   }
 
+  function saveField(field, value) {
+    if (!activeDraftId || !field) return null;
+    return report.setMetadata(activeDraftId, { [field]: value });
+  }
+
+  function requestGeneration() {
+    const draft = report.get(activeDraftId);
+    if (!draft || generating) return null;
+
+    generating = true;
+    report.markGenerating(draft.id);
+    renderDraft(report.get(draft.id));
+
+    const request = { draftId: draft.id, draft: report.get(draft.id) };
+    platform.events.emit("report:generation-requested", request);
+
+    // Developer Mode simulates a successful document generation. In Apps Script,
+    // the server-side generator will call ReportEngine.saveResult after success.
+    if (document.querySelector('meta[name="dev-mode"]')) {
+      setTimeout(() => {
+        const result = report.saveResult(draft.id, {
+          status: "GENERATED",
+          mode: "DEVELOPER_PREVIEW",
+          generatedAt: new Date().toISOString(),
+          documentUrl: "",
+        });
+        generating = false;
+        close();
+        console.info("Developer report generation completed.", result);
+      }, 150);
+    }
+    return request;
+  }
+
+  document.addEventListener("input", event => {
+    const field = event.target.closest?.("[data-pf-report-field]")?.dataset.pfReportField;
+    if (!field) return;
+    saveField(field, event.target.value);
+  });
+
+  document.addEventListener("change", event => {
+    const field = event.target.closest?.("[data-pf-report-field]")?.dataset.pfReportField;
+    if (!field) return;
+    saveField(field, event.target.value);
+  });
+
   document.addEventListener("click", event => {
     const action = event.target.closest?.("[data-pf-report-preview]")?.dataset.pfReportPreview;
     if (!action) return;
-    if (action === "close" || action === "back") {
-      close();
-      return;
-    }
-    if (action === "queue") {
-      const draft = report.get(activeDraftId);
-      const plugin = window.$PF?.transferQueuePlugin;
-      if (!draft || !plugin) return;
-      const entry = plugin.enqueueDraft(draft);
-      close();
-      plugin.open();
-      console.info("Report added to Transfer Queue.", entry);
-      return;
-    }
-    if (action === "details") {
-      const draft = report.get(activeDraftId);
-      close();
-      platform.events.emit("report:details-requested", { draft });
-      console.info("Report details requested.", draft);
-    }
+    if (action === "close" || action === "back") { close(); return; }
+    if (action === "generate") { requestGeneration(); }
   });
 
-  platform.events.on("report:preview-ready", draft => {
-    open(draft);
+  platform.events.on("report:preview-ready", draft => open(draft));
+  platform.events.on("report:completed", event => {
+    if (event?.id === activeDraftId) generating = false;
   });
 
   window.$PF.reportPreview = {
-    version: "1.1.0",
+    version: "2.0.0",
+    mode: "REPORT_DESIGNER_V1",
     open,
     close,
+    generate: requestGeneration,
     get activeDraftId() { return activeDraftId; },
   };
 
-  console.info("Report summary preview UI v1.1.0 active.");
+  console.info("Report Designer V1 active: two-column live details and personnel preview.");
+})();
+
+// Personnel Platform — Report-to-TransferQueue bridge
+// A preview is only a draft. Transfer movements are queued only after
+// ReportEngine records a successful GENERATED result.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  let lastQueuedDraftId = "";
+  let lastAction = "";
+  let lastAt = "";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function removeManualQueueAction() {
+    document
+      .querySelectorAll('[data-pf-report-preview="queue"]')
+      .forEach(button => button.remove());
+  }
+
+  function queueGeneratedReport(event = {}) {
+    if (text(event.status).toUpperCase() !== "GENERATED") return null;
+
+    const draftId = text(event.id || event.draftId);
+    if (!draftId) return null;
+
+    const draft = report.get(draftId);
+    const plugin = window.$PF?.transferQueuePlugin;
+    if (!draft || !plugin?.enqueueDraft) return null;
+
+    const entry = plugin.enqueueDraft(draft);
+    lastQueuedDraftId = draftId;
+    lastAction = "QUEUED_AFTER_REPORT_SUCCESS";
+    lastAt = new Date().toISOString();
+
+    platform.events.emit("report:transfer-queued", {
+      reportDraftId: draftId,
+      queueEntry: entry,
+    });
+
+    console.info("Successful report added to Transfer Queue.", {
+      draftId,
+      queueEntryId: entry?.id,
+    });
+
+    return entry;
+  }
+
+  // The preview UI is rendered dynamically, so remove its old manual queue
+  // action after each preview render and whenever the dialog DOM changes.
+  platform.events.on("report:preview-ready", () => {
+    queueMicrotask(removeManualQueueAction);
+  });
+
+  const observer = new MutationObserver(removeManualQueueAction);
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  removeManualQueueAction();
+
+  platform.events.on("report:completed", queueGeneratedReport);
+
+  const ReportQueueBridge = {
+    version: "1.0.0",
+    mode: "SUCCESS_ONLY",
+    queueGeneratedReport,
+    removeManualQueueAction,
+    status() {
+      const state = {
+        version: this.version,
+        mode: this.mode,
+        manualQueueButton: Boolean(
+          document.querySelector('[data-pf-report-preview="queue"]')
+        ),
+        lastQueuedDraftId: lastQueuedDraftId || "—",
+        lastAction: lastAction || "—",
+        lastAt: lastAt || "—",
+      };
+      console.table(state);
+      return state;
+    },
+  };
+
+  if (platform.engines.has("reportQueueBridge")) {
+    platform.engines.replace("reportQueueBridge", ReportQueueBridge);
+  } else {
+    platform.engines.register("reportQueueBridge", ReportQueueBridge);
+  }
+
+  window.$PF.reportQueueBridge = ReportQueueBridge;
+  console.info(
+    "ReportQueueBridge v1.0.0 active. Transfer Queue receives GENERATED reports only."
+  );
 })();
 
 // Reassignment Plugin v1 — clean body built on AssignmentCore
@@ -10136,8 +9034,6 @@ function patchAoRowButtonsForFastUpdates_() {
       ? window.PersonnelState.records
       : [];
 
-    // Use the complete shared destination directory when available, then merge
-    // any newly added values found in the current personnel roster.
     const shared = window.ReassignmentEngine?.getDirectory?.() || {};
 
     const camps = sortedUnique([
@@ -10182,7 +9078,7 @@ function patchAoRowButtonsForFastUpdates_() {
       .rp1-btn.primary { background:#ffe600; border-color:#d9c700; }
       .rp1-btn.active { background:#236b39; color:white; border-color:#236b39; }
       .rp1-btn:disabled { opacity:.45; cursor:not-allowed; }
-      .rp1-grid { display:grid; grid-template-columns:minmax(290px, 1.05fr) minmax(230px,.72fr) minmax(420px,2fr); gap:12px; margin-top:12px; min-height:calc(100vh - 115px); }
+      .rp1-grid { display:grid; grid-template-columns:minmax(290px,1.05fr) minmax(230px,.72fr) minmax(420px,2fr); gap:12px; margin-top:12px; min-height:calc(100vh - 115px); }
       .rp1-panel { border:1px solid #c9decf; border-radius:16px; background:#f8fcf8; padding:14px; min-width:0; }
       .rp1-panel h2 { margin:4px 0 14px; font-size:20px; }
       .rp1-toolbar { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
@@ -10202,7 +9098,7 @@ function patchAoRowButtonsForFastUpdates_() {
       .rp1-assigned { display:flex; justify-content:space-between; gap:8px; align-items:center; background:#e9f6ec; border-radius:9px; padding:8px; margin-bottom:7px; }
       .rp1-empty { padding:18px; text-align:center; opacity:.65; border:1px dashed #bfd4c4; border-radius:12px; }
       .rp1-dev-launch { position:fixed; right:18px; bottom:18px; z-index:99990; box-shadow:0 8px 24px rgba(0,0,0,.15); }
-      @media (max-width: 980px) { .rp1-grid { grid-template-columns:1fr; } }
+      @media (max-width:980px) { .rp1-grid { grid-template-columns:1fr; } }
     `;
     document.head.appendChild(style);
   }
@@ -10234,7 +9130,6 @@ function patchAoRowButtonsForFastUpdates_() {
             <button class="rp1-btn" data-rp1="close">Back to Personnel Filter</button>
           </div>
         </header>
-
         <main class="rp1-grid">
           <section class="rp1-panel">
             <div class="rp1-kicker">Step 1</div>
@@ -10244,18 +9139,16 @@ function patchAoRowButtonsForFastUpdates_() {
               <button class="rp1-btn" data-rp1="clear-selection">Clear</button>
             </div>
             <div class="rp1-list">
-              ${unassigned.length ? unassigned.map(([key, item]) => `
+              ${unassigned.length ? unassigned.map(([key,item]) => `
                 <label class="rp1-person">
                   <input type="checkbox" data-rp1-check="${escapeHtml(key)}" ${selected.has(key) ? "checked" : ""}>
                   <span class="rp1-person-main">
                     <div class="rp1-person-name">${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</div>
                     <div class="rp1-person-sub">${escapeHtml(current.transferMode === "CAMP_TO_CAMP" ? personCamp(item) : personOffice(item))}</div>
                   </span>
-                </label>
-              `).join("") : `<div class="rp1-empty">No unassigned personnel.</div>`}
+                </label>`).join("") : `<div class="rp1-empty">No unassigned personnel.</div>`}
             </div>
           </section>
-
           <section class="rp1-panel">
             <div class="rp1-kicker">Transfer Type</div>
             <div class="rp1-toolbar">
@@ -10270,44 +9163,27 @@ function patchAoRowButtonsForFastUpdates_() {
             </div>
             <button class="rp1-btn primary" style="width:100%;margin-top:10px" data-rp1="assign" ${selected.size && current.destination ? "" : "disabled"}>Assign Selected</button>
           </section>
-
           <section class="rp1-panel">
             <div class="rp1-kicker">Step 3</div>
             <h2>Assigned Personnel</h2>
             <div class="rp1-groups">
               ${groups.length ? groups.map(group => `
                 <article class="rp1-group">
-                  <div class="rp1-group-head">
-                    <div>
-                      <div class="rp1-group-title">${escapeHtml(group.transferMode === "CAMP_TO_CAMP" ? "CAMP TO" : "OFFICE TO")} ${escapeHtml(group.destination)}</div>
-                      <small>${group.keys.length} personnel</small>
-                    </div>
-                  </div>
-                  ${group.keys.map(key => {
-                    const item = people.get(key) || {};
-                    return `<div class="rp1-assigned"><span>${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</span><button class="rp1-btn" data-rp1-remove="${escapeHtml(key)}">×</button></div>`;
-                  }).join("")}
-                </article>
-              `).join("") : `<div class="rp1-empty">No personnel assigned yet.</div>`}
+                  <div class="rp1-group-head"><div><div class="rp1-group-title">${escapeHtml(group.transferMode === "CAMP_TO_CAMP" ? "CAMP TO" : "OFFICE TO")} ${escapeHtml(group.destination)}</div><small>${group.keys.length} personnel</small></div></div>
+                  ${group.keys.map(key => { const item = people.get(key) || {}; return `<div class="rp1-assigned"><span>${escapeHtml([personRank(item), personName(item)].filter(Boolean).join(" "))}</span><button class="rp1-btn" data-rp1-remove="${escapeHtml(key)}">×</button></div>`; }).join("")}
+                </article>`).join("") : `<div class="rp1-empty">No personnel assigned yet.</div>`}
             </div>
           </section>
         </main>
-      </div>
-    `;
+      </div>`;
   }
 
-  function syncParticipants() {
-    engine.setParticipants(SCOPE, personnelEntries());
-  }
+  function syncParticipants() { engine.setParticipants(SCOPE, personnelEntries()); }
 
   function open() {
     syncParticipants();
     let root = document.getElementById(ROOT_ID);
-    if (!root) {
-      root = document.createElement("div");
-      root.id = ROOT_ID;
-      document.body.appendChild(root);
-    }
+    if (!root) { root = document.createElement("div"); root.id = ROOT_ID; document.body.appendChild(root); }
     root.hidden = false;
     document.body.style.overflow = "hidden";
     render();
@@ -10319,53 +9195,26 @@ function patchAoRowButtonsForFastUpdates_() {
     document.body.style.overflow = "";
   }
 
-  function clearAll() {
-    engine.reset(SCOPE, personnelEntries());
-    render();
-  }
+  function clearAll() { engine.reset(SCOPE, personnelEntries()); render(); }
 
   document.addEventListener("click", event => {
     const launch = event.target.closest("[data-rp1-launch]");
-    if (launch) {
-      event.preventDefault();
-      open();
-      return;
-    }
-
+    if (launch) { event.preventDefault(); open(); return; }
     const root = event.target.closest(`#${ROOT_ID}`);
     if (!root) return;
-
     const modeButton = event.target.closest("[data-rp1-mode]");
-    if (modeButton) {
-      engine.setTransferMode(SCOPE, modeButton.dataset.rp1Mode);
-      render();
-      return;
-    }
-
+    if (modeButton) { engine.setTransferMode(SCOPE, modeButton.dataset.rp1Mode); render(); return; }
     const destination = event.target.closest("[data-rp1-destination]");
-    if (destination) {
-      engine.setDestination(SCOPE, destination.dataset.rp1Destination);
-      render();
-      return;
-    }
-
+    if (destination) { engine.setDestination(SCOPE, destination.dataset.rp1Destination); render(); return; }
     const remove = event.target.closest("[data-rp1-remove]");
-    if (remove) {
-      engine.removeAssignment(SCOPE, remove.dataset.rp1Remove);
-      render();
-      return;
-    }
-
+    if (remove) { engine.removeAssignment(SCOPE, remove.dataset.rp1Remove); render(); return; }
     const action = event.target.closest("[data-rp1]")?.dataset.rp1;
     if (!action) return;
     if (action === "close") close();
     else if (action === "clear-all") clearAll();
     else if (action === "select-all") engine.selectAllUnassigned(SCOPE);
     else if (action === "clear-selection") engine.clearSelection(SCOPE);
-    else if (action === "assign") {
-      try { engine.assignSelected(SCOPE); }
-      catch (error) { alert(error.message); }
-    }
+    else if (action === "assign") { try { engine.assignSelected(SCOPE); } catch (error) { alert(error.message); } }
     else if (action === "undo") engine.undo(SCOPE);
     else if (action === "redo") engine.redo(SCOPE);
     render();
@@ -10395,24 +9244,20 @@ function patchAoRowButtonsForFastUpdates_() {
   const plugin = {
     id: PLUGIN_ID,
     name: "Reassignment V1",
-    version: "1.0.1",
+    version: "1.0.2",
     requires: ["state", "events", "selection", "assignmentCore"],
-    install() {
-      installStyles();
-      engine.createScope(SCOPE);
-      syncParticipants();
-    },
+    install() { installStyles(); engine.createScope(SCOPE); syncParticipants(); },
     activate() {},
     deactivate() { close(); },
     open,
     close,
+    render,
     clearAll,
     report() { return engine.report(SCOPE); },
   };
 
   platform.plugins.register(plugin);
   platform.plugins.activate(PLUGIN_ID);
-
   installStyles();
   const launcher = document.createElement("button");
   launcher.type = "button";
@@ -10422,7 +9267,7 @@ function patchAoRowButtonsForFastUpdates_() {
   document.body.appendChild(launcher);
 
   window.$PF.reassignmentV1 = plugin;
-  console.info("Reassignment Plugin V1.0.1 active. Run $PF.reassignmentV1.open().");
+  console.info("Reassignment Plugin V1.0.2 active. Run $PF.reassignmentV1.open().");
 })();
 
 // Reassignment V1 — state-driven group destination dropdown
@@ -10871,6 +9716,423 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("Reassignment V1.2 active: SortEngine, advisory validation, and payload bridge.");
 })();
 
+// Personnel Platform — reusable NameFormatEngine
+// Formats personnel names for plugin previews and generated report payloads.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const STORAGE_KEY = "reassignment-v1:name-format";
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
+  const MODES = ["FIRST_INITIAL_LAST", "LAST_FIRST_INITIAL"];
+  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
+  let currentMode = sessionStorage.getItem(STORAGE_KEY) || "FIRST_INITIAL_LAST";
+  let scheduled = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function normalizeMode(value) {
+    return MODES.includes(value) ? value : "FIRST_INITIAL_LAST";
+  }
+
+  function parseName(value) {
+    const raw = text(value).replace(/\s+/g, " ");
+    if (!raw) return { first: "", middles: [], last: "", suffix: "" };
+
+    let tokens;
+    if (raw.includes(",")) {
+      const [lastPart, givenPart] = raw.split(/,(.+)/).map(text);
+      tokens = [...givenPart.split(" ").filter(Boolean), ...lastPart.split(" ").filter(Boolean)];
+    } else {
+      tokens = raw.split(" ").filter(Boolean);
+    }
+
+    let suffix = "";
+    if (tokens.length > 1 && SUFFIXES.has(tokens.at(-1).toUpperCase())) {
+      suffix = tokens.pop();
+    }
+
+    if (tokens.length === 1) {
+      return { first: tokens[0], middles: [], last: "", suffix };
+    }
+
+    return {
+      first: tokens[0] || "",
+      middles: tokens.slice(1, -1),
+      last: tokens.at(-1) || "",
+      suffix,
+    };
+  }
+
+  function initials(values) {
+    return (values || [])
+      .map(value => text(value).replace(/\./g, ""))
+      .filter(Boolean)
+      .map(value => value.charAt(0))
+      .join(" ");
+  }
+
+  function formatName(value, mode = currentMode) {
+    const raw = text(value);
+    if (!raw) return "";
+
+    const parts = parseName(raw);
+    if (!parts.last) return [parts.first, parts.suffix].filter(Boolean).join(" ");
+
+    const middle = initials(parts.middles);
+    const suffix = parts.suffix ? ` ${parts.suffix}` : "";
+
+    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
+      return `${parts.last}${suffix}, ${[parts.first, middle].filter(Boolean).join(" ")}`.trim();
+    }
+
+    return `${[parts.first, middle, parts.last].filter(Boolean).join(" ")}${suffix}`.trim();
+  }
+
+  function personnelName(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName);
+  }
+
+  function updateVisibleNames() {
+    const root = document.getElementById(ROOT_ID);
+    const assignmentCore = platform.engines.get("assignmentCore");
+    if (!root || root.hidden || !assignmentCore) return;
+
+    const state = assignmentCore.get(SCOPE);
+    const people = new Map(state?.participants || []);
+
+    root.querySelectorAll(".rp1-assigned").forEach(row => {
+      const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
+      const label = row.querySelector("span");
+      const person = people.get(key) || {};
+      if (!label || !key) return;
+
+      const rank = text(person?.rank || person?.record?.Rank);
+      const name = formatName(personnelName(person));
+      label.textContent = [rank, name].filter(Boolean).join(" ");
+    });
+  }
+
+  function addStyles() {
+    if (document.getElementById("platformNameFormatStyles")) return;
+    const style = document.createElement("style");
+    style.id = "platformNameFormatStyles";
+    style.textContent = `
+      .rp1-phase3-tools { justify-content:flex-end !important; }
+      .rp1-display-tool { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+      .rp1-display-tool label { font-size:12px; font-weight:800; white-space:nowrap; }
+      .rp1-display-tool select { width:auto; min-width:160px; margin:0; padding:8px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function decorate() {
+    scheduled = false;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    addStyles();
+    const sort = root.querySelector("#rp1Step3Sort");
+    const tools = sort?.closest(".rp1-phase3-tools");
+    if (!sort || !tools) return;
+
+    const existingSortLabel = [...tools.querySelectorAll(":scope > label")][0];
+    if (existingSortLabel) existingSortLabel.textContent = "Sort";
+
+    if (!sort.closest(".rp1-display-tool")) {
+      const sortGroup = document.createElement("div");
+      sortGroup.className = "rp1-display-tool";
+      const label = existingSortLabel || document.createElement("label");
+      label.textContent = "Sort";
+      tools.insertBefore(sortGroup, label);
+      sortGroup.append(label, sort);
+    }
+
+    if (!tools.querySelector("#rp1NameFormat")) {
+      const group = document.createElement("div");
+      group.className = "rp1-display-tool";
+      group.innerHTML = `
+        <label for="rp1NameFormat">Name format</label>
+        <select id="rp1NameFormat" class="rp1-search">
+          <option value="FIRST_INITIAL_LAST">First name M Last name</option>
+          <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
+        </select>
+      `;
+      tools.appendChild(group);
+      group.querySelector("select").value = currentMode;
+    }
+
+    updateVisibleNames();
+  }
+
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(decorate);
+  }
+
+  function formatPayload(payload) {
+    if (!payload || text(payload.reportType).toUpperCase() !== "REASSIGNMENT") return payload;
+    const next = structuredClone(payload);
+    next.nameFormat = currentMode;
+    next.personnel = (Array.isArray(next.personnel) ? next.personnel : []).map(person => ({
+      ...person,
+      originalFullName: text(person.originalFullName || person.fullName),
+      fullName: formatName(person.originalFullName || person.fullName),
+    }));
+    return next;
+  }
+
+  const generator = platform.engines.get("generator");
+  if (generator && !generator.__nameFormatWrapped) {
+    const originalGenerate = generator.generate.bind(generator);
+    generator.generate = function (reportType, payload, context = {}) {
+      return originalGenerate(reportType, formatPayload(payload), context);
+    };
+    Object.defineProperty(generator, "__nameFormatWrapped", { value: true });
+  }
+
+  document.addEventListener("change", event => {
+    if (event.target.id !== "rp1NameFormat") return;
+    currentMode = normalizeMode(event.target.value);
+    sessionStorage.setItem(STORAGE_KEY, currentMode);
+    updateVisibleNames();
+    platform.events.emit("name-format:changed", { mode: currentMode });
+  });
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+
+  const NameFormatEngine = {
+    version: "1.0.1",
+    modes: [...MODES],
+    parse: parseName,
+    format: formatName,
+    formatPayload,
+    get mode() { return currentMode; },
+    setMode(value) {
+      currentMode = normalizeMode(value);
+      sessionStorage.setItem(STORAGE_KEY, currentMode);
+      scheduleDecorate();
+      platform.events.emit("name-format:changed", { mode: currentMode });
+      return currentMode;
+    },
+    status() {
+      const report = {
+        version: this.version,
+        mode: currentMode,
+        modes: MODES.length,
+        generatorWrapped: Boolean(generator?.__nameFormatWrapped),
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", NameFormatEngine);
+  else platform.engines.register("nameFormat", NameFormatEngine);
+
+  window.$PF.nameFormat = NameFormatEngine;
+  scheduleDecorate();
+  console.info("NameFormatEngine v1.0.1 active without periods in initials.");
+})();
+
+// Reassignment Plugin V1 — UI polish
+// Adds glass-green primary buttons, whole-card selection, and Step 1 removal.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const plugin = window.$PF?.reassignmentV1;
+  if (!platform || !engine || !plugin) return;
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
+  let scheduled = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function installStyles() {
+    if (document.getElementById("reassignmentPluginV1PolishStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1PolishStyles";
+    style.textContent = `
+      #${ROOT_ID} .rp1-btn.primary {
+        color:#174d2b;
+        background:linear-gradient(180deg,rgba(72,156,100,.20),rgba(72,156,100,.11));
+        border-color:rgba(40,119,67,.36);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 5px 16px rgba(38,107,62,.08);
+        backdrop-filter:blur(10px);
+        -webkit-backdrop-filter:blur(10px);
+      }
+      #${ROOT_ID} .rp1-btn.primary:hover:not(:disabled) {
+        color:#103f23;
+        background:linear-gradient(180deg,rgba(72,156,100,.29),rgba(72,156,100,.17));
+        border-color:rgba(36,111,61,.52);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 8px 20px rgba(38,107,62,.14);
+      }
+      #${ROOT_ID} .rp1-btn.primary:disabled {
+        color:rgba(23,77,43,.46);
+        background:rgba(72,156,100,.07);
+        border-color:rgba(40,119,67,.15);
+        box-shadow:none;
+      }
+      #${ROOT_ID} .rp1-person {
+        position:relative;
+        padding-right:44px;
+        transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
+      }
+      #${ROOT_ID} .rp1-person:hover {
+        background:rgba(73,151,98,.08);
+        border-color:rgba(45,124,71,.28);
+      }
+      #${ROOT_ID} .rp1-person.is-selected {
+        background:linear-gradient(180deg,rgba(69,151,96,.15),rgba(69,151,96,.09));
+        border-color:rgba(39,119,66,.38);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 5px 14px rgba(38,107,62,.08);
+        backdrop-filter:blur(9px);
+        -webkit-backdrop-filter:blur(9px);
+      }
+      #${ROOT_ID} .rp1-person input[type="checkbox"] { accent-color:#2b7444; }
+      #${ROOT_ID} .rp1-step1-remove {
+        position:absolute;
+        top:50%;
+        right:9px;
+        transform:translateY(-50%);
+        width:27px;
+        height:27px;
+        display:grid;
+        place-items:center;
+        padding:0;
+        border:1px solid rgba(92,128,103,.28);
+        border-radius:9px;
+        color:#45604d;
+        background:rgba(255,255,255,.62);
+        font:inherit;
+        font-size:17px;
+        line-height:1;
+        cursor:pointer;
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+      }
+      #${ROOT_ID} .rp1-step1-remove:hover {
+        color:#8d2929;
+        border-color:rgba(174,74,74,.38);
+        background:rgba(255,228,228,.78);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function decorate() {
+    scheduled = false;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    installStyles();
+    root.querySelectorAll(".rp1-person").forEach(card => {
+      const checkbox = card.querySelector("[data-rp1-check]");
+      if (!checkbox) return;
+
+      card.dataset.rp1Card = checkbox.dataset.rp1Check;
+      card.classList.toggle("is-selected", checkbox.checked);
+
+      if (!card.querySelector("[data-rp1-step1-remove]")) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "rp1-step1-remove";
+        remove.dataset.rp1Step1Remove = checkbox.dataset.rp1Check;
+        remove.title = "Remove from reassignment";
+        remove.setAttribute("aria-label", "Remove from reassignment");
+        remove.textContent = "×";
+        card.appendChild(remove);
+      }
+    });
+  }
+
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(decorate);
+  }
+
+  function removeFromWorkspace(key) {
+    const value = text(key);
+    if (!value) return;
+
+    const state = engine.get(SCOPE);
+    const participants = (state.participants || []).filter(([personKey]) => personKey !== value);
+    engine.setParticipants(SCOPE, participants);
+
+    const legacyCart = window.PersonnelState?.aoCart;
+    if (legacyCart instanceof Map && legacyCart.has(value)) {
+      legacyCart.delete(value);
+      try { window.saveAoCart_?.(); } catch (_error) {}
+      try { window.updateAoCartCount_?.(); } catch (_error) {}
+      try { window.renderPreviewTable?.(); } catch (_error) {}
+    }
+
+    plugin.render();
+    scheduleDecorate();
+  }
+
+  document.addEventListener("click", event => {
+    const remove = event.target.closest?.("[data-rp1-step1-remove]");
+    if (remove) {
+      event.preventDefault();
+      event.stopPropagation();
+      removeFromWorkspace(remove.dataset.rp1Step1Remove);
+      return;
+    }
+
+    const card = event.target.closest?.(`#${ROOT_ID} [data-rp1-card]`);
+    if (!card || event.target.closest("input[type='checkbox']")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    engine.toggleSelection(SCOPE, card.dataset.rp1Card);
+    plugin.render();
+    scheduleDecorate();
+  }, true);
+
+  document.addEventListener("change", event => {
+    if (!event.target.matches?.(`#${ROOT_ID} [data-rp1-check]`)) return;
+    scheduleDecorate();
+  });
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+
+  const originalOpen = plugin.open.bind(plugin);
+  plugin.open = function (...args) {
+    const result = originalOpen(...args);
+    scheduleDecorate();
+    return result;
+  };
+
+  Object.assign(plugin, {
+    version: "1.3.0",
+    removeParticipant: removeFromWorkspace,
+  });
+
+  window.$PF.reassignmentV1Polish = {
+    version: "1.0.0",
+    decorate,
+    removeFromWorkspace,
+  };
+
+  scheduleDecorate();
+  console.info("Reassignment V1 polish active: glass-green actions and Step 1 card controls.");
+})();
 
 // Personnel Platform — Report Generator launcher
 // Places the launcher in the Personnel Table toolbar and asks for report type.
@@ -11083,6 +10345,252 @@ function patchAoRowButtonsForFastUpdates_() {
   console.info("Platform UI control bridge v2.0.0 active in passive mode.");
 })();
 
+// Personnel Platform — KeyboardEngine
+// Central keyboard routing for active platform plugins and overlays.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const REASSIGNMENT_SCOPE = "reassignment-v1";
+  let enabled = true;
+  let lastAction = "";
+  let lastAt = "";
+
+  function isVisible(element) {
+    return Boolean(element && !element.hidden && element.getClientRects().length);
+  }
+
+  function isTextEditingTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = String(target.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  function record(action) {
+    lastAction = action;
+    lastAt = new Date().toISOString();
+    platform.events.emit("keyboard:action", { action, at: lastAt });
+  }
+
+  function closeTopmost() {
+    const reportPreview = document.getElementById("reportSummaryPreviewRoot");
+    if (isVisible(reportPreview)) {
+      window.$PF?.reportPreview?.close?.();
+      record("ESCAPE_REPORT_PREVIEW");
+      return true;
+    }
+
+    const transferQueue = document.getElementById("transferQueuePluginV1Root");
+    if (isVisible(transferQueue)) {
+      window.$PF?.transferQueuePlugin?.close?.();
+      record("ESCAPE_TRANSFER_QUEUE");
+      return true;
+    }
+
+    const launcher = document.getElementById("platformReportLauncherRoot");
+    if (isVisible(launcher)) {
+      window.$PF?.reportLauncher?.close?.();
+      if (isVisible(launcher)) launcher.hidden = true;
+      const backdrop = document.getElementById("platformReportLauncherBackdrop");
+      if (backdrop) backdrop.hidden = true;
+      record("ESCAPE_REPORT_LAUNCHER");
+      return true;
+    }
+
+    const reassignment = document.getElementById("reassignmentPluginV1Root");
+    if (isVisible(reassignment)) {
+      window.$PF?.reassignmentV1?.close?.();
+      if (isVisible(reassignment)) {
+        reassignment.hidden = true;
+        document.body.style.overflow = "";
+      }
+      record("ESCAPE_REASSIGNMENT");
+      return true;
+    }
+
+    return false;
+  }
+
+  function activeAssignmentContext() {
+    const root = document.getElementById("reassignmentPluginV1Root");
+    if (!isVisible(root)) return null;
+    const engine = platform.engines.get("assignmentCore");
+    if (!engine) return null;
+    return { engine, scope: REASSIGNMENT_SCOPE };
+  }
+
+  function undo() {
+    const context = activeAssignmentContext();
+    if (!context) return false;
+    const before = context.engine.get(context.scope);
+    if (!before.undo?.length) return false;
+    context.engine.undo(context.scope);
+    window.$PF?.reassignmentV1?.render?.();
+    record("UNDO_REASSIGNMENT");
+    return true;
+  }
+
+  function redo() {
+    const context = activeAssignmentContext();
+    if (!context) return false;
+    const before = context.engine.get(context.scope);
+    if (!before.redo?.length) return false;
+    context.engine.redo(context.scope);
+    window.$PF?.reassignmentV1?.render?.();
+    record("REDO_REASSIGNMENT");
+    return true;
+  }
+
+  function handleKeydown(event) {
+    if (!enabled || event.defaultPrevented) return;
+
+    if (event.key === "Escape") {
+      if (closeTopmost()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    const modifier = event.ctrlKey || event.metaKey;
+    if (!modifier || event.altKey || isTextEditingTarget(event.target)) return;
+
+    const key = String(event.key || "").toLowerCase();
+    const wantsUndo = key === "z" && !event.shiftKey;
+    const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
+
+    if (wantsUndo && undo()) {
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (wantsRedo && redo()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  document.addEventListener("keydown", handleKeydown, true);
+
+  const KeyboardEngine = {
+    version: "1.0.0",
+    enable() { enabled = true; return this.status(); },
+    disable() { enabled = false; return this.status(); },
+    escape: closeTopmost,
+    undo,
+    redo,
+    status() {
+      const context = activeAssignmentContext();
+      const state = context?.engine?.get?.(context.scope);
+      const report = {
+        version: this.version,
+        enabled,
+        reassignmentActive: Boolean(context),
+        canUndo: Boolean(state?.undo?.length),
+        canRedo: Boolean(state?.redo?.length),
+        lastAction: lastAction || "—",
+        lastAt: lastAt || "—",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("keyboard")) platform.engines.replace("keyboard", KeyboardEngine);
+  else platform.engines.register("keyboard", KeyboardEngine);
+
+  window.$PF.keyboard = KeyboardEngine;
+  console.info("KeyboardEngine v1.0.0 active: Esc, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z.");
+})();
+
+// Personnel Platform — shared glass-green action theme
+// Keeps yellow for counters/status badges while making clickable actions glass green.
+
+(function () {
+  "use strict";
+
+  if (document.getElementById("platformGlassGreenThemeStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "platformGlassGreenThemeStyles";
+  style.textContent = `
+    :root {
+      --pf-glass-green-bg: linear-gradient(180deg, rgba(46,125,80,.20), rgba(46,125,80,.11));
+      --pf-glass-green-hover: linear-gradient(180deg, rgba(46,125,80,.30), rgba(46,125,80,.18));
+      --pf-glass-green-border: rgba(46,125,80,.38);
+      --pf-glass-green-border-hover: rgba(46,125,80,.58);
+      --pf-glass-green-text: #174b2d;
+      --pf-glass-green-shadow: 0 7px 18px rgba(31,101,60,.12);
+    }
+
+    /* Main Personnel Filter actions */
+    .button-primary,
+    .button-ghost,
+    #clearRanksButton,
+    #applyNowButton,
+    #restoreFromBarButton,
+    .pf-report-launcher,
+    [data-rp1-launch],
+    .ao-row-add-button.is-added,
+    .ao-row-add-button[data-selected="true"] {
+      background: var(--pf-glass-green-bg) !important;
+      border-color: var(--pf-glass-green-border) !important;
+      color: var(--pf-glass-green-text) !important;
+      box-shadow: var(--pf-glass-green-shadow) !important;
+      backdrop-filter: blur(10px) saturate(125%);
+      -webkit-backdrop-filter: blur(10px) saturate(125%);
+      transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+
+    .button-primary:hover:not(:disabled),
+    .button-ghost:hover:not(:disabled),
+    #clearRanksButton:hover:not(:disabled),
+    #applyNowButton:hover:not(:disabled),
+    #restoreFromBarButton:hover:not(:disabled),
+    .pf-report-launcher:hover:not(:disabled),
+    [data-rp1-launch]:hover:not(:disabled),
+    .ao-row-add-button.is-added:hover:not(:disabled),
+    .ao-row-add-button[data-selected="true"]:hover:not(:disabled) {
+      background: var(--pf-glass-green-hover) !important;
+      border-color: var(--pf-glass-green-border-hover) !important;
+      box-shadow: 0 9px 22px rgba(31,101,60,.18) !important;
+      transform: translateY(-1px);
+    }
+
+    .button-primary:disabled,
+    .button-ghost:disabled,
+    #clearRanksButton:disabled,
+    #applyNowButton:disabled,
+    #restoreFromBarButton:disabled,
+    .pf-report-launcher:disabled,
+    [data-rp1-launch]:disabled {
+      background: rgba(46,125,80,.08) !important;
+      border-color: rgba(46,125,80,.18) !important;
+      color: rgba(23,75,45,.48) !important;
+      box-shadow: none !important;
+    }
+
+    /* Report chooser primary option */
+    .pf-report-type-choice.primary {
+      background: var(--pf-glass-green-bg) !important;
+      border-color: var(--pf-glass-green-border) !important;
+      color: var(--pf-glass-green-text) !important;
+      box-shadow: var(--pf-glass-green-shadow) !important;
+      backdrop-filter: blur(10px) saturate(125%);
+      -webkit-backdrop-filter: blur(10px) saturate(125%);
+    }
+
+    .pf-report-type-choice.primary:hover:not(:disabled) {
+      background: var(--pf-glass-green-hover) !important;
+      border-color: var(--pf-glass-green-border-hover) !important;
+    }
+  `;
+
+  document.head.appendChild(style);
+  console.info("Platform glass-green action theme active.");
+})();
 
 </script>
 </body>
