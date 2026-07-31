@@ -1,0 +1,441 @@
+//----------------------------------
+// Personnel Platform — AssignmentEngine v2 migration
+// Developer Mode only: platform state is canonical, legacy reassignment state is mirrored.
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const SCOPE = "reassignment";
+  const STATE_SCOPE = `assignment:${SCOPE}`;
+  const STORE_NAMESPACE = "assignment";
+  const STORE_KEY = SCOPE;
+  const MAX_HISTORY = 30;
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizeMode_(value) {
+    return value === "CAMP_TO_CAMP" ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE";
+  }
+
+  function normalizeDestination_(mode, value) {
+    return {
+      type: mode === "CAMP_TO_CAMP" ? "CAMP" : "OFFICE",
+      value: text_(value),
+    };
+  }
+
+  function normalizeAssignment_(value) {
+    if (value && typeof value === "object") {
+      const mode = normalizeMode_(value.mode || (value.camp ? "CAMP_TO_CAMP" : "OFFICE_TO_OFFICE"));
+      return {
+        mode,
+        office: mode === "OFFICE_TO_OFFICE" ? text_(value.office) : "",
+        camp: mode === "CAMP_TO_CAMP" ? text_(value.camp) : "",
+      };
+    }
+
+    return {
+      mode: "OFFICE_TO_OFFICE",
+      office: text_(value),
+      camp: "",
+    };
+  }
+
+  function normalizeEntries_(entries) {
+    const map = new Map();
+    (entries || []).forEach(entry => {
+      if (!Array.isArray(entry) || entry.length < 2) return;
+      const key = text_(entry[0]);
+      if (key) map.set(key, normalizeAssignment_(entry[1]));
+    });
+    return [...map.entries()];
+  }
+
+  function legacyAssignments_() {
+    return window.ReassignmentState?.assignments instanceof Map
+      ? normalizeEntries_([...window.ReassignmentState.assignments.entries()])
+      : [];
+  }
+
+  function legacySelectedKeys_() {
+    return window.ReassignmentState?.selectedKeys instanceof Set
+      ? [...window.ReassignmentState.selectedKeys].map(text_).filter(Boolean)
+      : [];
+  }
+
+  function initialState_() {
+    const legacyEngine = window.ReassignmentEngine;
+    const mode = normalizeMode_(legacyEngine?.state?.transferMode);
+    const destination = normalizeDestination_(mode, legacyEngine?.state?.destination?.value || "");
+    return {
+      transferMode: mode,
+      destination,
+      assignments: legacyAssignments_(),
+      selectedKeys: legacySelectedKeys_(),
+      undo: [],
+      redo: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function ensureScope_() {
+    let state = platform.state.get(STATE_SCOPE);
+    if (state) return state;
+
+    const stored = platform.store.load(STORE_NAMESPACE, STORE_KEY, null);
+    state = stored && typeof stored === "object"
+      ? {
+          ...initialState_(),
+          ...stored,
+          transferMode: normalizeMode_(stored.transferMode),
+          destination: normalizeDestination_(
+            normalizeMode_(stored.transferMode),
+            stored.destination?.value
+          ),
+          assignments: normalizeEntries_(stored.assignments),
+          selectedKeys: Array.isArray(stored.selectedKeys)
+            ? stored.selectedKeys.map(text_).filter(Boolean)
+            : [],
+          undo: Array.isArray(stored.undo) ? stored.undo : [],
+          redo: Array.isArray(stored.redo) ? stored.redo : [],
+        }
+      : initialState_();
+
+    platform.state.createScope(STATE_SCOPE, state);
+    return platform.state.get(STATE_SCOPE);
+  }
+
+  function snapshot_(state) {
+    return {
+      transferMode: state.transferMode,
+      destination: { ...state.destination },
+      assignments: normalizeEntries_(state.assignments),
+      selectedKeys: [...(state.selectedKeys || [])],
+    };
+  }
+
+  function mirrorToLegacy_(state) {
+    if (window.ReassignmentState) {
+      window.ReassignmentState.assignments = new Map(normalizeEntries_(state.assignments));
+      window.ReassignmentState.selectedKeys = new Set(state.selectedKeys || []);
+      window.ReassignmentState.activeOffice = state.transferMode === "OFFICE_TO_OFFICE"
+        ? state.destination.value
+        : "";
+      window.ReassignmentState.activeCamp = state.transferMode === "CAMP_TO_CAMP"
+        ? state.destination.value
+        : "";
+    }
+
+    if (window.ReassignmentEngine?.state) {
+      window.ReassignmentEngine.state.transferMode = state.transferMode;
+      window.ReassignmentEngine.state.destination = { ...state.destination };
+    }
+
+    if (typeof window.saveReassignmentState_ === "function") {
+      window.saveReassignmentState_();
+    }
+  }
+
+  function emit_(state, action) {
+    platform.events.emit("assignment:changed", {
+      scopeId: SCOPE,
+      action,
+      assigned: state.assignments.length,
+      groups: AssignmentEngineV2.groups().length,
+    });
+
+    if (typeof window.ReassignmentEngine?.emit === "function") {
+      window.ReassignmentEngine.emit();
+    } else if (typeof window.renderReassignmentWorkspace_ === "function") {
+      window.renderReassignmentWorkspace_();
+    }
+  }
+
+  function commit_(next, action, options = {}) {
+    const current = ensureScope_();
+    const recordHistory = options.recordHistory !== false;
+
+    const state = {
+      ...current,
+      ...next,
+      transferMode: normalizeMode_(next.transferMode ?? current.transferMode),
+      assignments: normalizeEntries_(next.assignments ?? current.assignments),
+      selectedKeys: Array.isArray(next.selectedKeys)
+        ? next.selectedKeys.map(text_).filter(Boolean)
+        : [...(current.selectedKeys || [])],
+      updatedAt: new Date().toISOString(),
+    };
+
+    state.destination = normalizeDestination_(
+      state.transferMode,
+      next.destination?.value ?? current.destination?.value
+    );
+
+    if (recordHistory) {
+      state.undo = [...(current.undo || []), snapshot_(current)].slice(-MAX_HISTORY);
+      state.redo = [];
+    }
+
+    platform.state.set(STATE_SCOPE, state);
+    platform.store.save(STORE_NAMESPACE, STORE_KEY, state);
+    mirrorToLegacy_(state);
+    emit_(state, action);
+    return state;
+  }
+
+  function currentSelectedKeys_() {
+    const legacy = legacySelectedKeys_();
+    if (legacy.length || !ensureScope_().selectedKeys.length) return legacy;
+    return [...ensureScope_().selectedKeys];
+  }
+
+  function visibleUnassignedKeys_() {
+    const cart = window.PersonnelState?.aoCart instanceof Map
+      ? window.PersonnelState.aoCart
+      : new Map();
+    const assigned = AssignmentEngineV2.items();
+    const entries = [...cart.entries()].filter(([key]) => !assigned.has(key));
+    const visible = typeof window.filterUnassigned_ === "function"
+      ? window.filterUnassigned_(entries)
+      : entries;
+    return visible.map(([key]) => key);
+  }
+
+  function assignmentForDestination_(state) {
+    const value = text_(state.destination?.value);
+    if (!value) return null;
+    return state.transferMode === "CAMP_TO_CAMP"
+      ? { mode: "CAMP_TO_CAMP", office: "", camp: value }
+      : { mode: "OFFICE_TO_OFFICE", office: value, camp: "" };
+  }
+
+  const AssignmentEngineV2 = {
+    version: "0.3.0",
+    scopeId: SCOPE,
+
+    get() {
+      return ensureScope_();
+    },
+
+    items() {
+      return new Map(normalizeEntries_(this.get().assignments));
+    },
+
+    selectedKeys() {
+      return new Set(currentSelectedKeys_());
+    },
+
+    directory() {
+      return window.ReassignmentEngine?.getDirectory?.() || { camps: [], offices: [] };
+    },
+
+    setTransferMode(mode) {
+      const value = normalizeMode_(mode);
+      return commit_({
+        transferMode: value,
+        destination: normalizeDestination_(value, ""),
+      }, "SET_TRANSFER_MODE");
+    },
+
+    setDestination(value) {
+      const state = this.get();
+      return commit_({
+        destination: normalizeDestination_(state.transferMode, value),
+      }, "SET_DESTINATION");
+    },
+
+    assignKeys(keys) {
+      const state = this.get();
+      const assignment = assignmentForDestination_(state);
+      if (!assignment) {
+        alert(state.transferMode === "CAMP_TO_CAMP"
+          ? "Choose a destination Camp first."
+          : "Choose a destination Office first.");
+        return state;
+      }
+
+      const cart = window.PersonnelState?.aoCart instanceof Map
+        ? window.PersonnelState.aoCart
+        : new Map();
+      const map = this.items();
+      (keys || []).map(text_).filter(Boolean).forEach(key => {
+        if (cart.has(key)) map.set(key, { ...assignment });
+      });
+
+      return commit_({
+        assignments: [...map.entries()],
+        selectedKeys: [],
+      }, "ASSIGN_KEYS");
+    },
+
+    assignSelected() {
+      return this.assignKeys([...this.selectedKeys()]);
+    },
+
+    assignVisible() {
+      return this.assignKeys(visibleUnassignedKeys_());
+    },
+
+    remove(key) {
+      const map = this.items();
+      map.delete(text_(key));
+      return commit_({ assignments: [...map.entries()] }, "REMOVE");
+    },
+
+    clear() {
+      return commit_({ assignments: [], selectedKeys: [] }, "CLEAR");
+    },
+
+    moveGroup(groupId, destination) {
+      const [mode, oldDestination] = text_(groupId).split("|");
+      const normalizedMode = normalizeMode_(mode);
+      const map = this.items();
+      map.forEach((assignment, key) => {
+        const currentDestination = assignment.mode === "CAMP_TO_CAMP"
+          ? assignment.camp
+          : assignment.office;
+        if (assignment.mode === normalizedMode && currentDestination === oldDestination) {
+          map.set(key, normalizedMode === "CAMP_TO_CAMP"
+            ? { mode: normalizedMode, office: "", camp: text_(destination) }
+            : { mode: normalizedMode, office: text_(destination), camp: "" });
+        }
+      });
+      return commit_({ assignments: [...map.entries()] }, "MOVE_GROUP");
+    },
+
+    groups() {
+      const groups = new Map();
+      this.items().forEach((assignment, key) => {
+        const destination = assignment.mode === "CAMP_TO_CAMP"
+          ? assignment.camp
+          : assignment.office;
+        const id = `${assignment.mode}|${destination}`;
+        if (!groups.has(id)) {
+          groups.set(id, {
+            id,
+            mode: assignment.mode,
+            destination,
+            keys: [],
+          });
+        }
+        groups.get(id).keys.push(key);
+      });
+      return [...groups.values()];
+    },
+
+    undo() {
+      const current = this.get();
+      const previous = current.undo?.at(-1);
+      if (!previous) return current;
+      const next = {
+        ...previous,
+        undo: current.undo.slice(0, -1),
+        redo: [...(current.redo || []), snapshot_(current)].slice(-MAX_HISTORY),
+      };
+      return commit_(next, "UNDO", { recordHistory: false });
+    },
+
+    redo() {
+      const current = this.get();
+      const nextSnapshot = current.redo?.at(-1);
+      if (!nextSnapshot) return current;
+      const next = {
+        ...nextSnapshot,
+        undo: [...(current.undo || []), snapshot_(current)].slice(-MAX_HISTORY),
+        redo: current.redo.slice(0, -1),
+      };
+      return commit_(next, "REDO", { recordHistory: false });
+    },
+
+    syncFromLegacy() {
+      const legacyEngine = window.ReassignmentEngine;
+      const mode = normalizeMode_(legacyEngine?.state?.transferMode);
+      return commit_({
+        transferMode: mode,
+        destination: normalizeDestination_(mode, legacyEngine?.state?.destination?.value),
+        assignments: legacyAssignments_(),
+        selectedKeys: legacySelectedKeys_(),
+      }, "SYNC_FROM_LEGACY", { recordHistory: false });
+    },
+
+    report() {
+      const state = this.get();
+      const legacyCount = window.ReassignmentState?.assignments?.size || 0;
+      const report = {
+        version: this.version,
+        scope: SCOPE,
+        transferMode: state.transferMode,
+        destination: state.destination?.value || "—",
+        selected: this.selectedKeys().size,
+        assigned: this.items().size,
+        groups: this.groups().length,
+        undo: state.undo?.length || 0,
+        redo: state.redo?.length || 0,
+        legacyCount,
+        synchronized: this.items().size === legacyCount,
+        updatedAt: state.updatedAt || "",
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  platform.engines.replace("assignment", AssignmentEngineV2);
+
+  platform.commands.register("ASSIGNMENT.SET_TRANSFER_MODE", command =>
+    AssignmentEngineV2.setTransferMode(command.value)
+  );
+  platform.commands.register("ASSIGNMENT.SET_DESTINATION", command =>
+    AssignmentEngineV2.setDestination(command.value)
+  );
+  platform.commands.register("ASSIGNMENT.ASSIGN_SELECTED", () =>
+    AssignmentEngineV2.assignSelected()
+  );
+  platform.commands.register("ASSIGNMENT.ASSIGN_VISIBLE", () =>
+    AssignmentEngineV2.assignVisible()
+  );
+  platform.commands.register("ASSIGNMENT.REMOVE", command =>
+    AssignmentEngineV2.remove(command.key)
+  );
+  platform.commands.register("ASSIGNMENT.MOVE_GROUP", command =>
+    AssignmentEngineV2.moveGroup(command.groupId, command.destination || command.value)
+  );
+  platform.commands.register("ASSIGNMENT.CLEAR", () =>
+    AssignmentEngineV2.clear()
+  );
+  platform.commands.register("ASSIGNMENT.UNDO", () =>
+    AssignmentEngineV2.undo()
+  );
+  platform.commands.register("ASSIGNMENT.REDO", () =>
+    AssignmentEngineV2.redo()
+  );
+
+  ensureScope_();
+  mirrorToLegacy_(AssignmentEngineV2.get());
+
+  // Route the current reassignment controls through the shared engine while
+  // preserving legacy renderer compatibility during migration.
+  if (window.ReassignmentEngine?.dispatch) {
+    const legacyDispatch = window.ReassignmentEngine.dispatch.bind(window.ReassignmentEngine);
+    window.ReassignmentEngine.dispatch = function (command) {
+      const type = text_(command?.type).toUpperCase();
+      if (type === "SET_TRANSFER_MODE") return AssignmentEngineV2.setTransferMode(command.value);
+      if (type === "SET_DESTINATION") return AssignmentEngineV2.setDestination(command.value);
+      if (type === "ASSIGN_SELECTED") return AssignmentEngineV2.assignSelected();
+      if (type === "ASSIGN_VISIBLE") return AssignmentEngineV2.assignVisible();
+      if (type === "REMOVE_ASSIGNMENT") return AssignmentEngineV2.remove(command.key);
+      if (type === "UNDO") return AssignmentEngineV2.undo();
+      if (type === "REDO") return AssignmentEngineV2.redo();
+      return legacyDispatch(command);
+    };
+  }
+
+  window.$PF.assignment = AssignmentEngineV2;
+  console.info("AssignmentEngine v0.3 owns reassignment assignments in Developer Mode. Run $PF.assignment.report().");
+})();
