@@ -1,0 +1,346 @@
+// Reassignment Plugin V1 — Phase 3
+// Stable event-driven sorting, advisory validation, and report payload bridge.
+// No MutationObserver. No legacy ReassignmentState dependency.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const engine = platform?.engines?.get?.("assignmentCore");
+  const sorter = platform?.engines?.get?.("sort");
+  const plugin = window.$PF?.reassignmentV1;
+  if (!platform || !engine || !sorter || !plugin) return;
+
+  const SCOPE = "reassignment-v1";
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SORT_KEY = "reassignment-v1:sort-mode";
+  let sortMode = sessionStorage.getItem(SORT_KEY) || "LIST";
+  let scheduled = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function nameOf(item) {
+    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName || "Unnamed Personnel");
+  }
+
+  function rankOf(item) {
+    return text(item?.rank || item?.record?.Rank);
+  }
+
+  function officeOf(item) {
+    return text(item?.office || item?.record?.Office);
+  }
+
+  function campOf(item) {
+    return text(item?.camp || item?.record?.Camp);
+  }
+
+  function directory() {
+    const shared = window.ReassignmentEngine?.getDirectory?.() || {};
+    const rows = Array.isArray(window.PersonnelState?.records) ? window.PersonnelState.records : [];
+    const unique = values => [...new Set(values.map(text).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    return {
+      camps: unique([...(shared.camps || []), ...rows.map(row => row.Camp)]),
+      offices: unique([...(shared.offices || []), ...rows.map(row => row.Office)]),
+    };
+  }
+
+  function orderedKeys(keys, state, people) {
+    const listOrder = new Map((state.participants || []).map(([key], index) => [key, index]));
+    const assignedOrder = new Map((state.assignments || []).map(([key], index) => [key, index]));
+    return sorter.sort(keys, {
+      mode: sortMode,
+      getKey: key => key,
+      getRank: key => rankOf(people.get(key) || {}),
+      getName: key => nameOf(people.get(key) || {}),
+      listOrder,
+      assignedOrder,
+    });
+  }
+
+  function addStyles() {
+    if (document.getElementById("reassignmentPluginV1Phase3Styles")) return;
+    const style = document.createElement("style");
+    style.id = "reassignmentPluginV1Phase3Styles";
+    style.textContent = `
+      .rp1-phase3-tools { display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap; margin:-4px 0 12px; }
+      .rp1-group-change { display:flex; gap:5px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+      .rp1-caution-backdrop { position:fixed; inset:0; z-index:100100; background:rgba(10,35,18,.45); display:grid; place-items:center; padding:18px; }
+      .rp1-caution-card { width:min(560px,100%); max-height:80vh; overflow:auto; background:#fff; border:1px solid #c5d9ca; border-radius:16px; padding:18px; box-shadow:0 20px 55px rgba(0,0,0,.2); }
+      .rp1-caution-list { display:flex; flex-direction:column; gap:8px; margin:14px 0; }
+      .rp1-caution-item { padding:10px; border-radius:10px; background:#fff8cf; border:1px solid #eadc78; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function decorate() {
+    scheduled = false;
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return;
+
+    addStyles();
+    const state = engine.get(SCOPE);
+    const people = new Map(state.participants || []);
+    const dirs = directory();
+    const panels = [...root.querySelectorAll(".rp1-panel")];
+    const step3 = panels.find(panel => /Step 3/i.test(panel.querySelector(".rp1-kicker")?.textContent || ""));
+    if (!step3) return;
+
+    const heading = step3.querySelector("h2");
+    if (heading && !step3.querySelector("#rp1Step3Sort")) {
+      const tools = document.createElement("div");
+      tools.className = "rp1-phase3-tools";
+      tools.innerHTML = `
+        <label style="font-size:12px;font-weight:800">Sort assigned personnel</label>
+        <select id="rp1Step3Sort" class="rp1-search" style="width:auto;min-width:190px;margin:0;padding:8px">
+          <option value="LIST">LIST sequence</option>
+          <option value="RANK">Rank</option>
+          <option value="RANK_LAST_NAME">Rank and last name</option>
+          <option value="LAST_NAME">Last name</option>
+          <option value="ASSIGNED_SEQUENCE">As assigned</option>
+        </select>
+      `;
+      heading.insertAdjacentElement("afterend", tools);
+      tools.querySelector("select").value = sortMode;
+    }
+
+    root.querySelectorAll(".rp1-group").forEach(groupEl => {
+      const assignedEls = [...groupEl.querySelectorAll(".rp1-assigned")];
+      const keys = assignedEls
+        .map(element => element.querySelector("[data-rp1-remove]")?.dataset.rp1Remove)
+        .filter(Boolean);
+      if (!keys.length) return;
+
+      const assignment = new Map(state.assignments || []).get(keys[0]);
+      if (!assignment) return;
+      const groupId = `${assignment.transferMode}|${assignment.destination}`;
+      const head = groupEl.querySelector(".rp1-group-head");
+
+      if (head && !head.querySelector("[data-rp1-group-change]")) {
+        const options = assignment.transferMode === "CAMP_TO_CAMP" ? dirs.camps : dirs.offices;
+        const controls = document.createElement("div");
+        controls.className = "rp1-group-change";
+        controls.innerHTML = `
+          <select class="rp1-search" data-rp1-group-select="${escapeHtml(groupId)}" style="width:150px;margin:0;padding:7px">
+            ${options.map(option => `<option value="${escapeHtml(option)}" ${option === assignment.destination ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+          </select>
+          <button type="button" class="rp1-btn" data-rp1-group-change="${escapeHtml(groupId)}" style="padding:7px 9px">Change</button>
+        `;
+        head.appendChild(controls);
+      }
+
+      const byKey = new Map(assignedEls.map(element => [
+        element.querySelector("[data-rp1-remove]")?.dataset.rp1Remove,
+        element,
+      ]));
+      orderedKeys(keys, state, people).forEach(key => {
+        const element = byKey.get(key);
+        if (element) groupEl.appendChild(element);
+      });
+    });
+
+    if (!root.querySelector("[data-rp1-generate]")) {
+      const step3Panel = step3;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rp1-btn primary";
+      button.dataset.rp1Generate = "true";
+      button.textContent = "Generate Report";
+      button.style.cssText = "float:right;margin-top:12px";
+      step3Panel.appendChild(button);
+    }
+  }
+
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(decorate);
+  }
+
+  function validate() {
+    const state = engine.get(SCOPE);
+    const cautions = [];
+    const assigned = new Set((state.assignments || []).map(([key]) => key));
+    const unassigned = (state.participants || []).filter(([key]) => !assigned.has(key));
+
+    if (!state.participants.length) {
+      cautions.push({ code: "NO_PERSONNEL", level: "critical-caution", message: "No personnel are included in this report." });
+    }
+    if (!state.assignments.length) {
+      cautions.push({ code: "NO_ASSIGNMENTS", level: "critical-caution", message: "No personnel have been assigned to a destination." });
+    }
+    if (unassigned.length) {
+      cautions.push({ code: "UNASSIGNED_PERSONNEL", level: "caution", message: `${unassigned.length} personnel remain unassigned.` });
+    }
+    if (!state.destination && state.selectedKeys?.length) {
+      cautions.push({ code: "SELECTED_WITHOUT_DESTINATION", level: "caution", message: "Selected personnel do not have an active destination." });
+    }
+
+    (state.assignments || []).forEach(([key, assignment]) => {
+      if (!text(assignment?.destination)) {
+        cautions.push({ code: "MISSING_DESTINATION", level: "critical-caution", message: `Personnel ${key} has no destination.` });
+      }
+    });
+
+    return { canGenerate: true, cautions };
+  }
+
+  function buildPayload() {
+    const state = engine.get(SCOPE);
+    const people = new Map(state.participants || []);
+    const assignments = new Map(state.assignments || []);
+    const allKeys = [...assignments.keys()];
+    const ordered = orderedKeys(allKeys, state, people);
+
+    return {
+      reportType: "REASSIGNMENT",
+      personnelLayout: "LIST",
+      sortMode,
+      generatedAt: new Date().toISOString(),
+      order: {
+        number: "",
+        date: "",
+        signingOfficer: "",
+        signingPosition: "",
+        fileReference: "",
+      },
+      personnel: ordered.map((key, index) => {
+        const item = people.get(key) || {};
+        const assignment = assignments.get(key) || {};
+        return {
+          sequence: index + 1,
+          key,
+          rank: rankOf(item),
+          fullName: nameOf(item),
+          fromOffice: officeOf(item),
+          fromCamp: campOf(item),
+          transferMode: assignment.transferMode || "OFFICE_TO_OFFICE",
+          toOffice: assignment.transferMode === "OFFICE_TO_OFFICE" ? text(assignment.destination) : "",
+          toCamp: assignment.transferMode === "CAMP_TO_CAMP" ? text(assignment.destination) : "",
+        };
+      }),
+    };
+  }
+
+  function previewPayload() {
+    const payload = buildPayload();
+    console.table(payload.personnel);
+    return payload;
+  }
+
+  function proceedToGenerator() {
+    const payload = buildPayload();
+    platform.events.emit("generator:requested", {
+      pluginId: "reassignment-v1",
+      reportType: "REASSIGNMENT",
+      payload,
+    });
+    console.info("Reassignment V1 payload ready for GeneratorEngine.", payload);
+    return payload;
+  }
+
+  function showCautions(result) {
+    document.getElementById("rp1CautionBackdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.id = "rp1CautionBackdrop";
+    backdrop.className = "rp1-caution-backdrop";
+    backdrop.innerHTML = `
+      <div class="rp1-caution-card">
+        <h2 style="margin-top:0">Report Cautions</h2>
+        <p>The report can still be generated. Review these items first:</p>
+        <div class="rp1-caution-list">
+          ${result.cautions.map(item => `<div class="rp1-caution-item">⚠ ${escapeHtml(item.message)}</div>`).join("")}
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+          <button class="rp1-btn" data-rp1-caution="back">Go Back</button>
+          <button class="rp1-btn primary" data-rp1-caution="continue">Generate Anyway</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+  }
+
+  function requestGenerate() {
+    const result = validate();
+    if (result.cautions.length) {
+      showCautions(result);
+      return result;
+    }
+    proceedToGenerator();
+    return result;
+  }
+
+  document.addEventListener("change", event => {
+    if (event.target.id !== "rp1Step3Sort") return;
+    sortMode = event.target.value || "LIST";
+    sessionStorage.setItem(SORT_KEY, sortMode);
+    scheduleDecorate();
+  });
+
+  document.addEventListener("click", event => {
+    const changeButton = event.target.closest("[data-rp1-group-change]");
+    if (changeButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const groupId = changeButton.dataset.rp1GroupChange;
+      const select = document.querySelector(`[data-rp1-group-select="${CSS.escape(groupId)}"]`);
+      const destination = text(select?.value);
+      if (destination) engine.moveGroup(SCOPE, groupId, destination);
+      scheduleDecorate();
+      return;
+    }
+
+    if (event.target.closest("[data-rp1-generate]")) {
+      event.preventDefault();
+      requestGenerate();
+      return;
+    }
+
+    const cautionAction = event.target.closest("[data-rp1-caution]")?.dataset.rp1Caution;
+    if (cautionAction === "back") {
+      document.getElementById("rp1CautionBackdrop")?.remove();
+    } else if (cautionAction === "continue") {
+      document.getElementById("rp1CautionBackdrop")?.remove();
+      proceedToGenerator();
+    }
+  }, true);
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+
+  Object.assign(plugin, {
+    version: "1.2.0",
+    validate,
+    buildPayload,
+    previewPayload,
+    requestGenerate,
+    get sortMode() { return sortMode; },
+    setSortMode(value) {
+      sortMode = sorter.modes.includes(value) ? value : "LIST";
+      sessionStorage.setItem(SORT_KEY, sortMode);
+      scheduleDecorate();
+      return sortMode;
+    },
+  });
+
+  window.$PF.reassignmentV1Phase3 = {
+    version: "1.2.0",
+    decorate,
+    validate,
+    buildPayload,
+  };
+
+  scheduleDecorate();
+  console.info("Reassignment V1.2 active: SortEngine, advisory validation, and payload bridge.");
+})();
