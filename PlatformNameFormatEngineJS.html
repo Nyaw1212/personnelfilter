@@ -27,7 +27,6 @@
     const raw = text(value).replace(/\s+/g, " ");
     if (!raw) return { first: "", middles: [], last: "", suffix: "" };
 
-    // Normalize an existing LAST, FIRST MIDDLE format before applying a new format.
     let tokens;
     if (raw.includes(",")) {
       const [lastPart, givenPart] = raw.split(/,(.+)/).map(text);
@@ -57,7 +56,7 @@
     return (values || [])
       .map(value => text(value).replace(/\./g, ""))
       .filter(Boolean)
-      .map(value => `${value.charAt(0)}.`)
+      .map(value => value.charAt(0))
       .join(" ");
   }
 
@@ -143,8 +142,8 @@
       group.innerHTML = `
         <label for="rp1NameFormat">Name format</label>
         <select id="rp1NameFormat" class="rp1-search">
-          <option value="FIRST_INITIAL_LAST">First name M. Last name</option>
-          <option value="LAST_FIRST_INITIAL">Last name, First name M.</option>
+          <option value="FIRST_INITIAL_LAST">First name M Last name</option>
+          <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
         </select>
       `;
       tools.appendChild(group);
@@ -192,7 +191,7 @@
   platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
 
   const NameFormatEngine = {
-    version: "1.0.0",
+    version: "1.0.1",
     modes: [...MODES],
     parse: parseName,
     format: formatName,
@@ -222,5 +221,5 @@
 
   window.$PF.nameFormat = NameFormatEngine;
   scheduleDecorate();
-  console.info("NameFormatEngine v1.0.0 active. Run $PF.nameFormat.status().");
+  console.info("NameFormatEngine v1.0.1 active without periods in initials.");
 })();
