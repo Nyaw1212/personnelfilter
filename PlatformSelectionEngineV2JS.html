@@ -18,6 +18,18 @@
     return String(value === null || value === undefined ? "" : value).trim();
   }
 
+  function legacyState_() {
+    // PersonnelState is declared with a top-level lexical binding in the legacy
+    // bundle, so it is available as `PersonnelState` but not necessarily as
+    // `window.PersonnelState`.
+    try {
+      if (typeof PersonnelState !== "undefined" && PersonnelState) {
+        return PersonnelState;
+      }
+    } catch (ignored) {}
+    return window.PersonnelState || null;
+  }
+
   function normalizeEntries_(entries) {
     const map = new Map();
     (entries || []).forEach(entry => {
@@ -28,17 +40,11 @@
     return [...map.entries()];
   }
 
-  function legacyCart_() {
-    if (!window.PersonnelState) return null;
-    if (!(window.PersonnelState.aoCart instanceof Map)) {
-      window.PersonnelState.aoCart = new Map();
-    }
-    return window.PersonnelState.aoCart;
-  }
-
   function legacyEntries_() {
-    const cart = legacyCart_();
-    return cart ? [...cart.entries()] : [];
+    const state = legacyState_();
+    return state?.aoCart instanceof Map
+      ? [...state.aoCart.entries()]
+      : [];
   }
 
   function ensureScope_() {
@@ -65,15 +71,17 @@
   }
 
   function mirrorToLegacy_(state) {
-    const cart = legacyCart_();
-    if (!cart) return;
+    const legacy = legacyState_();
+    if (!legacy) return;
 
-    // Preserve the original Map reference. Several legacy renderers/listeners keep
-    // a reference to PersonnelState.aoCart; replacing the Map leaves those closures
-    // reading stale data even though the platform engine has already changed.
-    cart.clear();
+    if (!(legacy.aoCart instanceof Map)) {
+      legacy.aoCart = new Map();
+    }
+
+    // Preserve the same Map object because legacy listeners retain its reference.
+    legacy.aoCart.clear();
     normalizeEntries_(state?.entries || []).forEach(([key, item]) => {
-      cart.set(key, item);
+      legacy.aoCart.set(key, item);
     });
 
     refreshLegacyUi_();
@@ -104,7 +112,7 @@
   }
 
   const SelectionEngineV2 = {
-    version: "0.2.2",
+    version: "0.2.3",
     scopeId: SCOPE,
 
     get(scopeId = SCOPE) {
@@ -171,24 +179,15 @@
       return commit_(legacyEntries_(), legacyEntries_().map(([key]) => key));
     },
 
-    syncToLegacy() {
-      mirrorToLegacy_(this.get(SCOPE));
-      return this.report();
-    },
-
     report() {
       const state = this.get(SCOPE);
-      const engineKeys = this.keys(SCOPE);
-      const legacyKeys = legacyEntries_().map(([key]) => key);
-      const synchronized =
-        engineKeys.length === legacyKeys.length &&
-        engineKeys.every(key => legacyKeys.includes(key));
+      const legacyCount = legacyState_()?.aoCart?.size || 0;
       const report = {
         version: this.version,
         scope: SCOPE,
-        count: engineKeys.length,
-        legacyCount: legacyKeys.length,
-        synchronized,
+        count: this.count(SCOPE),
+        legacyCount,
+        synchronized: this.count(SCOPE) === legacyCount,
         updatedAt: state.updatedAt || "",
       };
       console.table(report);
@@ -229,8 +228,9 @@
 
   if (typeof window.addAllVisiblePersonnelToAo_ === "function") {
     window.addAllVisiblePersonnelToAo_ = function () {
-      const records = Array.isArray(window.PersonnelState?.filteredRecords)
-        ? window.PersonnelState.filteredRecords
+      const legacy = legacyState_();
+      const records = Array.isArray(legacy?.filteredRecords)
+        ? legacy.filteredRecords
         : [];
       const map = SelectionEngineV2.items(SCOPE);
       records.forEach(record => {
@@ -244,5 +244,5 @@
   }
 
   window.$PF.selection = SelectionEngineV2;
-  console.info("SelectionEngine v0.2.2 owns AO cart in Developer Mode. Run $PF.selection.report().");
+  console.info("SelectionEngine v0.2.3 owns AO cart in Developer Mode. Run $PF.selection.report().");
 })();
