@@ -24,6 +24,7 @@ function appJsBundle() {
   const platformPilot = [
     "PlatformCoreJS.html",
     "PlatformLegacyEngineAdaptersJS.html",
+    "PlatformSelectionEngineV2JS.html",
     "ReassignmentPluginJS.html",
   ];
 
@@ -53,4 +54,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with ReassignmentEngine and PersonnelPlatform plugin foundation loaded.");
+console.log("Built dev/index.html with ReassignmentEngine, PersonnelPlatform, and SelectionEngine v2 loaded.");
