@@ -106,75 +106,65 @@ function include(
       .createHtmlOutputFromFile("Stage1GenerateChoiceHardFixJS")
       .getContent();
 
-    // Main toolbar launcher and global Escape handling load near the end.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("Stage1ReportLauncherAndEscapeJS")
       .getContent();
 
-    // Layout selector extends the final report dialog.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentLayoutChoiceJS")
       .getContent();
 
-    // Transfer Queue captures the final report payload.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("TransferQueueJS")
       .getContent();
 
-    // Queue cancellation extends the Transfer Queue controls.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("TransferQueueCancelPatchJS")
       .getContent();
 
-    // New reports receive today's date; edited reports retain their date.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentTodayDatePatchJS")
       .getContent();
 
-    // Legacy Office + Camp labels.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("DestinationCampChipsJS")
       .getContent();
 
-    // Camp and Office destination option chips.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDestinationCampFilterJS")
       .getContent();
 
-    // Step 1 can return to Personnel Filter to add more personnel.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentAddPersonnelJS")
       .getContent();
 
-    // Explicit Camp-to-Camp / Office-to-Office transfer selection.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentFlexibleDestinationAndSortJS")
       .getContent();
 
-    // Compact Step 1 filters and clickable personnel name area.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentCompactSourceUXJS")
       .getContent();
 
-    // Correct Step 1 Camp/Office subtitles using the active transfer mode.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentSourceSubtitleFixJS")
       .getContent();
 
-    // New Report must discard the edited report and restore the current selection.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentNewReportResetFixJS")
       .getContent();
 
-    // Fixed master destination options and per-group destination changes.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDestinationMasterAndGroupChangeJS")
       .getContent();
 
-    // Keep defaults, then automatically merge any new Office or Camp values
-    // found in the current LIST roster.
     content += "\n" + HtmlService
       .createHtmlOutputFromFile("ReassignmentDynamicDestinationDirectoryJS")
+      .getContent();
+
+    // Searchable merged Camp/Office directory and Step 3 group reassignment.
+    content += "\n" + HtmlService
+      .createHtmlOutputFromFile("ReassignmentDestinationDirectoryUXJS")
       .getContent();
   }
 
