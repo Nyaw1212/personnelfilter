@@ -56,8 +56,10 @@ function appJsBundle() {
     "PlatformSortEngineJS.html",
     "PlatformGeneratorEngineJS.html",
     "PlatformReportEngineJS.html",
+    "PlatformTransferQueueEngineJS.html",
     "PlatformReportPreviewUIJS.html",
     "ReassignmentPluginV1JS.html",
+    "ReassignmentPluginV1GroupChangeFixJS.html",
     "ReassignmentPluginV1Phase3JS.html",
   ];
 
@@ -86,4 +88,4 @@ html = html.replace(
 
 fs.mkdirSync(devDir, { recursive: true });
 fs.writeFileSync(path.join(devDir, "index.html"), html, "utf8");
-console.log("Built dev/index.html with clean Reassignment V1; legacy reassignment runtime detached.");
+console.log("Built dev/index.html with clean Reassignment V1, group change fix, and TransferQueueEngine.");
