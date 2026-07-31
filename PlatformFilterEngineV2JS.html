@@ -1,0 +1,304 @@
+//----------------------------------
+// Personnel Platform — FilterEngine v0.2 migration
+// Developer Mode only. Platform state is authoritative;
+// PersonnelState.filters remains a temporary UI mirror.
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) {
+    console.warn("PlatformFilterEngineV2: PersonnelPlatform unavailable.");
+    return;
+  }
+
+  const SCOPE = "personnel-main";
+  const STATE_SCOPE = `filter:${SCOPE}`;
+  const VERSION = "0.2.0";
+
+  function text_(value) {
+    return String(value === null || value === undefined ? "" : value).trim();
+  }
+
+  function normalizeArray_(values) {
+    return [...new Set((Array.isArray(values) ? values : [...(values || [])])
+      .map(text_)
+      .filter(Boolean))];
+  }
+
+  function groupDefinitions_() {
+    return Array.isArray(window.PERSONNEL_APP_CONFIG?.filterGroups)
+      ? window.PERSONNEL_APP_CONFIG.filterGroups
+      : [];
+  }
+
+  function emptyState_() {
+    const groups = {};
+    groupDefinitions_().forEach(group => {
+      groups[group.key] = [];
+    });
+
+    return {
+      search: "",
+      ranks: [],
+      groups,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function legacyFilters_() {
+    return window.PersonnelState?.filters || null;
+  }
+
+  function readLegacy_() {
+    const legacy = legacyFilters_();
+    const next = emptyState_();
+    if (!legacy) return next;
+
+    next.search = text_(legacy.search);
+    next.ranks = normalizeArray_(legacy.ranks instanceof Set ? legacy.ranks : []);
+
+    groupDefinitions_().forEach(group => {
+      const values = legacy[group.key];
+      next.groups[group.key] = normalizeArray_(values instanceof Set ? values : []);
+    });
+
+    return next;
+  }
+
+  function writeLegacy_(state) {
+    const legacy = legacyFilters_();
+    if (!legacy) return;
+
+    legacy.search = text_(state.search);
+    legacy.ranks = new Set(normalizeArray_(state.ranks));
+
+    groupDefinitions_().forEach(group => {
+      legacy[group.key] = new Set(normalizeArray_(state.groups?.[group.key]));
+    });
+
+    const searchInput = document.getElementById("searchInput");
+    if (searchInput && searchInput.value !== legacy.search) {
+      searchInput.value = legacy.search;
+    }
+  }
+
+  function equivalent_(a, b) {
+    return JSON.stringify({
+      search: text_(a?.search),
+      ranks: [...normalizeArray_(a?.ranks)].sort(),
+      groups: Object.fromEntries(groupDefinitions_().map(group => [
+        group.key,
+        [...normalizeArray_(a?.groups?.[group.key])].sort(),
+      ])),
+    }) === JSON.stringify({
+      search: text_(b?.search),
+      ranks: [...normalizeArray_(b?.ranks)].sort(),
+      groups: Object.fromEntries(groupDefinitions_().map(group => [
+        group.key,
+        [...normalizeArray_(b?.groups?.[group.key])].sort(),
+      ])),
+    });
+  }
+
+  function current_() {
+    return platform.state.get(STATE_SCOPE) || platform.state.createScope(STATE_SCOPE, readLegacy_());
+  }
+
+  function commit_(next, options = {}) {
+    const normalized = {
+      search: text_(next.search),
+      ranks: normalizeArray_(next.ranks),
+      groups: {},
+      updatedAt: new Date().toISOString(),
+    };
+
+    groupDefinitions_().forEach(group => {
+      normalized.groups[group.key] = normalizeArray_(next.groups?.[group.key]);
+    });
+
+    platform.state.set(STATE_SCOPE, normalized);
+    writeLegacy_(normalized);
+
+    if (options.render !== false && window.PersonnelState?.initialized) {
+      if (typeof window.filterAndRenderPersonnel === "function") {
+        window.filterAndRenderPersonnel();
+      }
+      if (options.sync !== false && typeof window.scheduleSheetSync === "function") {
+        window.scheduleSheetSync();
+      }
+    }
+
+    platform.events.emit("filter:changed", {
+      scope: SCOPE,
+      state: normalized,
+    });
+
+    return normalized;
+  }
+
+  function syncFromLegacy_() {
+    const legacy = readLegacy_();
+    const state = current_();
+    if (!equivalent_(state, legacy)) {
+      return commit_(legacy, { render: false, sync: false });
+    }
+    return state;
+  }
+
+  function matches_(record, state) {
+    const search = text_(state.search).toLowerCase();
+
+    for (const group of groupDefinitions_()) {
+      const selected = new Set(normalizeArray_(state.groups?.[group.key]));
+      if (selected.size && !selected.has(text_(record?.[group.recordKey]))) {
+        return false;
+      }
+    }
+
+    const ranks = new Set(normalizeArray_(state.ranks));
+    if (ranks.size && !ranks.has(text_(record?.Rank))) {
+      return false;
+    }
+
+    if (search) {
+      const columns = Array.isArray(window.PERSONNEL_APP_CONFIG?.searchableColumns)
+        ? window.PERSONNEL_APP_CONFIG.searchableColumns
+        : Object.keys(record || {});
+      const found = columns.some(column =>
+        text_(record?.[column]).toLowerCase().includes(search)
+      );
+      if (!found) return false;
+    }
+
+    return true;
+  }
+
+  const FilterEngineV2 = {
+    version: VERSION,
+    scope: SCOPE,
+
+    getState() {
+      return current_();
+    },
+
+    syncFromLegacy() {
+      return syncFromLegacy_();
+    },
+
+    apply(records) {
+      const state = current_();
+      return (Array.isArray(records) ? records : []).filter(record => matches_(record, state));
+    },
+
+    setSearch(value) {
+      return commit_({ ...current_(), search: text_(value) });
+    },
+
+    toggle(groupKey, value) {
+      const key = text_(groupKey);
+      const selectedValue = text_(value);
+      const state = current_();
+
+      if (key === "ranks" || key === "rank") {
+        const set = new Set(state.ranks || []);
+        if (set.has(selectedValue)) set.delete(selectedValue);
+        else set.add(selectedValue);
+        return commit_({ ...state, ranks: [...set] });
+      }
+
+      const groups = { ...(state.groups || {}) };
+      const set = new Set(groups[key] || []);
+      if (set.has(selectedValue)) set.delete(selectedValue);
+      else set.add(selectedValue);
+      groups[key] = [...set];
+      return commit_({ ...state, groups });
+    },
+
+    setGroup(groupKey, values) {
+      const key = text_(groupKey);
+      const state = current_();
+      if (key === "ranks" || key === "rank") {
+        return commit_({ ...state, ranks: normalizeArray_(values) });
+      }
+      return commit_({
+        ...state,
+        groups: {
+          ...(state.groups || {}),
+          [key]: normalizeArray_(values),
+        },
+      });
+    },
+
+    clearGroup(groupKey) {
+      return this.setGroup(groupKey, []);
+    },
+
+    clearAll() {
+      return commit_(emptyState_());
+    },
+
+    report() {
+      const state = current_();
+      const legacy = readLegacy_();
+      const activeGroups = Object.values(state.groups || {})
+        .reduce((total, values) => total + normalizeArray_(values).length, 0);
+      const report = {
+        version: VERSION,
+        scope: SCOPE,
+        records: window.PersonnelState?.records?.length || 0,
+        visible: window.PersonnelState?.filteredRecords?.length || 0,
+        search: state.search || "—",
+        ranks: state.ranks.length,
+        groupValues: activeGroups,
+        synchronized: equivalent_(state, legacy),
+        updatedAt: state.updatedAt,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  platform.engines.replace("filter", FilterEngineV2);
+  platform.filter = FilterEngineV2;
+
+  platform.commands.register("FILTER.SET_SEARCH", command =>
+    FilterEngineV2.setSearch(command.value)
+  );
+  platform.commands.register("FILTER.TOGGLE", command =>
+    FilterEngineV2.toggle(command.groupKey || command.group, command.value)
+  );
+  platform.commands.register("FILTER.SET_GROUP", command =>
+    FilterEngineV2.setGroup(command.groupKey || command.group, command.values || [])
+  );
+  platform.commands.register("FILTER.CLEAR_GROUP", command =>
+    FilterEngineV2.clearGroup(command.groupKey || command.group)
+  );
+  platform.commands.register("FILTER.CLEAR_ALL", () =>
+    FilterEngineV2.clearAll()
+  );
+
+  // Legacy UI bridge: every legacy filter action is mirrored into the engine.
+  const originalHandleFilterChange = window.handleFilterChange;
+  if (typeof originalHandleFilterChange === "function") {
+    window.handleFilterChange = function () {
+      syncFromLegacy_();
+      return originalHandleFilterChange.apply(this, arguments);
+    };
+  }
+
+  const originalFilterPersonnelRecords = window.filterPersonnelRecords;
+  window.filterPersonnelRecords = function () {
+    syncFromLegacy_();
+    return FilterEngineV2.apply(window.PersonnelState?.records || []);
+  };
+  window.filterPersonnelRecords.platformOwned = true;
+  window.filterPersonnelRecords.legacy = originalFilterPersonnelRecords;
+
+  syncFromLegacy_();
+
+  console.info(
+    "FilterEngine v0.2 owns personnel filters in Developer Mode. Run $PF.filter.report()."
+  );
+})();
