@@ -1,0 +1,44 @@
+//----------------------------------
+// Reassignment Engine — Legacy State Bridge (Developer Mode only)
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function expose_(name, getter) {
+    try {
+      const value = getter();
+      if (value !== undefined && value !== null) {
+        window[name] = value;
+      }
+    } catch (_error) {}
+  }
+
+  expose_("PersonnelState", () =>
+    typeof PersonnelState !== "undefined" ? PersonnelState : null
+  );
+
+  expose_("ReassignmentState", () =>
+    typeof ReassignmentState !== "undefined" ? ReassignmentState : null
+  );
+
+  expose_("renderReassignmentWorkspace_", () =>
+    typeof renderReassignmentWorkspace_ === "function"
+      ? renderReassignmentWorkspace_
+      : null
+  );
+
+  expose_("filterUnassigned_", () =>
+    typeof filterUnassigned_ === "function" ? filterUnassigned_ : null
+  );
+
+  expose_("saveReassignmentState_", () =>
+    typeof saveReassignmentState_ === "function"
+      ? saveReassignmentState_
+      : null
+  );
+
+  window.ReassignmentEngineLegacyBridge = {
+    connected: Boolean(window.PersonnelState && window.ReassignmentState),
+  };
+})();
