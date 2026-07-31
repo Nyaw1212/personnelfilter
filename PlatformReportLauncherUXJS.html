@@ -1,0 +1,144 @@
+// Personnel Platform — Report Generator launcher
+// Places the launcher in the Personnel Table toolbar and asks for report type.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const MODAL_ID = "pfReportTypeModal";
+  const BACKDROP_ID = "pfReportTypeBackdrop";
+
+  function installStyles() {
+    if (document.getElementById("pfReportLauncherStyles")) return;
+    const style = document.createElement("style");
+    style.id = "pfReportLauncherStyles";
+    style.textContent = `
+      .pf-report-launcher { margin-left:auto; }
+      #${BACKDROP_ID} { position:fixed; inset:0; z-index:100300; background:rgba(8,31,15,.46); backdrop-filter:blur(5px); }
+      #${MODAL_ID} { position:fixed; z-index:100301; top:50%; left:50%; transform:translate(-50%,-50%); width:min(520px,92vw); padding:20px; border:1px solid #c5d9ca; border-radius:18px; background:#f7fcf8; box-shadow:0 28px 80px rgba(0,0,0,.32); color:#153c21; }
+      #${BACKDROP_ID}[hidden], #${MODAL_ID}[hidden] { display:none !important; }
+      .pf-report-type-grid { display:grid; gap:10px; margin:16px 0; }
+      .pf-report-type-choice { width:100%; text-align:left; border:1px solid #c5d9ca; border-radius:12px; padding:13px; background:#fff; cursor:pointer; font:inherit; }
+      .pf-report-type-choice strong, .pf-report-type-choice small { display:block; }
+      .pf-report-type-choice small { margin-top:4px; opacity:.7; }
+      .pf-report-type-choice.primary { border-color:#d4c400; background:#fff8b8; }
+      .pf-report-type-actions { display:flex; justify-content:flex-end; gap:8px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureModal() {
+    installStyles();
+    let backdrop = document.getElementById(BACKDROP_ID);
+    let modal = document.getElementById(MODAL_ID);
+    if (backdrop && modal) return { backdrop, modal };
+
+    backdrop = document.createElement("div");
+    backdrop.id = BACKDROP_ID;
+    backdrop.hidden = true;
+
+    modal = document.createElement("section");
+    modal.id = MODAL_ID;
+    modal.hidden = true;
+    modal.innerHTML = `
+      <div class="rp1-kicker">Report Generator</div>
+      <h2 style="margin:4px 0 0">Choose report type</h2>
+      <p style="margin:6px 0 0;opacity:.72">Choose which report workflow to open for the selected personnel.</p>
+      <div class="pf-report-type-grid">
+        <button type="button" class="pf-report-type-choice primary" data-pf-report-type="REASSIGNMENT">
+          <strong>Reassignment Report</strong>
+          <small>Assign Camp or Office destinations and prepare the transfer report.</small>
+        </button>
+        <button type="button" class="pf-report-type-choice" disabled>
+          <strong>More report plugins</strong>
+          <small>Additional report types will appear here when their plugins are installed.</small>
+        </button>
+      </div>
+      <div class="pf-report-type-actions">
+        <button type="button" class="rp1-btn" data-pf-report-type="CANCEL">Cancel</button>
+      </div>
+    `;
+
+    backdrop.addEventListener("click", closeChooser);
+    document.body.append(backdrop, modal);
+    return { backdrop, modal };
+  }
+
+  function openChooser() {
+    const selection = platform.engines.get("selection");
+    if (!selection?.count?.("ao-cart")) {
+      alert("Select at least one personnel first.");
+      return;
+    }
+    const { backdrop, modal } = ensureModal();
+    backdrop.hidden = false;
+    modal.hidden = false;
+  }
+
+  function closeChooser() {
+    const backdrop = document.getElementById(BACKDROP_ID);
+    const modal = document.getElementById(MODAL_ID);
+    if (backdrop) backdrop.hidden = true;
+    if (modal) modal.hidden = true;
+  }
+
+  function installLauncher() {
+    const button = document.querySelector("[data-rp1-launch]");
+    if (!button) return false;
+
+    button.textContent = "Report Generator";
+    button.classList.remove("rp1-dev-launch");
+    button.classList.add("pf-report-launcher");
+    button.title = "Choose a report type";
+
+    const toolbar =
+      document.querySelector(".ao-selection-toolbar") ||
+      document.querySelector(".preview-toolbar") ||
+      document.querySelector(".preview-stats")?.parentElement;
+
+    if (toolbar && button.parentElement !== toolbar) toolbar.appendChild(button);
+    return true;
+  }
+
+  document.addEventListener("click", event => {
+    const launcher = event.target.closest?.("[data-rp1-launch]");
+    if (launcher) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      openChooser();
+      return;
+    }
+
+    const type = event.target.closest?.("[data-pf-report-type]")?.dataset.pfReportType;
+    if (!type) return;
+    event.preventDefault();
+    if (type === "CANCEL") {
+      closeChooser();
+      return;
+    }
+    if (type === "REASSIGNMENT") {
+      closeChooser();
+      window.$PF?.reassignmentV1?.open?.();
+    }
+  }, true);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installLauncher, { once:true });
+  } else {
+    installLauncher();
+  }
+
+  platform.events.on("selection:changed", () => queueMicrotask(installLauncher));
+
+  window.$PF.reportLauncher = {
+    version: "1.0.0",
+    open: openChooser,
+    close: closeChooser,
+    install: installLauncher,
+  };
+
+  console.info("Report Generator launcher v1.0.0 active.");
+})();
