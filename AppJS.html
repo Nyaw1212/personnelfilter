@@ -8,6 +8,7 @@ async function initializePersonnelApp() {
 
   renderRankGroups();
   renderPreviewHeader();
+  installTemporaryRefreshButton_();
 
   setSyncStatus(
     "Loading personnel...",
@@ -64,6 +65,92 @@ async function initializePersonnelApp() {
       "Personnel data could not be loaded."
     );
   }
+}
+
+function installTemporaryRefreshButton_() {
+  if (document.getElementById("refreshPersonnelDataButton")) {
+    return;
+  }
+
+  const applyButton =
+    document.getElementById("applyNowButton");
+
+  if (!applyButton || !applyButton.parentElement) {
+    console.warn(
+      "Temporary refresh button could not be installed."
+    );
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.id = "refreshPersonnelDataButton";
+  button.type = "button";
+  button.className = applyButton.className;
+  button.textContent = "Refresh Data";
+  button.title = "Reload current personnel data from Google Sheets";
+
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = "Refreshing...";
+
+    setSyncStatus(
+      "Refreshing personnel...",
+      "working"
+    );
+
+    setLastSyncLabel(
+      "Reading current personnel data from Google Sheets..."
+    );
+
+    try {
+      const response =
+        await PersonnelAPI.loadPersonnel();
+
+      PersonnelState.records =
+        Array.isArray(response?.records)
+          ? response.records
+          : [];
+
+      populateFilterValuesFromRecords();
+      renderGeneralFilterGroups();
+      filterAndRenderPersonnel();
+
+      setSyncStatus(
+        "Preview ready",
+        "ready"
+      );
+
+      setLastSyncLabel(
+        `${PersonnelState.records.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
+      );
+    } catch (error) {
+      console.error(
+        "Personnel refresh error:",
+        error
+      );
+
+      setSyncStatus(
+        "Refresh failed",
+        "error"
+      );
+
+      setLastSyncLabel(
+        error?.message ||
+        "Personnel data could not be refreshed."
+      );
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  });
+
+  applyButton.parentElement.insertBefore(
+    button,
+    applyButton
+  );
 }
 
 function populateFilterValuesFromRecords() {
