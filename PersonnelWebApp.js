@@ -29,6 +29,7 @@ function include(filename) {
     "AOSelectionBulkControlsJS",
     "PerformanceClientJS",
     "PersonnelDataRefreshFixJS",
+    "PersonnelTableV2JS",
     "TransferQueueJS",
     "TransferQueueCancelPatchJS"
   ];
