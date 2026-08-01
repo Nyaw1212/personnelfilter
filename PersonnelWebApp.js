@@ -67,6 +67,7 @@ function includePlatformBundle() {
     "ReassignmentPluginV1JS",
     "ReassignmentPluginV1GroupChangeFixJS",
     "ReassignmentPluginV1Phase3JS",
+    "PlatformNameHandlerEngineJS",
     "PlatformNameFormatEngineJS",
     "ReassignmentPluginV1PolishJS",
     "ReassignmentRankDisplayFixJS",
