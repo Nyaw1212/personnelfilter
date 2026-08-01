@@ -1,6 +1,6 @@
 <script>
 // Personnel Platform — reusable NameFormatEngine
-// Formats personnel names for plugin previews and generated report payloads.
+// Uses canonical structured name fields, uppercase output, and suffix-last order.
 
 (function () {
   "use strict";
@@ -12,74 +12,158 @@
   const ROOT_ID = "reassignmentPluginV1Root";
   const SCOPE = "reassignment-v1";
   const MODES = ["FIRST_INITIAL_LAST", "LAST_FIRST_INITIAL"];
-  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
+  const SUFFIXES = new Set(["JR", "SR", "II", "III", "IV", "V"]);
   let currentMode = sessionStorage.getItem(STORAGE_KEY) || "FIRST_INITIAL_LAST";
   let scheduled = false;
 
   function text(value) {
-    return String(value == null ? "" : value).trim();
+    return String(value == null ? "" : value)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function upper(value) {
+    return text(value).toUpperCase();
   }
 
   function normalizeMode(value) {
     return MODES.includes(value) ? value : "FIRST_INITIAL_LAST";
   }
 
+  function normalizeSuffix(value) {
+    const normalized = upper(value).replace(/[.,]/g, "");
+    return SUFFIXES.has(normalized) ? normalized : "";
+  }
+
   function parseName(value) {
-    const raw = text(value).replace(/\s+/g, " ");
+    const raw = text(value);
     if (!raw) return { first: "", middles: [], last: "", suffix: "" };
 
     let tokens;
     if (raw.includes(",")) {
       const [lastPart, givenPart] = raw.split(/,(.+)/).map(text);
-      tokens = [...givenPart.split(" ").filter(Boolean), ...lastPart.split(" ").filter(Boolean)];
+      tokens = [
+        ...givenPart.split(" ").filter(Boolean),
+        ...lastPart.split(" ").filter(Boolean),
+      ];
     } else {
       tokens = raw.split(" ").filter(Boolean);
     }
 
     let suffix = "";
-    if (tokens.length > 1 && SUFFIXES.has(tokens.at(-1).toUpperCase())) {
-      suffix = tokens.pop();
-    }
+    tokens = tokens.filter(token => {
+      const candidate = normalizeSuffix(token);
+      if (!suffix && candidate) {
+        suffix = candidate;
+        return false;
+      }
+      return true;
+    });
 
     if (tokens.length === 1) {
-      return { first: tokens[0], middles: [], last: "", suffix };
+      return {
+        first: upper(tokens[0]),
+        middles: [],
+        last: "",
+        suffix,
+      };
     }
 
     return {
-      first: tokens[0] || "",
-      middles: tokens.slice(1, -1),
-      last: tokens.at(-1) || "",
+      first: upper(tokens[0]),
+      middles: tokens.slice(1, -1).map(upper),
+      last: upper(tokens.at(-1)),
       suffix,
     };
   }
 
   function initials(values) {
     return (values || [])
-      .map(value => text(value).replace(/\./g, ""))
+      .map(value => upper(value).replace(/\./g, ""))
       .filter(Boolean)
       .map(value => value.charAt(0))
       .join(" ");
   }
 
-  function formatName(value, mode = currentMode) {
-    const raw = text(value);
-    if (!raw) return "";
+  function structuredParts(item) {
+    const record = item?.record || item || {};
+    const first = upper(
+      item?.firstName ||
+      record["First Name"] ||
+      record.FirstName
+    );
+    const middle = upper(
+      item?.middleName ||
+      record["Middle Name"] ||
+      record.MiddleName
+    );
+    const last = upper(
+      item?.lastName ||
+      record["Last Name"] ||
+      record.LastName
+    );
+    const suffix = normalizeSuffix(
+      item?.suffix ||
+      record.Suffix ||
+      record["Name Extension"]
+    );
 
-    const parts = parseName(raw);
-    if (!parts.last) return [parts.first, parts.suffix].filter(Boolean).join(" ");
-
-    const middle = initials(parts.middles);
-    const suffix = parts.suffix ? ` ${parts.suffix}` : "";
-
-    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
-      return `${parts.last}${suffix}, ${[parts.first, middle].filter(Boolean).join(" ")}`.trim();
+    if (first || middle || last || suffix) {
+      return {
+        first,
+        middles: middle ? middle.split(/\s+/).filter(Boolean) : [],
+        last,
+        suffix,
+      };
     }
 
-    return `${[parts.first, middle, parts.last].filter(Boolean).join(" ")}${suffix}`.trim();
+    return parseName(
+      item?.fullName ||
+      record["Full Name"] ||
+      record.FullName
+    );
   }
 
-  function personnelName(item) {
-    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName);
+  function formatParts(parts, mode = currentMode) {
+    const normalized = {
+      first: upper(parts?.first),
+      middles: (parts?.middles || []).map(upper).filter(Boolean),
+      last: upper(parts?.last),
+      suffix: normalizeSuffix(parts?.suffix),
+    };
+
+    const middle = initials(normalized.middles);
+
+    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
+      const given = [
+        normalized.first,
+        middle,
+        normalized.suffix,
+      ].filter(Boolean).join(" ");
+
+      return normalized.last
+        ? `${normalized.last}${given ? `, ${given}` : ""}`
+        : given;
+    }
+
+    return [
+      normalized.first,
+      middle,
+      normalized.last,
+      normalized.suffix,
+    ].filter(Boolean).join(" ");
+  }
+
+  function formatName(value, mode = currentMode) {
+    return formatParts(parseName(value), mode);
+  }
+
+  function formatPerson(item, mode = currentMode) {
+    return formatParts(structuredParts(item), mode);
+  }
+
+  function personRank(item) {
+    return upper(item?.rank || item?.record?.Rank || item?.Rank);
   }
 
   function updateVisibleNames() {
@@ -90,15 +174,24 @@
     const state = assignmentCore.get(SCOPE);
     const people = new Map(state?.participants || []);
 
+    root.querySelectorAll(".rp1-person").forEach(row => {
+      const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
+      const label = row.querySelector(".rp1-person-name");
+      const person = people.get(key) || {};
+      if (!label || !key) return;
+      label.textContent = [personRank(person), formatPerson(person)]
+        .filter(Boolean)
+        .join(" ");
+    });
+
     root.querySelectorAll(".rp1-assigned").forEach(row => {
       const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
       const label = row.querySelector("span");
       const person = people.get(key) || {};
       if (!label || !key) return;
-
-      const rank = text(person?.rank || person?.record?.Rank);
-      const name = formatName(personnelName(person));
-      label.textContent = [rank, name].filter(Boolean).join(" ");
+      label.textContent = [personRank(person), formatPerson(person)]
+        .filter(Boolean)
+        .join(" ");
     });
   }
 
@@ -123,32 +216,33 @@
     addStyles();
     const sort = root.querySelector("#rp1Step3Sort");
     const tools = sort?.closest(".rp1-phase3-tools");
-    if (!sort || !tools) return;
 
-    const existingSortLabel = [...tools.querySelectorAll(":scope > label")][0];
-    if (existingSortLabel) existingSortLabel.textContent = "Sort";
+    if (sort && tools) {
+      const existingSortLabel = [...tools.querySelectorAll(":scope > label")][0];
+      if (existingSortLabel) existingSortLabel.textContent = "Sort";
 
-    if (!sort.closest(".rp1-display-tool")) {
-      const sortGroup = document.createElement("div");
-      sortGroup.className = "rp1-display-tool";
-      const label = existingSortLabel || document.createElement("label");
-      label.textContent = "Sort";
-      tools.insertBefore(sortGroup, label);
-      sortGroup.append(label, sort);
-    }
+      if (!sort.closest(".rp1-display-tool")) {
+        const sortGroup = document.createElement("div");
+        sortGroup.className = "rp1-display-tool";
+        const label = existingSortLabel || document.createElement("label");
+        label.textContent = "Sort";
+        tools.insertBefore(sortGroup, label);
+        sortGroup.append(label, sort);
+      }
 
-    if (!tools.querySelector("#rp1NameFormat")) {
-      const group = document.createElement("div");
-      group.className = "rp1-display-tool";
-      group.innerHTML = `
-        <label for="rp1NameFormat">Name format</label>
-        <select id="rp1NameFormat" class="rp1-search">
-          <option value="FIRST_INITIAL_LAST">First name M Last name</option>
-          <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
-        </select>
-      `;
-      tools.appendChild(group);
-      group.querySelector("select").value = currentMode;
+      if (!tools.querySelector("#rp1NameFormat")) {
+        const group = document.createElement("div");
+        group.className = "rp1-display-tool";
+        group.innerHTML = `
+          <label for="rp1NameFormat">Name format</label>
+          <select id="rp1NameFormat" class="rp1-search">
+            <option value="FIRST_INITIAL_LAST">First name M Last name</option>
+            <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
+          </select>
+        `;
+        tools.appendChild(group);
+        group.querySelector("select").value = currentMode;
+      }
     }
 
     updateVisibleNames();
@@ -157,17 +251,17 @@
   function scheduleDecorate() {
     if (scheduled) return;
     scheduled = true;
-    queueMicrotask(decorate);
+    requestAnimationFrame(decorate);
   }
 
   function formatPayload(payload) {
-    if (!payload || text(payload.reportType).toUpperCase() !== "REASSIGNMENT") return payload;
+    if (!payload || upper(payload.reportType) !== "REASSIGNMENT") return payload;
     const next = structuredClone(payload);
     next.nameFormat = currentMode;
     next.personnel = (Array.isArray(next.personnel) ? next.personnel : []).map(person => ({
       ...person,
       originalFullName: text(person.originalFullName || person.fullName),
-      fullName: formatName(person.originalFullName || person.fullName),
+      fullName: formatPerson(person),
     }));
     return next;
   }
@@ -190,12 +284,14 @@
   });
 
   platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+  platform.events.on("selection:changed", scheduleDecorate);
 
   const NameFormatEngine = {
-    version: "1.0.1",
+    version: "1.1.0",
     modes: [...MODES],
     parse: parseName,
     format: formatName,
+    formatPerson,
     formatPayload,
     get mode() { return currentMode; },
     setMode(value) {
@@ -210,6 +306,8 @@
         version: this.version,
         mode: currentMode,
         modes: MODES.length,
+        uppercase: true,
+        suffixLast: true,
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -220,8 +318,9 @@
   if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", NameFormatEngine);
   else platform.engines.register("nameFormat", NameFormatEngine);
 
+  window.$PF = window.$PF || {};
   window.$PF.nameFormat = NameFormatEngine;
   scheduleDecorate();
-  console.info("NameFormatEngine v1.0.1 active without periods in initials.");
+  console.info("NameFormatEngine v1.1.0 active: uppercase names and suffix-last order.");
 })();
 </script>
