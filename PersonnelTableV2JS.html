@@ -1,0 +1,215 @@
+// Personnel Table V2 — independent sheet-backed table.
+// No dependency on PersonnelState, PersonnelAPI, or legacy render patches.
+
+(function () {
+  "use strict";
+
+  const V2 = {
+    records: [],
+    filtered: [],
+    query: "",
+    loading: false,
+  };
+
+  const COLUMNS = [
+    ["FULL NAME", "Full Name"],
+    ["RANK", "Rank"],
+    ["GENDER", "Gender"],
+    ["CATEGORY", "Category"],
+    ["TYPE", "Type"],
+    ["OFFICE", "Office"],
+    ["CAMP", "Camp"],
+  ];
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function read(record, key) {
+    const aliases = {
+      "Full Name": ["Full Name", "FULL NAME", "fullName"],
+      Rank: ["Rank", "RANK", "rank"],
+      Gender: ["Gender", "GENDER", "gender"],
+      Category: ["Category", "CATEGORY", "category"],
+      Type: ["Type", "TYPE", "type"],
+      Office: ["Office", "OFFICE", "office"],
+      Camp: ["Camp", "CAMP", "camp"],
+    };
+
+    for (const name of aliases[key] || [key]) {
+      const value = record?.[name];
+      if (value != null && text(value)) return text(value);
+    }
+    return "";
+  }
+
+  function loadFromServer() {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => reject(new Error(error?.message || String(error))))
+        .getPersonnelWebAppDataOptimized();
+    });
+  }
+
+  function installStyles() {
+    if (document.getElementById("personnelTableV2Styles")) return;
+    const style = document.createElement("style");
+    style.id = "personnelTableV2Styles";
+    style.textContent = `
+      #personnelTableV2Root[hidden] { display:none !important; }
+      #personnelTableV2Root {
+        position:fixed; inset:0; z-index:10000; background:#eef8f0;
+        display:flex; flex-direction:column; font-family:Arial,"Segoe UI",sans-serif;
+      }
+      .ptv2-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; background:#dcefe0; border-bottom:1px solid #a9c9b0; }
+      .ptv2-title h2 { margin:0; font-size:22px; color:#123e22; }
+      .ptv2-title p { margin:3px 0 0; color:#496b54; font-size:12px; }
+      .ptv2-actions { display:flex; align-items:center; gap:8px; }
+      .ptv2-btn { border:1px solid #8eb49a; background:#fff; color:#164d2b; border-radius:9px; padding:9px 14px; font-weight:700; cursor:pointer; }
+      .ptv2-btn.primary { background:#1f7a3f; color:#fff; border-color:#1f7a3f; }
+      .ptv2-btn:disabled { opacity:.55; cursor:wait; }
+      .ptv2-toolbar { display:flex; align-items:center; gap:10px; padding:12px 18px; background:#f8fcf9; border-bottom:1px solid #c8ddce; }
+      .ptv2-search { flex:1; min-width:180px; border:1px solid #aac6b2; border-radius:10px; padding:10px 12px; font-size:14px; background:#fff; }
+      .ptv2-count { white-space:nowrap; font-weight:800; color:#245735; }
+      .ptv2-status { min-width:180px; text-align:right; color:#55725d; font-size:12px; }
+      .ptv2-table-wrap { flex:1; overflow:auto; margin:14px 18px 18px; background:#fff; border:1px solid #b9d2c0; border-radius:12px; }
+      .ptv2-table { width:100%; border-collapse:separate; border-spacing:0; font-size:12px; }
+      .ptv2-table th { position:sticky; top:0; z-index:2; background:#dcefe0; color:#174527; padding:10px; text-align:left; border-bottom:1px solid #a9c9b0; white-space:nowrap; }
+      .ptv2-table td { padding:9px 10px; border-bottom:1px solid #e1eee4; white-space:nowrap; }
+      .ptv2-table tr:hover td { background:#f2faf4; }
+      .ptv2-empty { padding:40px; text-align:center; color:#6b7d70; }
+      #openPersonnelTableV2Button { margin-right:8px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function createRoot() {
+    if (document.getElementById("personnelTableV2Root")) return;
+
+    const root = document.createElement("section");
+    root.id = "personnelTableV2Root";
+    root.hidden = true;
+    root.innerHTML = `
+      <header class="ptv2-header">
+        <div class="ptv2-title">
+          <h2>Personnel Table V2</h2>
+          <p>Independent live table reading FULL NAME directly from the LIST sheet.</p>
+        </div>
+        <div class="ptv2-actions">
+          <button id="ptv2Reload" class="ptv2-btn primary" type="button">Reload Data</button>
+          <button id="ptv2Close" class="ptv2-btn" type="button">Back to Current App</button>
+        </div>
+      </header>
+      <div class="ptv2-toolbar">
+        <input id="ptv2Search" class="ptv2-search" type="search" placeholder="Search name, rank, office, camp...">
+        <span id="ptv2Count" class="ptv2-count">0 rows</span>
+        <span id="ptv2Status" class="ptv2-status">Not loaded</span>
+      </div>
+      <div class="ptv2-table-wrap">
+        <table class="ptv2-table">
+          <thead><tr>${COLUMNS.map(([label]) => `<th>${label}</th>`).join("")}</tr></thead>
+          <tbody id="ptv2Body"></tbody>
+        </table>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    root.querySelector("#ptv2Close").addEventListener("click", () => {
+      root.hidden = true;
+    });
+    root.querySelector("#ptv2Reload").addEventListener("click", reload);
+    root.querySelector("#ptv2Search").addEventListener("input", event => {
+      V2.query = event.target.value;
+      filterAndRender();
+    });
+  }
+
+  function installLauncher() {
+    if (document.getElementById("openPersonnelTableV2Button")) return;
+    const actions = document.querySelector(".window-actions");
+    if (!actions) return;
+
+    const button = document.createElement("button");
+    button.id = "openPersonnelTableV2Button";
+    button.type = "button";
+    button.className = "button button-primary";
+    button.textContent = "Table V2";
+    button.addEventListener("click", async () => {
+      const root = document.getElementById("personnelTableV2Root");
+      root.hidden = false;
+      if (!V2.records.length) await reload();
+    });
+    actions.insertBefore(button, actions.firstChild);
+  }
+
+  function filterAndRender() {
+    const q = text(V2.query).toLowerCase();
+    V2.filtered = !q
+      ? [...V2.records]
+      : V2.records.filter(record =>
+          COLUMNS.some(([, key]) => read(record, key).toLowerCase().includes(q))
+        );
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById("ptv2Body");
+    const count = document.getElementById("ptv2Count");
+    if (!body || !count) return;
+
+    count.textContent = `${V2.filtered.length.toLocaleString()} rows`;
+    if (!V2.filtered.length) {
+      body.innerHTML = `<tr><td class="ptv2-empty" colspan="${COLUMNS.length}">No personnel found.</td></tr>`;
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    V2.filtered.forEach(record => {
+      const row = document.createElement("tr");
+      COLUMNS.forEach(([, key]) => {
+        const cell = document.createElement("td");
+        cell.textContent = read(record, key);
+        row.appendChild(cell);
+      });
+      fragment.appendChild(row);
+    });
+    body.replaceChildren(fragment);
+  }
+
+  async function reload() {
+    if (V2.loading) return;
+    V2.loading = true;
+    const button = document.getElementById("ptv2Reload");
+    const status = document.getElementById("ptv2Status");
+    if (button) { button.disabled = true; button.textContent = "Loading..."; }
+    if (status) status.textContent = "Reading Google Sheets...";
+
+    try {
+      const response = await loadFromServer();
+      V2.records = Array.isArray(response?.records) ? response.records : [];
+      filterAndRender();
+      if (status) status.textContent = `Loaded ${V2.records.length.toLocaleString()} rows at ${new Date().toLocaleTimeString()}`;
+      console.info("Personnel Table V2 loaded", V2.records.length, "rows");
+    } catch (error) {
+      console.error("Personnel Table V2 load failed:", error);
+      V2.records = [];
+      filterAndRender();
+      if (status) status.textContent = `Load failed: ${error.message}`;
+    } finally {
+      V2.loading = false;
+      if (button) { button.disabled = false; button.textContent = "Reload Data"; }
+    }
+  }
+
+  window.PersonnelTableV2 = { state: V2, reload, open() {
+    document.getElementById("personnelTableV2Root").hidden = false;
+    return reload();
+  }};
+
+  window.addEventListener("DOMContentLoaded", () => {
+    installStyles();
+    createRoot();
+    installLauncher();
+  });
+})();
