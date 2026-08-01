@@ -1,62 +1,108 @@
 <script>
-// Reassignment V1 display fix — remove duplicated rank prefixes.
+// Reassignment V1 display fix — remove duplicated rank prefixes reliably.
 
 (function () {
   "use strict";
 
   const ROOT_ID = "reassignmentPluginV1Root";
-  let observer = null;
+  let rootObserver = null;
+  let bodyObserver = null;
   let scheduled = false;
 
   function cleanLabel(value) {
-    const text = String(value || "").trim();
-    return text.replace(/^(\S+)\s+\1\b\s*/i, "$1 ");
+    const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+    if (words.length < 2) return words.join(" ");
+
+    // Remove every immediately repeated leading rank token, for example:
+    // CSO2 CSO2 NAME -> CSO2 NAME
+    // CCINSP CCINSP NAME -> CCINSP NAME
+    while (words.length > 1 && words[0].localeCompare(words[1], undefined, {
+      sensitivity: "base",
+    }) === 0) {
+      words.splice(1, 1);
+    }
+
+    return words.join(" ");
   }
 
   function normalizeRankLabels(root) {
     if (!root) return;
+
     root.querySelectorAll(".rp1-person-name, .rp1-assigned > span").forEach(node => {
-      const cleaned = cleanLabel(node.textContent);
-      if (cleaned !== node.textContent) node.textContent = cleaned;
+      const original = String(node.textContent || "").trim();
+      const cleaned = cleanLabel(original);
+      if (cleaned && cleaned !== original) node.textContent = cleaned;
     });
   }
 
   function schedule(root) {
     if (scheduled) return;
     scheduled = true;
+
     requestAnimationFrame(() => {
       scheduled = false;
       normalizeRankLabels(root || document.getElementById(ROOT_ID));
     });
   }
 
-  function attach() {
-    const root = document.getElementById(ROOT_ID);
+  function attachRoot(root) {
     if (!root) return false;
-    if (root.dataset.rankDisplayFix === "true") {
-      schedule(root);
-      return true;
+
+    if (root.dataset.rankDisplayFix !== "true") {
+      root.dataset.rankDisplayFix = "true";
+
+      if (rootObserver) rootObserver.disconnect();
+      rootObserver = new MutationObserver(() => schedule(root));
+      rootObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
     }
 
-    root.dataset.rankDisplayFix = "true";
-    observer = new MutationObserver(() => schedule(root));
-    observer.observe(root, { childList: true, subtree: true });
     schedule(root);
     return true;
   }
 
+  function attach() {
+    return attachRoot(document.getElementById(ROOT_ID));
+  }
+
+  function watchForWorkspace() {
+    if (attach() || bodyObserver || !document.body) return;
+
+    bodyObserver = new MutationObserver(() => {
+      const root = document.getElementById(ROOT_ID);
+      if (!root) return;
+      attachRoot(root);
+      bodyObserver.disconnect();
+      bodyObserver = null;
+    });
+
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
   document.addEventListener("click", event => {
-    if (event.target.closest?.("[data-rp1-launch], #reassignmentPluginV1Root")) {
-      queueMicrotask(attach);
+    if (event.target.closest?.("[data-rp1-launch], [data-pf-report-type='REASSIGNMENT'], #reassignmentPluginV1Root")) {
+      setTimeout(watchForWorkspace, 0);
     }
   }, true);
 
   document.addEventListener("change", event => {
-    if (event.target.closest?.("#reassignmentPluginV1Root")) queueMicrotask(attach);
+    if (event.target.closest?.("#reassignmentPluginV1Root")) setTimeout(attach, 0);
   }, true);
 
-  window.addEventListener("DOMContentLoaded", attach, { once: true });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", watchForWorkspace, { once: true });
+  } else {
+    watchForWorkspace();
+  }
+
   window.$PF = window.$PF || {};
-  window.$PF.reassignmentRankDisplayFix = { version: "1.0.0", refresh: attach };
+  window.$PF.reassignmentRankDisplayFix = {
+    version: "1.1.0",
+    refresh: attach,
+    cleanLabel,
+  };
 })();
 </script>
