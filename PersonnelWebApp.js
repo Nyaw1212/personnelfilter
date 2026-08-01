@@ -24,6 +24,7 @@ function include(filename) {
 
   const sharedClientModules = [
     "GeneratedReportsJS",
+    "GeneratedReportsUnreadBadgeJS",
     "GeneratedReportPreviewJS",
     "Stage1GeneratedReportEditorJS",
     "AOSelectionBulkControlsJS",
