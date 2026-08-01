@@ -107,7 +107,8 @@ function getPersonnelWebAppData() {
             source,
             index +
               PERSONNEL_WEB_CONFIG
-                .firstDataRow
+                .firstDataRow,
+            row
           );
 
         }
@@ -167,8 +168,36 @@ function getPersonnelWebSheet_() {
 
 function normalizeWebPersonnelRecord_(
   source,
-  sheetRow
+  sheetRow,
+  rawRow
 ) {
+
+  const row = Array.isArray(rawRow) ? rawRow : [];
+
+  // LIST sheet positional source of truth:
+  // G = Rank, I = first name, J = middle/name extension, H = last name.
+  // Full Name intentionally excludes column G so the UI can prepend Rank once.
+  const columnG = cleanWebCellValue_(row[6]);
+  const columnH = cleanWebCellValue_(row[7]);
+  const columnI = cleanWebCellValue_(row[8]);
+  const columnJ = cleanWebCellValue_(row[9]);
+
+  const positionalFullName = [
+    columnI,
+    columnJ,
+    columnH,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const positionalDisplayName = [
+    columnG,
+    columnI,
+    columnJ,
+    columnH,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const firstName =
     getWebRecordValue_(
@@ -217,29 +246,41 @@ function normalizeWebPersonnelRecord_(
     .filter(Boolean)
     .join(" ");
 
+  const rank =
+    columnG ||
+    getWebRecordValue_(
+      source,
+      [
+        "RANK",
+        "Rank",
+      ]
+    );
+
+  const fullName =
+    positionalFullName ||
+    generatedName ||
+    getWebRecordValue_(
+      source,
+      [
+        "FULL NAME",
+        "Full Name",
+      ]
+    );
+
   return {
 
     __sheetRow:
       sheetRow,
 
     "Full Name":
-      getWebRecordValue_(
-        source,
-        [
-          "FULL NAME",
-          "Full Name",
-        ]
-      ) ||
-      generatedName,
+      fullName,
+
+    "Display Name":
+      positionalDisplayName ||
+      [rank, fullName].filter(Boolean).join(" "),
 
     "Rank":
-      getWebRecordValue_(
-        source,
-        [
-          "RANK",
-          "Rank",
-        ]
-      ),
+      rank,
 
     "Gender":
       getWebRecordValue_(
@@ -297,6 +338,14 @@ function normalizeWebPersonnelRecord_(
 
   };
 
+}
+
+//----------------------------------
+// Clean Raw Sheet Cell
+//----------------------------------
+
+function cleanWebCellValue_(value) {
+  return String(value == null ? "" : value).trim();
 }
 
 //----------------------------------
