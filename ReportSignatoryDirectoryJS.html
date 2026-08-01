@@ -1,0 +1,273 @@
+<script>
+// Report Designer signatory resolver backed by OFFICE_DIRECTORY.
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  let records = [];
+  let loadingPromise = null;
+  let syncing = false;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function key(value) {
+    return text(value).replace(/\s+/g, " ").toUpperCase();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function runServer(method) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => reject(new Error(error?.message || String(error))))
+        [method]();
+    });
+  }
+
+  function loadDirectory() {
+    if (loadingPromise) return loadingPromise;
+    loadingPromise = runServer("getOfficeDirectoryForReport")
+      .then(response => {
+        if (!response?.success) {
+          throw new Error(response?.message || "Unable to load OFFICE_DIRECTORY.");
+        }
+        records = Array.isArray(response.records) ? response.records : [];
+        return records;
+      })
+      .catch(error => {
+        console.error("OFFICE_DIRECTORY load failed:", error);
+        records = [];
+        return records;
+      });
+    return loadingPromise;
+  }
+
+  function offices() {
+    return [...new Map(records
+      .filter(record => text(record.office))
+      .map(record => [key(record.office), record.office]))
+      .values()]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }
+
+  function signatories() {
+    const list = [];
+    records.forEach(record => {
+      if (text(record.chiefName)) {
+        list.push({
+          office: record.office,
+          role: "CHIEF",
+          name: record.chiefName,
+          position: record.chiefPosition,
+        });
+      }
+      if (text(record.deputyName)) {
+        list.push({
+          office: record.office,
+          role: "DEPUTY",
+          name: record.deputyName,
+          position: record.deputyPosition,
+        });
+      }
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }
+
+  function entryByOffice(office) {
+    return records.find(record => key(record.office) === key(office)) || null;
+  }
+
+  function signatoryByName(name) {
+    return signatories().find(item => key(item.name) === key(name)) || null;
+  }
+
+  function currentDraft() {
+    const id = window.$PF?.reportPreview?.activeDraftId;
+    return id ? report.get(id) : null;
+  }
+
+  function saveMetadata(patch) {
+    const draft = currentDraft();
+    if (!draft) return null;
+    return report.setMetadata(draft.id, patch);
+  }
+
+  function field(id) {
+    return document.getElementById(id);
+  }
+
+  function setValue(element, value) {
+    if (!element) return;
+    element.value = text(value);
+  }
+
+  function applyOffice(office, roleValue) {
+    const entry = entryByOffice(office);
+    if (!entry) return;
+
+    const role = roleValue === "DEPUTY" ? "DEPUTY" : "CHIEF";
+    const name = role === "DEPUTY" ? entry.deputyName : entry.chiefName;
+    const position = role === "DEPUTY" ? entry.deputyPosition : entry.chiefPosition;
+
+    syncing = true;
+    setValue(field("pfRpSigningOffice"), entry.office);
+    setValue(field("pfRpSignatoryRole"), role);
+    setValue(field("pfRpSigningOfficer"), name);
+    setValue(field("pfRpSigningPosition"), position);
+    syncing = false;
+
+    saveMetadata({
+      signingOffice: entry.office,
+      signatoryRole: role,
+      signingOfficer: text(name),
+      signingPosition: text(position),
+      signingOfficeCode: text(entry.officeCode),
+      signingCamp: text(entry.camp),
+    });
+  }
+
+  function applyOfficer(name) {
+    const match = signatoryByName(name);
+    if (!match) return;
+
+    syncing = true;
+    setValue(field("pfRpSigningOffice"), match.office);
+    setValue(field("pfRpSignatoryRole"), match.role);
+    setValue(field("pfRpSigningOfficer"), match.name);
+    setValue(field("pfRpSigningPosition"), match.position);
+    syncing = false;
+
+    const entry = entryByOffice(match.office) || {};
+    saveMetadata({
+      signingOffice: match.office,
+      signatoryRole: match.role,
+      signingOfficer: match.name,
+      signingPosition: text(match.position),
+      signingOfficeCode: text(entry.officeCode),
+      signingCamp: text(entry.camp),
+    });
+  }
+
+  function installStyles() {
+    if (document.getElementById("reportSignatoryDirectoryStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reportSignatoryDirectoryStyles";
+    style.textContent = `
+      .pf-rp-signatory-grid{display:grid;grid-template-columns:1fr 110px;gap:8px}
+      .pf-rp-select{appearance:auto}
+      @media(max-width:520px){.pf-rp-signatory-grid{grid-template-columns:1fr}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function option(value, label, selected) {
+    return `<option value="${escapeHtml(value)}"${key(value) === key(selected) ? " selected" : ""}>${escapeHtml(label || value)}</option>`;
+  }
+
+  function installUi() {
+    const officerInput = field("pfRpSigningOfficer");
+    const positionInput = field("pfRpSigningPosition");
+    if (!officerInput || !positionInput) return;
+    if (field("pfRpSigningOffice")) return;
+
+    installStyles();
+    const draft = currentDraft();
+    const metadata = draft?.metadata || {};
+
+    const officeField = document.createElement("div");
+    officeField.className = "pf-rp-field";
+    officeField.innerHTML = `
+      <label for="pfRpSigningOffice">Signing Office</label>
+      <div class="pf-rp-signatory-grid">
+        <select id="pfRpSigningOffice" class="pf-rp-input pf-rp-select">
+          ${option("", "Select office", metadata.signingOffice)}
+          ${offices().map(value => option(value, value, metadata.signingOffice)).join("")}
+        </select>
+        <select id="pfRpSignatoryRole" class="pf-rp-input pf-rp-select" aria-label="Signatory role">
+          ${option("CHIEF", "Chief", metadata.signatoryRole || "CHIEF")}
+          ${option("DEPUTY", "Deputy", metadata.signatoryRole)}
+        </select>
+      </div>
+      <div class="pf-rp-hint">Choose an office, then switch Chief/Deputy when needed.</div>`;
+
+    officerInput.closest(".pf-rp-field")?.before(officeField);
+
+    const officerSelect = document.createElement("select");
+    officerSelect.id = "pfRpSigningOfficer";
+    officerSelect.className = "pf-rp-input pf-rp-select";
+    officerSelect.dataset.pfReportField = "signingOfficer";
+    officerSelect.innerHTML = `
+      ${option("", "Select signing officer", metadata.signingOfficer)}
+      ${signatories().map(item => option(
+        item.name,
+        `${item.name} — ${item.role === "DEPUTY" ? "Deputy" : "Chief"}, ${item.office}`,
+        metadata.signingOfficer
+      )).join("")}`;
+    officerInput.replaceWith(officerSelect);
+
+    field("pfRpSigningOffice")?.addEventListener("change", event => {
+      if (syncing) return;
+      applyOffice(event.target.value, field("pfRpSignatoryRole")?.value);
+    });
+
+    field("pfRpSignatoryRole")?.addEventListener("change", event => {
+      if (syncing) return;
+      applyOffice(field("pfRpSigningOffice")?.value, event.target.value);
+    });
+
+    officerSelect.addEventListener("change", event => {
+      if (syncing) return;
+      applyOfficer(event.target.value);
+    });
+
+    // Preserve free editing of Position after it is auto-populated.
+    positionInput.addEventListener("input", event => {
+      if (!syncing) saveMetadata({ signingPosition: event.target.value });
+    });
+
+    if (metadata.signingOfficer) {
+      applyOfficer(metadata.signingOfficer);
+    } else if (metadata.signingOffice) {
+      applyOffice(metadata.signingOffice, metadata.signatoryRole || "CHIEF");
+    }
+  }
+
+  async function refreshUi() {
+    await loadDirectory();
+    installUi();
+  }
+
+  platform.events.on("report:preview-ready", () => {
+    window.setTimeout(refreshUi, 0);
+  });
+
+  new MutationObserver(() => {
+    if (field("pfRpSigningOfficer") && !field("pfRpSigningOffice")) {
+      refreshUi();
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+
+  loadDirectory();
+
+  window.$PF.reportSignatoryDirectory = {
+    version: "1.0.0",
+    refresh: refreshUi,
+    get records() { return records.slice(); },
+  };
+
+  console.info("Report signatory directory active: OFFICE_DIRECTORY linked resolver.");
+})();
+</script>
