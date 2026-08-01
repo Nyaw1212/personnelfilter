@@ -22,7 +22,6 @@ function include(filename) {
 
   if (filename !== "AppJS") return content;
 
-  // These existing client modules are still part of the base Personnel Filter.
   const sharedClientModules = [
     "GeneratedReportsJS",
     "GeneratedReportPreviewJS",
@@ -39,9 +38,6 @@ function include(filename) {
       .getContent();
   });
 
-  // Index.html places AppJS inside its original <script> element. Close that
-  // element, insert the wrapped platform modules, then reopen it so the
-  // existing closing tag in Index.html remains balanced.
   content += "\n</script>\n" + includePlatformBundle() + "\n<script>\n";
 
   return content;
@@ -52,9 +48,6 @@ function include(filename) {
 //----------------------------------
 
 function includePlatformBundle() {
-  // Each platform module is a valid HTML partial wrapped in its own <script>
-  // element. Joining those partials avoids Apps Script's malformed-HTML error
-  // while preserving the same execution order used in Developer Mode.
   const platformModules = [
     "PlatformCoreJS",
     "PlatformPerformanceEngineJS",
@@ -76,6 +69,7 @@ function includePlatformBundle() {
     "ReassignmentPluginV1Phase3JS",
     "PlatformNameFormatEngineJS",
     "ReassignmentPluginV1PolishJS",
+    "ReassignmentRankDisplayFixJS",
     "PlatformReportLauncherUXJS",
     "PlatformUIControlBridgeFixJS",
     "PlatformKeyboardEngineJS",
