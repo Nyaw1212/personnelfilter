@@ -31,7 +31,8 @@ function include(filename) {
     "PersonnelDataRefreshFixJS",
     "PersonnelTableV2JS",
     "CanonicalTransferQueueClientJS",
-    "MultiTextSearchJS"
+    "MultiTextSearchJS",
+    "MultiTextSearchPerformanceFixJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
