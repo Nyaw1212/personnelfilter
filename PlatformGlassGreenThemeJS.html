@@ -20,7 +20,7 @@
     return false;
   }
 
-  // Keep lightweight mode enabled by default while we diagnose hover CPU use.
+  // Daily-use mode stays lightweight by default.
   let storedMode = "on";
   try { storedMode = localStorage.getItem("pfPerformanceMode") || "on"; } catch (_) {}
   if (storedMode !== "off") enablePerformanceMode();
@@ -98,7 +98,12 @@
         border-color: var(--pf-glass-green-border-hover) !important;
       }
 
-      /* Diagnostic performance mode: remove costly hover/compositing effects. */
+      /* Daily-use performance mode: remove compositing and motion costs globally. */
+      .${MODE_CLASS},
+      .${MODE_CLASS} body {
+        scroll-behavior: auto !important;
+      }
+
       .${MODE_CLASS} *,
       .${MODE_CLASS} *::before,
       .${MODE_CLASS} *::after {
@@ -106,10 +111,30 @@
         transition: none !important;
         backdrop-filter: none !important;
         -webkit-backdrop-filter: none !important;
+        filter: none !important;
+        text-shadow: none !important;
+        will-change: auto !important;
       }
 
-      .${MODE_CLASS} :hover {
+      .${MODE_CLASS} :hover,
+      .${MODE_CLASS} :focus,
+      .${MODE_CLASS} :active {
         transform: none !important;
+      }
+
+      /* Remove large layered shadows while preserving borders and layout. */
+      .${MODE_CLASS} button,
+      .${MODE_CLASS} input,
+      .${MODE_CLASS} select,
+      .${MODE_CLASS} textarea,
+      .${MODE_CLASS} article,
+      .${MODE_CLASS} section,
+      .${MODE_CLASS} dialog,
+      .${MODE_CLASS} [class*="card"],
+      .${MODE_CLASS} [class*="panel"],
+      .${MODE_CLASS} [class*="modal"],
+      .${MODE_CLASS} [class*="dialog"] {
+        box-shadow: none !important;
       }
 
       .${MODE_CLASS} .button-primary:hover:not(:disabled),
@@ -123,7 +148,7 @@
       .${MODE_CLASS} .pf-report-type-choice.primary:hover:not(:disabled) {
         background: var(--pf-glass-green-bg) !important;
         border-color: var(--pf-glass-green-border) !important;
-        box-shadow: var(--pf-glass-green-shadow) !important;
+        box-shadow: none !important;
         transform: none !important;
       }
     `;
@@ -136,7 +161,14 @@
     disable: disablePerformanceMode,
     status() {
       const enabled = document.documentElement.classList.contains(MODE_CLASS);
-      console.table({ enabled, hoverEffects: enabled ? "DISABLED" : "ENABLED", blur: enabled ? "DISABLED" : "ENABLED" });
+      console.table({
+        enabled,
+        hoverEffects: enabled ? "DISABLED" : "ENABLED",
+        blur: enabled ? "DISABLED" : "ENABLED",
+        filters: enabled ? "DISABLED" : "ENABLED",
+        animations: enabled ? "DISABLED" : "ENABLED",
+        heavyShadows: enabled ? "DISABLED" : "ENABLED",
+      });
       return enabled;
     },
   };
