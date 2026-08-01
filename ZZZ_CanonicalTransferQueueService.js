@@ -28,7 +28,7 @@ function enqueueTransferBatchCanonical(payload, generatedReport) {
 
     const index = buildCanonicalPersonnelIndex_(listSheet);
     const now = new Date();
-    const documentUrl = String(generatedReport?.url || "").trim();
+    const documentUrl = String(generatedReport?.url || generatedReport?.documentUrl || "").trim();
 
     const rows = personnel.map((person, i) => {
       const fullName = canonicalNormalizeName_(person.fullName, person.rank);
@@ -67,24 +67,129 @@ function getTransferQueueRecordsCanonical() {
     const ss = SpreadsheetApp.openById(CANONICAL_TRANSFER_QUEUE_CONFIG.spreadsheetId);
     const sheet = getCanonicalTransferQueueSheet_(ss);
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return { success: true, records: [] };
+    if (lastRow < 2) return { success: true, records: [], counts: canonicalEmptyStatusCounts_() };
 
     const values = sheet.getRange(2, 1, lastRow - 1, CANONICAL_TRANSFER_QUEUE_HEADERS.length).getDisplayValues();
     const records = values.map((row, i) => ({
-      rowNumber: i + 2, transferId: row[0], orderNumber: row[1], orderDate: row[2],
-      fullName: row[3], rank: row[4], previousOffice: row[5], previousCamp: row[6],
-      newOffice: row[7], newCamp: row[8], status: row[9], approvedBy: row[10],
-      approvedDate: row[11], appliedDate: row[12], documentUrl: row[13],
-      errorMessage: row[14], createdDate: row[15]
+      rowNumber: i + 2,
+      transferId: row[0],
+      orderNumber: row[1],
+      orderDate: row[2],
+      fullName: row[3],
+      rank: row[4],
+      previousOffice: row[5],
+      previousCamp: row[6],
+      newOffice: row[7],
+      newCamp: row[8],
+      status: canonicalDisplayStatus_(row[9]),
+      approvedBy: row[10],
+      approvedDate: row[11],
+      appliedDate: row[12],
+      documentUrl: row[13],
+      errorMessage: row[14],
+      createdDate: row[15]
     })).reverse();
-    return { success: true, records };
+
+    const counts = canonicalEmptyStatusCounts_();
+    records.forEach(record => {
+      counts.ALL++;
+      if (Object.prototype.hasOwnProperty.call(counts, record.status)) counts[record.status]++;
+    });
+
+    return { success: true, records, counts };
   } catch (error) {
-    return { success: false, records: [], message: error?.message || String(error) };
+    return { success: false, records: [], counts: canonicalEmptyStatusCounts_(), message: error?.message || String(error) };
   }
 }
 
+function approveTransfersCanonical(transferIds) {
+  const ids = canonicalIdSet_(transferIds);
+  if (!ids.size) return { success: false, message: "Select at least one transfer." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = SpreadsheetApp.openById(CANONICAL_TRANSFER_QUEUE_CONFIG.spreadsheetId);
+    const queueSheet = getCanonicalTransferQueueSheet_(ss);
+    const queue = queueSheet.getDataRange().getValues();
+    const approvedBy = Session.getActiveUser().getEmail() || "Personnel Filter user";
+    const now = new Date();
+    let approved = 0;
+    let skipped = 0;
+
+    for (let i = 1; i < queue.length; i++) {
+      const row = queue[i];
+      const id = String(row[0] || "").trim();
+      if (!ids.has(id)) continue;
+      const status = canonicalDisplayStatus_(row[9]);
+      if (["APPLIED", "CANCELLED"].includes(status)) { skipped++; continue; }
+
+      queueSheet.getRange(i + 1, 10, 1, 3).setValues([["APPROVED", approvedBy, now]]);
+      queueSheet.getRange(i + 1, 15).clearContent();
+      approved++;
+    }
+
+    SpreadsheetApp.flush();
+    return {
+      success: true,
+      approved,
+      skipped,
+      message: `${approved} transfer(s) approved${skipped ? `; ${skipped} skipped` : ""}.`
+    };
+  } catch (error) {
+    return { success: false, message: error?.message || String(error) };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function applyTransfersCanonical(transferIds) {
+  return canonicalApplyTransfers_(transferIds, false);
+}
+
 function approveAndApplyTransfersCanonical(transferIds) {
-  const ids = new Set((Array.isArray(transferIds) ? transferIds : []).map(v => String(v || "").trim()).filter(Boolean));
+  return canonicalApplyTransfers_(transferIds, true);
+}
+
+function cancelTransfersCanonical(transferIds) {
+  const ids = canonicalIdSet_(transferIds);
+  if (!ids.size) return { success: false, message: "Select at least one transfer." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = SpreadsheetApp.openById(CANONICAL_TRANSFER_QUEUE_CONFIG.spreadsheetId);
+    const queueSheet = getCanonicalTransferQueueSheet_(ss);
+    const queue = queueSheet.getDataRange().getValues();
+    let cancelled = 0;
+    let skipped = 0;
+
+    for (let i = 1; i < queue.length; i++) {
+      const row = queue[i];
+      const id = String(row[0] || "").trim();
+      if (!ids.has(id)) continue;
+      const status = canonicalDisplayStatus_(row[9]);
+      if (["APPLIED", "CANCELLED"].includes(status)) { skipped++; continue; }
+      queueSheet.getRange(i + 1, 10).setValue("CANCELLED");
+      cancelled++;
+    }
+
+    SpreadsheetApp.flush();
+    return {
+      success: true,
+      cancelled,
+      skipped,
+      message: `${cancelled} transfer(s) cancelled${skipped ? `; ${skipped} skipped` : ""}.`
+    };
+  } catch (error) {
+    return { success: false, message: error?.message || String(error) };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function canonicalApplyTransfers_(transferIds, approveFirst) {
+  const ids = canonicalIdSet_(transferIds);
   if (!ids.size) return { success: false, message: "Select at least one transfer." };
 
   const lock = LockService.getScriptLock();
@@ -100,14 +205,20 @@ function approveAndApplyTransfersCanonical(transferIds) {
     const approvedBy = Session.getActiveUser().getEmail() || "Personnel Filter user";
     const now = new Date();
     let applied = 0;
+    let skipped = 0;
     const failures = [];
 
     for (let i = 1; i < queue.length; i++) {
       const row = queue[i];
       const id = String(row[0] || "").trim();
       if (!ids.has(id)) continue;
-      const status = String(row[9] || "").toUpperCase();
-      if (["APPLIED","CANCELLED"].includes(status)) continue;
+
+      const status = canonicalDisplayStatus_(row[9]);
+      if (["APPLIED", "CANCELLED"].includes(status)) { skipped++; continue; }
+      if (!approveFirst && status !== "APPROVED") {
+        failures.push(`${String(row[3] || "").trim()}: Transfer must be APPROVED before applying.`);
+        continue;
+      }
 
       const fullName = String(row[3] || "").trim();
       const previousOffice = String(row[5] || "").trim();
@@ -116,18 +227,15 @@ function approveAndApplyTransfersCanonical(transferIds) {
       const match = canonicalFindMatch_(index, fullName, previousOffice);
 
       if (!match) {
-        const msg = "Personnel was not uniquely matched in LIST.";
-        queueSheet.getRange(i + 1, 10).setValue("ERROR");
-        queueSheet.getRange(i + 1, 15).setValue(msg);
-        failures.push(`${fullName}: ${msg}`);
+        canonicalMarkFailed_(queueSheet, i + 1, "Personnel was not uniquely matched in LIST.");
+        failures.push(`${fullName}: Personnel was not uniquely matched in LIST.`);
         continue;
       }
 
       const liveOffice = String(listSheet.getRange(match.rowNumber, 4).getDisplayValue() || "").trim();
       if (previousOffice && canonicalKey_(liveOffice) !== canonicalKey_(previousOffice)) {
         const msg = `Current LIST office is ${liveOffice || "blank"}, not ${previousOffice}.`;
-        queueSheet.getRange(i + 1, 10).setValue("ERROR");
-        queueSheet.getRange(i + 1, 15).setValue(msg);
+        canonicalMarkFailed_(queueSheet, i + 1, msg);
         failures.push(`${fullName}: ${msg}`);
         continue;
       }
@@ -142,13 +250,19 @@ function approveAndApplyTransfersCanonical(transferIds) {
       const campOk = !newCamp || canonicalKey_(verifiedCamp) === canonicalKey_(newCamp);
       if (!officeOk || !campOk) {
         const msg = `LIST verification failed. Office=${verifiedOffice}; Camp=${verifiedCamp}.`;
-        queueSheet.getRange(i + 1, 10).setValue("ERROR");
-        queueSheet.getRange(i + 1, 15).setValue(msg);
+        canonicalMarkFailed_(queueSheet, i + 1, msg);
         failures.push(`${fullName}: ${msg}`);
         continue;
       }
 
-      queueSheet.getRange(i + 1, 10, 1, 4).setValues([["APPLIED", approvedBy, now, now]]);
+      const existingApprovedBy = String(row[10] || "").trim();
+      const existingApprovedDate = row[11] || "";
+      queueSheet.getRange(i + 1, 10, 1, 4).setValues([[
+        "APPLIED",
+        existingApprovedBy || approvedBy,
+        existingApprovedDate || now,
+        now
+      ]]);
       queueSheet.getRange(i + 1, 15).clearContent();
       applied++;
     }
@@ -157,15 +271,38 @@ function approveAndApplyTransfersCanonical(transferIds) {
     return {
       success: failures.length === 0,
       applied,
+      skipped,
       failed: failures.length,
       failures,
-      message: failures.length ? `${applied} transfer(s) applied; ${failures.length} failed.` : `${applied} transfer(s) approved and applied to LIST.`
+      message: failures.length
+        ? `${applied} transfer(s) applied; ${failures.length} failed${skipped ? `; ${skipped} skipped` : ""}.`
+        : `${applied} transfer(s) applied to LIST${skipped ? `; ${skipped} skipped` : ""}.`
     };
   } catch (error) {
     return { success: false, message: error?.message || String(error) };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+function canonicalMarkFailed_(sheet, rowNumber, message) {
+  sheet.getRange(rowNumber, 10).setValue("FAILED");
+  sheet.getRange(rowNumber, 15).setValue(message);
+}
+
+function canonicalIdSet_(transferIds) {
+  return new Set((Array.isArray(transferIds) ? transferIds : [])
+    .map(value => String(value || "").trim())
+    .filter(Boolean));
+}
+
+function canonicalDisplayStatus_(value) {
+  const status = String(value || "PENDING").trim().toUpperCase();
+  return status === "ERROR" ? "FAILED" : status;
+}
+
+function canonicalEmptyStatusCounts_() {
+  return { ALL: 0, PENDING: 0, APPROVED: 0, APPLIED: 0, CANCELLED: 0, FAILED: 0 };
 }
 
 function getCanonicalTransferQueueSheet_(ss) {
@@ -191,9 +328,9 @@ function buildCanonicalPersonnelIndex_(sheet) {
 function canonicalFindMatch_(records, fullName, office) {
   const nameKey = canonicalKey_(fullName);
   const officeKey = canonicalKey_(office);
-  let matches = records.filter(r => canonicalKey_(r.fullName) === nameKey);
+  let matches = records.filter(record => canonicalKey_(record.fullName) === nameKey);
   if (officeKey) {
-    const officeMatches = matches.filter(r => canonicalKey_(r.office) === officeKey);
+    const officeMatches = matches.filter(record => canonicalKey_(record.office) === officeKey);
     if (officeMatches.length) matches = officeMatches;
   }
   return matches.length === 1 ? matches[0] : null;
@@ -206,8 +343,19 @@ function canonicalNormalizeName_(fullName, rank) {
   return name.replace(/\s+/g, " ").trim();
 }
 
-function canonicalKey_(value) { return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
-function canonicalClean_(value) { return String(value == null ? "" : value).trim(); }
+function canonicalKey_(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function canonicalClean_(value) {
+  return String(value == null ? "" : value).trim();
+}
+
 function canonicalTransferId_(orderNumber, index) {
-  return [canonicalClean_(orderNumber) || "AO", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMddHHmmss"), String(index + 1).padStart(3, "0"), Utilities.getUuid().slice(0, 8)].join("-");
+  return [
+    canonicalClean_(orderNumber) || "AO",
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMddHHmmss"),
+    String(index + 1).padStart(3, "0"),
+    Utilities.getUuid().slice(0, 8)
+  ].join("-");
 }
