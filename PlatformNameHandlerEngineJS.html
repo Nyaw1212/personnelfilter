@@ -1,6 +1,7 @@
 <script>
 // Personnel Platform — canonical Name Handler Engine
-// Uses LIST column A / Full Name for display and structured fields only as fallback/sort metadata.
+// Canonical source order mirrors the LIST sheet formula:
+// G (Rank) + I (First Name) + J (Middle Name) + H (Last Name) + K (Suffix).
 
 (function () {
   "use strict";
@@ -8,10 +9,12 @@
   const platform = window.PersonnelPlatform;
   if (!platform) return;
 
-  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
+  const SUFFIXES = new Set(["JR", "SR", "II", "III", "IV", "V"]);
 
   function text(value) {
-    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    return String(value == null ? "" : value)
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function upper(value) {
@@ -20,58 +23,34 @@
 
   function field(person, names) {
     const record = person?.record || person || {};
+
     for (const name of names) {
       const value = person?.[name] ?? record?.[name];
       if (text(value)) return text(value);
     }
+
     return "";
   }
 
-  function canonicalFullName(person) {
-    return upper(field(person, [
-      "displayName",
-      "Display Name",
-      "fullName",
-      "Full Name",
-      "FULL NAME",
-    ]));
-  }
-
-  function parseFallback(value) {
-    const tokens = text(value).split(" ").filter(Boolean);
-    let suffix = "";
-    if (tokens.length > 1 && SUFFIXES.has(upper(tokens.at(-1)))) suffix = tokens.pop();
-    if (tokens.length < 2) return { firstName: tokens[0] || "", middleName: "", lastName: "", suffix };
-    return {
-      firstName: tokens[0] || "",
-      middleName: tokens.slice(1, -1).join(" "),
-      lastName: tokens.at(-1) || "",
-      suffix,
-    };
+  function normalizeSuffix(value) {
+    const suffix = upper(value).replace(/[.,]/g, "");
+    return SUFFIXES.has(suffix) ? suffix : suffix;
   }
 
   function normalize(person) {
-    const rank = field(person, ["rank", "Rank"]);
-    let firstName = field(person, ["firstName", "First Name", "FIRST NAME"]);
-    let middleName = field(person, ["middleName", "Middle Name", "MIDDLE NAME"]);
-    let lastName = field(person, ["lastName", "Last Name", "LAST NAME"]);
-    let suffix = field(person, ["suffix", "Suffix", "SUFFIX"]);
-
-    if (!firstName && !lastName) {
-      const parsed = parseFallback(canonicalFullName(person));
-      firstName = parsed.firstName;
-      middleName = parsed.middleName;
-      lastName = parsed.lastName;
-      suffix = suffix || parsed.suffix;
-    }
-
     return {
-      rank: upper(rank),
-      firstName: upper(firstName),
-      middleName: upper(middleName),
-      lastName: upper(lastName),
-      suffix: upper(suffix).replace(/\.$/, ""),
-      fullName: canonicalFullName(person),
+      rank: upper(field(person, ["rank", "Rank", "RANK"])),
+      firstName: upper(field(person, ["firstName", "First Name", "FIRST NAME"])),
+      middleName: upper(field(person, ["middleName", "Middle Name", "MIDDLE NAME"])),
+      lastName: upper(field(person, ["lastName", "Last Name", "LAST NAME"])),
+      suffix: normalizeSuffix(field(person, [
+        "suffix",
+        "Suffix",
+        "SUFFIX",
+        "nameExtension",
+        "Name Extension",
+        "NAME EXTENSION",
+      ])),
     };
   }
 
@@ -85,49 +64,86 @@
       .toUpperCase();
   }
 
+  function canonicalFullName(person, includeRank = true) {
+    const parts = normalize(person);
+
+    return [
+      includeRank ? parts.rank : "",
+      parts.firstName,
+      parts.middleName,
+      parts.lastName,
+      parts.suffix,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function legacyFullName(person) {
+    return upper(field(person, [
+      "displayName",
+      "Display Name",
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+    ]));
+  }
+
   function formatStructured(person, options = {}) {
     const parts = normalize(person);
     const includeRank = options.includeRank !== false;
     const order = options.order === "LAST_FIRST" ? "LAST_FIRST" : "FIRST_LAST";
-    const middle = options.middleInitial === false ? parts.middleName : middleInitial(parts.middleName);
+    const middle = options.middleInitial === true
+      ? middleInitial(parts.middleName)
+      : parts.middleName;
 
     let name;
+
     if (order === "LAST_FIRST") {
       const left = [parts.lastName, parts.suffix].filter(Boolean).join(" ");
       const right = [parts.firstName, middle].filter(Boolean).join(" ");
       name = left && right ? `${left}, ${right}` : left || right;
     } else {
-      name = [parts.firstName, middle, parts.lastName, parts.suffix].filter(Boolean).join(" ");
+      name = [
+        parts.firstName,
+        middle,
+        parts.lastName,
+        parts.suffix,
+      ].filter(Boolean).join(" ");
     }
 
-    return [includeRank ? parts.rank : "", name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    return [includeRank ? parts.rank : "", name]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function format(person, options = {}) {
-    const fullName = canonicalFullName(person);
+    const structured = formatStructured(person, options);
+    if (structured) return structured;
 
-    // Column A / Full Name is the canonical display return. Structured fields
-    // remain available to SortEngine and as a fallback when column A is blank.
-    if (fullName && options.forceStructured !== true) return fullName;
+    // Compatibility fallback only when structured LIST fields are unavailable.
+    const fallback = legacyFullName(person);
+    if (options.includeRank === false) {
+      const rank = normalize(person).rank;
+      return rank && fallback.startsWith(`${rank} `)
+        ? fallback.slice(rank.length + 1)
+        : fallback;
+    }
 
-    return formatStructured(person, options);
+    return fallback;
   }
 
   const engine = {
-    version: "1.1.0",
+    version: "2.0.0",
     normalize,
     format,
     formatStructured,
     canonicalFullName,
     formatWithoutRank(person, options = {}) {
-      const fullName = canonicalFullName(person);
-      if (fullName && options.forceStructured !== true) {
-        const rank = upper(field(person, ["rank", "Rank"]));
-        return rank && fullName.startsWith(`${rank} `)
-          ? fullName.slice(rank.length + 1)
-          : fullName;
-      }
-      return formatStructured(person, { ...options, includeRank: false });
+      return format(person, { ...options, includeRank: false });
     },
     formatForReport(person, options = {}) {
       return format(person, { ...options, includeRank: true });
@@ -135,20 +151,26 @@
     status() {
       const report = {
         version: this.version,
-        canonicalDisplay: "FULL_NAME_COLUMN_A",
-        structuredSortFields: true,
-        fallbackParsing: true,
+        canonicalOrder: "G + I + J + H + K",
+        canonicalFields: "RANK + FIRST + MIDDLE + LAST + SUFFIX",
+        legacyFullNameFallback: true,
       };
       console.table(report);
       return report;
     },
   };
 
-  if (platform.engines.has("nameHandler")) platform.engines.replace("nameHandler", engine);
-  else platform.engines.register("nameHandler", engine);
+  if (platform.engines.has("nameHandler")) {
+    platform.engines.replace("nameHandler", engine);
+  } else {
+    platform.engines.register("nameHandler", engine);
+  }
 
   window.$PF = window.$PF || {};
   window.$PF.name = engine;
-  console.info("NameHandlerEngine v1.1.0 active: Full Name is canonical display.");
+
+  console.info(
+    "NameHandlerEngine v2.0.0 active: G + I + J + H + K is canonical."
+  );
 })();
 </script>
