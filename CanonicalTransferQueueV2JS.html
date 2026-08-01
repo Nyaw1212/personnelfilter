@@ -1,0 +1,341 @@
+// Canonical Transfer Queue V2.1 — sheet-backed monitoring and actions.
+(function () {
+  "use strict";
+
+  const VERSION = "2.1.0";
+  const ID = {
+    button: "canonicalTransferQueueButtonV2",
+    backdrop: "canonicalTransferQueueBackdropV2",
+    dialog: "canonicalTransferQueueDialogV2",
+    body: "canonicalTransferQueueBodyV2",
+    message: "canonicalTransferQueueMessageV2",
+    tabs: "canonicalTransferQueueTabsV2"
+  };
+  const STATUSES = ["ALL", "PENDING", "APPROVED", "APPLIED", "CANCELLED", "FAILED"];
+  let records = [];
+  let selected = new Set();
+  let activeStatus = "ALL";
+  let busy = false;
+
+  function server(method, ...args) {
+    return new Promise((resolve, reject) => {
+      const runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(error => reject(new Error(error?.message || String(error))));
+      runner[method](...args);
+    });
+  }
+
+  function removeOldQueue_() {
+    [
+      "canonicalTransferQueueButton", "canonicalTransferQueueBackdrop", "canonicalTransferQueueDialog",
+      "openTransferQueueButton", "transferQueueBackdrop", "transferQueueDialog",
+      "pfTransferQueueBackdrop", "pfTransferQueueDialog"
+    ].forEach(id => document.getElementById(id)?.remove());
+    document.querySelectorAll("button").forEach(button => {
+      if (button.id !== ID.button && button.textContent.trim().toLowerCase() === "transfer queue") button.remove();
+    });
+  }
+
+  function install() {
+    removeOldQueue_();
+    styles();
+    launcher();
+    dialog();
+    new MutationObserver(() => {
+      removeOldQueue_();
+      launcher();
+      dialog();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  function launcher() {
+    if (document.getElementById(ID.button)) return;
+    const host = document.querySelector(".window-actions") || document.querySelector("header") || document.body;
+    const button = document.createElement("button");
+    button.id = ID.button;
+    button.type = "button";
+    button.className = "button button-secondary";
+    button.textContent = "Transfer Queue";
+    button.title = `Transfer Queue V${VERSION}`;
+    button.addEventListener("click", open);
+    host.insertBefore(button, host.firstChild);
+  }
+
+  function dialog() {
+    if (document.getElementById(ID.dialog)) return;
+    const backdrop = document.createElement("div");
+    backdrop.id = ID.backdrop;
+    backdrop.className = "ctq2-backdrop";
+    backdrop.hidden = true;
+
+    const modal = document.createElement("section");
+    modal.id = ID.dialog;
+    modal.className = "ctq2-dialog";
+    modal.hidden = true;
+    modal.innerHTML = `
+      <header class="ctq2-header">
+        <div><small>PERSONNEL MOVEMENT · QUEUE V${VERSION}</small><h2>Transfer Queue</h2><p>Live monitoring from the TRANSFER_QUEUE sheet.</p></div>
+        <button type="button" data-close>Close</button>
+      </header>
+      <div id="${ID.message}" class="ctq2-message" hidden></div>
+      <nav id="${ID.tabs}" class="ctq2-tabs"></nav>
+      <div class="ctq2-toolbar">
+        <div><button data-select-visible>Select Visible</button><button data-clear>Clear Selection</button><button data-refresh>Refresh</button></div>
+        <strong data-count>0 selected</strong>
+      </div>
+      <div class="ctq2-wrap"><table class="ctq2-table">
+        <thead><tr><th></th><th>Status</th><th>AO</th><th>Rank / Name</th><th>From</th><th>To</th><th>Document</th><th>Actions</th></tr></thead>
+        <tbody id="${ID.body}"></tbody>
+      </table></div>
+      <footer class="ctq2-actions">
+        <button data-close>Close</button><button data-cancel>Cancel Selected</button><button data-approve>Approve Selected</button><button data-apply>Apply Selected</button><button class="primary" data-approve-apply>Approve & Apply Selected</button>
+      </footer>`;
+
+    backdrop.addEventListener("click", close);
+    modal.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", close));
+    modal.querySelector("[data-refresh]").addEventListener("click", load);
+    modal.querySelector("[data-select-visible]").addEventListener("click", selectVisible);
+    modal.querySelector("[data-clear]").addEventListener("click", clearSelection);
+    modal.querySelector("[data-approve]").addEventListener("click", () => selectedAction("approve"));
+    modal.querySelector("[data-apply]").addEventListener("click", () => selectedAction("apply"));
+    modal.querySelector("[data-approve-apply]").addEventListener("click", () => selectedAction("approveApply"));
+    modal.querySelector("[data-cancel]").addEventListener("click", () => selectedAction("cancel"));
+    document.body.append(backdrop, modal);
+  }
+
+  function open() {
+    selected.clear();
+    activeStatus = "ALL";
+    document.getElementById(ID.backdrop).hidden = false;
+    document.getElementById(ID.dialog).hidden = false;
+    updateCount();
+    load();
+  }
+
+  function close() {
+    document.getElementById(ID.backdrop).hidden = true;
+    document.getElementById(ID.dialog).hidden = true;
+  }
+
+  async function load() {
+    message("Reading TRANSFER_QUEUE...", "working");
+    try {
+      const response = await server("getTransferQueueRecordsCanonical");
+      if (!response?.success) throw new Error(response?.message || "Unable to load queue.");
+      records = Array.isArray(response.records) ? response.records : [];
+      selected = new Set([...selected].filter(id => records.some(record => record.transferId === id)));
+      renderTabs(response.counts || counts());
+      renderRows();
+      updateCount();
+      message(`${records.length} queue record(s) loaded from TRANSFER_QUEUE.`, "success");
+    } catch (error) {
+      message(error.message, "error");
+    }
+  }
+
+  function counts() {
+    const result = Object.fromEntries(STATUSES.map(status => [status, 0]));
+    records.forEach(record => {
+      const status = String(record.status || "PENDING").toUpperCase();
+      result.ALL++;
+      if (status in result) result[status]++;
+    });
+    return result;
+  }
+
+  function renderTabs(serverCounts) {
+    const host = document.getElementById(ID.tabs);
+    host.replaceChildren();
+    const currentCounts = { ...counts(), ...serverCounts };
+    STATUSES.forEach(status => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `ctq2-tab${status === activeStatus ? " active" : ""}`;
+      button.textContent = `${status} ${Number(currentCounts[status] || 0)}`;
+      button.addEventListener("click", () => {
+        activeStatus = status;
+        renderTabs(counts());
+        renderRows();
+      });
+      host.appendChild(button);
+    });
+  }
+
+  function visible() {
+    return activeStatus === "ALL" ? records : records.filter(record => String(record.status).toUpperCase() === activeStatus);
+  }
+
+  function renderRows() {
+    const body = document.getElementById(ID.body);
+    body.replaceChildren();
+    const rows = visible();
+    if (!rows.length) {
+      const row = body.insertRow();
+      const cell = row.insertCell();
+      cell.colSpan = 8;
+      cell.className = "ctq2-empty";
+      cell.textContent = `No ${activeStatus === "ALL" ? "" : activeStatus.toLowerCase() + " "}records.`;
+      return;
+    }
+
+    rows.forEach(record => {
+      const status = String(record.status || "PENDING").toUpperCase();
+      const row = body.insertRow();
+      const checkboxCell = row.insertCell();
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = record.transferId;
+      checkbox.disabled = ["APPLIED", "CANCELLED"].includes(status);
+      checkbox.checked = selected.has(record.transferId);
+      checkbox.addEventListener("change", () => {
+        checkbox.checked ? selected.add(checkbox.value) : selected.delete(checkbox.value);
+        updateCount();
+      });
+      checkboxCell.appendChild(checkbox);
+
+      const statusCell = row.insertCell();
+      statusCell.innerHTML = `<span class="ctq2-status is-${status.toLowerCase()}">${status}</span>`;
+      row.insertCell().textContent = record.orderNumber || "—";
+      row.insertCell().textContent = [record.rank, record.fullName].filter(Boolean).join(" ");
+      row.insertCell().textContent = [record.previousOffice, record.previousCamp].filter(Boolean).join(" / ") || "—";
+      row.insertCell().textContent = [record.newOffice, record.newCamp].filter(Boolean).join(" / ") || "—";
+
+      const documentCell = row.insertCell();
+      if (record.documentUrl) {
+        const link = document.createElement("a");
+        link.href = record.documentUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open AO";
+        documentCell.appendChild(link);
+      } else documentCell.textContent = "—";
+
+      const actions = row.insertCell();
+      actions.className = "ctq2-row-actions";
+      if (["PENDING", "FAILED"].includes(status)) {
+        actions.append(actionButton("Approve", () => act("approve", [record.transferId])));
+        actions.append(actionButton("Approve & Apply", () => act("approveApply", [record.transferId]), true));
+      } else if (status === "APPROVED") {
+        actions.append(actionButton("Apply", () => act("apply", [record.transferId]), true));
+      }
+      if (!["APPLIED", "CANCELLED"].includes(status)) actions.append(actionButton("Cancel", () => act("cancel", [record.transferId])));
+      if (!actions.children.length) actions.textContent = "—";
+      if (record.errorMessage) row.title = record.errorMessage;
+    });
+  }
+
+  function actionButton(label, handler, primary = false) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = primary ? "ctq2-mini primary" : "ctq2-mini";
+    button.textContent = label;
+    button.addEventListener("click", handler);
+    return button;
+  }
+
+  function selectVisible() {
+    visible().forEach(record => {
+      const status = String(record.status || "PENDING").toUpperCase();
+      if (!["APPLIED", "CANCELLED"].includes(status)) selected.add(record.transferId);
+    });
+    renderRows();
+    updateCount();
+  }
+
+  function clearSelection() {
+    selected.clear();
+    renderRows();
+    updateCount();
+  }
+
+  function selectedAction(action) {
+    if (!selected.size) return message("Select at least one transfer.", "error");
+    return act(action, [...selected]);
+  }
+
+  async function act(action, ids) {
+    if (busy || !ids.length) return;
+    const config = {
+      approve: ["approveTransfersCanonical", "approve"],
+      apply: ["applyTransfersCanonical", "apply"],
+      approveApply: ["approveAndApplyTransfersCanonical", "approve and apply"],
+      cancel: ["cancelTransfersCanonical", "cancel"]
+    }[action];
+    if (!config) return;
+    if (!confirm(`${config[1][0].toUpperCase() + config[1].slice(1)} ${ids.length} transfer(s)?`)) return;
+
+    busy = true;
+    disableButtons(true);
+    message(`${config[1][0].toUpperCase() + config[1].slice(1)}ing ${ids.length} transfer(s)...`, "working");
+    try {
+      const response = await server(config[0], ids);
+      message(response?.message || "Transfer action completed.", response?.success ? "success" : "error");
+      selected.clear();
+      await load();
+      if (["apply", "approveApply"].includes(action)) await refreshPersonnel();
+    } catch (error) {
+      message(error.message, "error");
+    } finally {
+      busy = false;
+      disableButtons(false);
+    }
+  }
+
+  async function refreshPersonnel() {
+    try {
+      if (typeof window.reloadPersonnelDataFromSheet === "function") {
+        await window.reloadPersonnelDataFromSheet({ showStatus: false });
+        return;
+      }
+      if (window.PersonnelAPI?.loadPersonnel && window.PersonnelState) {
+        const response = await window.PersonnelAPI.loadPersonnel();
+        const next = Array.isArray(response?.records) ? response.records : [];
+        if (!Array.isArray(window.PersonnelState.records)) window.PersonnelState.records = [];
+        window.PersonnelState.records.splice(0, window.PersonnelState.records.length, ...next);
+        if (typeof window.populateFilterValuesFromRecords === "function") window.populateFilterValuesFromRecords();
+        if (typeof window.renderGeneralFilterGroups === "function") window.renderGeneralFilterGroups();
+        if (typeof window.filterAndRenderPersonnel === "function") window.filterAndRenderPersonnel();
+        return;
+      }
+      if (typeof window.initializePersonnelApp === "function") await window.initializePersonnelApp();
+    } catch (error) {
+      console.error("Transfer applied, but personnel table refresh failed:", error);
+      message(`Transfer applied. Table refresh failed: ${error.message}`, "error");
+    }
+  }
+
+  function updateCount() {
+    const element = document.querySelector(`#${ID.dialog} [data-count]`);
+    if (element) element.textContent = `${selected.size} selected`;
+  }
+
+  function disableButtons(disabled) {
+    document.querySelectorAll(`#${ID.dialog} button`).forEach(button => {
+      if (!button.hasAttribute("data-close")) button.disabled = disabled;
+    });
+  }
+
+  function message(text, type) {
+    const element = document.getElementById(ID.message);
+    element.hidden = false;
+    element.className = `ctq2-message is-${type}`;
+    element.textContent = text;
+  }
+
+  function styles() {
+    if (document.getElementById("canonicalTransferQueueV2Styles")) return;
+    const style = document.createElement("style");
+    style.id = "canonicalTransferQueueV2Styles";
+    style.textContent = `
+      .ctq2-backdrop{position:fixed;inset:0;background:rgba(7,25,12,.52);z-index:16000}.ctq2-dialog{position:fixed;inset:4vh 3vw;z-index:16001;background:#f7fcf8;border-radius:18px;padding:18px;overflow:auto;box-shadow:0 22px 75px #0006}
+      .ctq2-header,.ctq2-toolbar,.ctq2-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.ctq2-header h2{margin:2px 0}.ctq2-header p{margin:0;color:#58705d}.ctq2-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.ctq2-tab{border:1px solid #c4d9c9;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800}.ctq2-tab.active{background:#236b39;color:#fff;border-color:#236b39}
+      .ctq2-toolbar{margin:10px 0}.ctq2-toolbar>div{display:flex;gap:7px;flex-wrap:wrap}.ctq2-wrap{overflow:auto;border:1px solid #c9dfce;border-radius:12px;background:#fff}.ctq2-table{width:100%;border-collapse:collapse;min-width:1120px}.ctq2-table th,.ctq2-table td{padding:9px;border-bottom:1px solid #e4eee6;text-align:left;vertical-align:middle}.ctq2-table th{background:#e5f3e8;position:sticky;top:0}.ctq2-actions{justify-content:flex-end;margin-top:12px;flex-wrap:wrap}.ctq2-actions .primary,.ctq2-mini.primary{background:#236b39;color:#fff;border-color:#236b39}.ctq2-row-actions{display:flex;gap:5px;flex-wrap:wrap}.ctq2-mini{font-size:11px;padding:5px 7px}.ctq2-status{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900}.ctq2-status.is-pending{background:#fff0a6}.ctq2-status.is-approved{background:#dbe7ff;color:#174b9b}.ctq2-status.is-applied{background:#d6f2dc;color:#175a27}.ctq2-status.is-cancelled{background:#e5e5e5;color:#555}.ctq2-status.is-failed{background:#ffdede;color:#8a2222}.ctq2-message{padding:9px;margin:10px 0;border-radius:8px}.ctq2-message.is-success{background:#ddf4e2}.ctq2-message.is-error{background:#ffe0e0}.ctq2-message.is-working{background:#fff2b8}.ctq2-empty{text-align:center;padding:30px!important}
+    `;
+    document.head.appendChild(style);
+  }
+
+  window.CanonicalTransferQueueV2 = { version: VERSION, open, reload: load };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
+  else install();
+})();
