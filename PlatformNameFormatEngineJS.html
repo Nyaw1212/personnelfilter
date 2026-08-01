@@ -1,6 +1,6 @@
 <script>
-// Personnel Platform — reusable NameFormatEngine
-// Uses canonical structured name fields, uppercase output, and suffix-last order.
+// Personnel Platform — Name Format controls
+// Delegates structured formatting to NameHandlerEngine and keeps a safe fallback.
 
 (function () {
   "use strict";
@@ -12,158 +12,34 @@
   const ROOT_ID = "reassignmentPluginV1Root";
   const SCOPE = "reassignment-v1";
   const MODES = ["FIRST_INITIAL_LAST", "LAST_FIRST_INITIAL"];
-  const SUFFIXES = new Set(["JR", "SR", "II", "III", "IV", "V"]);
   let currentMode = sessionStorage.getItem(STORAGE_KEY) || "FIRST_INITIAL_LAST";
   let scheduled = false;
 
   function text(value) {
-    return String(value == null ? "" : value)
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function upper(value) {
-    return text(value).toUpperCase();
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   }
 
   function normalizeMode(value) {
     return MODES.includes(value) ? value : "FIRST_INITIAL_LAST";
   }
 
-  function normalizeSuffix(value) {
-    const normalized = upper(value).replace(/[.,]/g, "");
-    return SUFFIXES.has(normalized) ? normalized : "";
+  function nameHandler() {
+    return platform.engines.get("nameHandler") || window.$PF?.name;
   }
 
-  function parseName(value) {
-    const raw = text(value);
-    if (!raw) return { first: "", middles: [], last: "", suffix: "" };
-
-    let tokens;
-    if (raw.includes(",")) {
-      const [lastPart, givenPart] = raw.split(/,(.+)/).map(text);
-      tokens = [
-        ...givenPart.split(" ").filter(Boolean),
-        ...lastPart.split(" ").filter(Boolean),
-      ];
-    } else {
-      tokens = raw.split(" ").filter(Boolean);
+  function formatPerson(person, mode = currentMode, includeRank = false) {
+    const handler = nameHandler();
+    if (handler?.format) {
+      return handler.format(person, {
+        includeRank,
+        middleInitial: true,
+        order: normalizeMode(mode) === "LAST_FIRST_INITIAL" ? "LAST_FIRST" : "FIRST_LAST",
+      });
     }
 
-    let suffix = "";
-    tokens = tokens.filter(token => {
-      const candidate = normalizeSuffix(token);
-      if (!suffix && candidate) {
-        suffix = candidate;
-        return false;
-      }
-      return true;
-    });
-
-    if (tokens.length === 1) {
-      return {
-        first: upper(tokens[0]),
-        middles: [],
-        last: "",
-        suffix,
-      };
-    }
-
-    return {
-      first: upper(tokens[0]),
-      middles: tokens.slice(1, -1).map(upper),
-      last: upper(tokens.at(-1)),
-      suffix,
-    };
-  }
-
-  function initials(values) {
-    return (values || [])
-      .map(value => upper(value).replace(/\./g, ""))
-      .filter(Boolean)
-      .map(value => value.charAt(0))
-      .join(" ");
-  }
-
-  function structuredParts(item) {
-    const record = item?.record || item || {};
-    const first = upper(
-      item?.firstName ||
-      record["First Name"] ||
-      record.FirstName
-    );
-    const middle = upper(
-      item?.middleName ||
-      record["Middle Name"] ||
-      record.MiddleName
-    );
-    const last = upper(
-      item?.lastName ||
-      record["Last Name"] ||
-      record.LastName
-    );
-    const suffix = normalizeSuffix(
-      item?.suffix ||
-      record.Suffix ||
-      record["Name Extension"]
-    );
-
-    if (first || middle || last || suffix) {
-      return {
-        first,
-        middles: middle ? middle.split(/\s+/).filter(Boolean) : [],
-        last,
-        suffix,
-      };
-    }
-
-    return parseName(
-      item?.fullName ||
-      record["Full Name"] ||
-      record.FullName
-    );
-  }
-
-  function formatParts(parts, mode = currentMode) {
-    const normalized = {
-      first: upper(parts?.first),
-      middles: (parts?.middles || []).map(upper).filter(Boolean),
-      last: upper(parts?.last),
-      suffix: normalizeSuffix(parts?.suffix),
-    };
-
-    const middle = initials(normalized.middles);
-
-    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
-      const given = [
-        normalized.first,
-        middle,
-        normalized.suffix,
-      ].filter(Boolean).join(" ");
-
-      return normalized.last
-        ? `${normalized.last}${given ? `, ${given}` : ""}`
-        : given;
-    }
-
-    return [
-      normalized.first,
-      middle,
-      normalized.last,
-      normalized.suffix,
-    ].filter(Boolean).join(" ");
-  }
-
-  function formatName(value, mode = currentMode) {
-    return formatParts(parseName(value), mode);
-  }
-
-  function formatPerson(item, mode = currentMode) {
-    return formatParts(structuredParts(item), mode);
-  }
-
-  function personRank(item) {
-    return upper(item?.rank || item?.record?.Rank || item?.Rank);
+    const rank = text(person?.rank || person?.record?.Rank || person?.Rank);
+    const fullName = text(person?.fullName || person?.record?.["Full Name"] || person?.["Full Name"]);
+    return [includeRank ? rank : "", fullName].filter(Boolean).join(" ").toUpperCase();
   }
 
   function updateVisibleNames() {
@@ -177,21 +53,13 @@
     root.querySelectorAll(".rp1-person").forEach(row => {
       const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
       const label = row.querySelector(".rp1-person-name");
-      const person = people.get(key) || {};
-      if (!label || !key) return;
-      label.textContent = [personRank(person), formatPerson(person)]
-        .filter(Boolean)
-        .join(" ");
+      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
     });
 
     root.querySelectorAll(".rp1-assigned").forEach(row => {
       const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
       const label = row.querySelector("span");
-      const person = people.get(key) || {};
-      if (!label || !key) return;
-      label.textContent = [personRank(person), formatPerson(person)]
-        .filter(Boolean)
-        .join(" ");
+      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
     });
   }
 
@@ -255,13 +123,14 @@
   }
 
   function formatPayload(payload) {
-    if (!payload || upper(payload.reportType) !== "REASSIGNMENT") return payload;
+    if (!payload || text(payload.reportType).toUpperCase() !== "REASSIGNMENT") return payload;
     const next = structuredClone(payload);
     next.nameFormat = currentMode;
     next.personnel = (Array.isArray(next.personnel) ? next.personnel : []).map(person => ({
       ...person,
       originalFullName: text(person.originalFullName || person.fullName),
-      fullName: formatPerson(person),
+      fullName: formatPerson(person, currentMode, false),
+      displayName: formatPerson(person, currentMode, true),
     }));
     return next;
   }
@@ -286,12 +155,10 @@
   platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
   platform.events.on("selection:changed", scheduleDecorate);
 
-  const NameFormatEngine = {
-    version: "1.1.0",
+  const engine = {
+    version: "2.0.0",
     modes: [...MODES],
-    parse: parseName,
-    format: formatName,
-    formatPerson,
+    format: formatPerson,
     formatPayload,
     get mode() { return currentMode; },
     setMode(value) {
@@ -305,9 +172,7 @@
       const report = {
         version: this.version,
         mode: currentMode,
-        modes: MODES.length,
-        uppercase: true,
-        suffixLast: true,
+        nameHandler: Boolean(nameHandler()),
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -315,12 +180,12 @@
     },
   };
 
-  if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", NameFormatEngine);
-  else platform.engines.register("nameFormat", NameFormatEngine);
+  if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", engine);
+  else platform.engines.register("nameFormat", engine);
 
   window.$PF = window.$PF || {};
-  window.$PF.nameFormat = NameFormatEngine;
+  window.$PF.nameFormat = engine;
   scheduleDecorate();
-  console.info("NameFormatEngine v1.1.0 active: uppercase names and suffix-last order.");
+  console.info("NameFormatEngine v2.0.0 active with NameHandlerEngine fallback.");
 })();
 </script>
