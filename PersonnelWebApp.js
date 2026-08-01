@@ -30,7 +30,7 @@ function include(filename) {
     "PerformanceClientJS",
     "PersonnelDataRefreshFixJS",
     "PersonnelTableV2JS",
-    "CanonicalTransferQueueV2JS"
+    "CanonicalTransferQueueClientJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
@@ -62,6 +62,7 @@ function includePlatformBundle() {
     "PlatformReportEngineJS",
     "PlatformReportPreviewUIJS",
     "PlatformReportGenerationBridgeJS",
+    "ReportToastDedupFixJS",
     "ReassignmentPluginV1JS",
     "ReassignmentPluginV1GroupChangeFixJS",
     "ReassignmentPluginV1Phase3JS",
