@@ -1,6 +1,7 @@
 <script>
 // Personnel Platform — Apps Script report generation bridge
-// Connects Report Designer generation requests to Stage1WorkflowServer.js.
+// Connects Report Designer generation requests to Stage1WorkflowServer.js
+// and writes successful reassignment reports to the canonical TRANSFER_QUEUE.
 
 (function () {
   "use strict";
@@ -46,6 +47,11 @@
         fullName: text(person?.fullName),
         from: fromValue(person),
         to: toValue(person),
+        fromOffice: text(person?.fromOffice),
+        fromCamp: text(person?.fromCamp),
+        toOffice: text(person?.toOffice),
+        toCamp: text(person?.toCamp),
+        transferMode: text(person?.transferMode),
         notes: text(person?.notes),
       })),
     };
@@ -66,6 +72,47 @@
     return result;
   }
 
+  function enqueueGeneratedTransfer_(draft, response, result) {
+    const payload = serverPayload(draft);
+
+    if (!payload.personnel.length) {
+      console.warn("Generated report has no personnel to enqueue.", result);
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(queueResponse => {
+        if (!queueResponse?.success) {
+          console.error(
+            "Report generated, but transfer queue write failed:",
+            queueResponse?.message || queueResponse
+          );
+          platform.events.emit("transfer-queue:enqueue-failed", {
+            draftId: draft?.id,
+            result,
+            response: queueResponse,
+          });
+          return;
+        }
+
+        console.info("Generated report added to TRANSFER_QUEUE.", queueResponse);
+        platform.events.emit("transfer-queue:enqueued", {
+          draftId: draft?.id,
+          result,
+          response: queueResponse,
+        });
+      })
+      .withFailureHandler(error => {
+        console.error("Report generated, but transfer queue request failed:", error);
+        platform.events.emit("transfer-queue:enqueue-failed", {
+          draftId: draft?.id,
+          result,
+          error,
+        });
+      })
+      .enqueueTransferBatchCanonical(payload, response);
+  }
+
   platform.events.on("report:generation-requested", request => {
     if (document.querySelector('meta[name="dev-mode"]')) return;
 
@@ -79,6 +126,7 @@
     }
 
     inFlight.add(draftId);
+    const payload = serverPayload(draft);
 
     google.script.run
       .withSuccessHandler(response => {
@@ -97,6 +145,10 @@
           generatedAt: new Date().toISOString(),
         });
 
+        // Direct integration: every successfully generated reassignment is
+        // persisted to the canonical TRANSFER_QUEUE sheet.
+        enqueueGeneratedTransfer_(draft, response, result);
+
         window.$PF.reportPreview?.close?.();
         console.info("Apps Script report generation completed.", result);
       })
@@ -104,11 +156,11 @@
         inFlight.delete(draftId);
         fail(draftId, error?.message || String(error || "Report generation failed."));
       })
-      .sendStage1ReassignmentToAogen(serverPayload(draft));
+      .sendStage1ReassignmentToAogen(payload);
   });
 
   window.$PF.reportGenerationBridge = {
-    version: "1.0.0",
+    version: "1.1.0",
     payload: draftOrId => serverPayload(
       typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId
     ),
@@ -117,12 +169,13 @@
         version: this.version,
         mode: document.querySelector('meta[name="dev-mode"]') ? "DEVELOPER" : "APPS_SCRIPT",
         inFlight: inFlight.size,
+        queueEndpoint: "enqueueTransferBatchCanonical",
       };
       console.table(state);
       return state;
     },
   };
 
-  console.info("ReportGenerationBridge v1.0.0 active.");
+  console.info("ReportGenerationBridge v1.1.0 active with canonical queue integration.");
 })();
 </script>
