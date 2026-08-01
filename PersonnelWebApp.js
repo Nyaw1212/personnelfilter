@@ -31,6 +31,7 @@ function include(filename) {
     "PersonnelDataRefreshFixJS",
     "PersonnelTableV2JS",
     "CanonicalTransferQueueClientJS",
+    "TransferQueueThemeSyncJS",
     "MultiTextSearchJS",
     "MultiTextSearchPerformanceFixJS"
   ];
