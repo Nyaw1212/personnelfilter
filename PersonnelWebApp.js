@@ -28,6 +28,7 @@ function include(filename) {
     "Stage1GeneratedReportEditorJS",
     "AOSelectionBulkControlsJS",
     "PerformanceClientJS",
+    "PersonnelDataRefreshFixJS",
     "TransferQueueJS",
     "TransferQueueCancelPatchJS"
   ];
