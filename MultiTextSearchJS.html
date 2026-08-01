@@ -1,0 +1,171 @@
+//----------------------------------
+// Multi-text personnel search
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const MODE_KEY = "personnelFilter.multiSearch.mode.v1";
+  let mode = "ANY";
+
+  function normalize_(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }
+
+  function terms_(value) {
+    const seen = new Set();
+    return String(value == null ? "" : value)
+      .split(/[\n,;]+/)
+      .map(normalize_)
+      .filter(term => {
+        if (!term || seen.has(term)) return false;
+        seen.add(term);
+        return true;
+      });
+  }
+
+  function recordText_(record) {
+    return PERSONNEL_APP_CONFIG.searchableColumns
+      .map(column => normalize_(record?.[column]))
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  function installFilterOverride_() {
+    window.recordMatchesSearch_ = function multiTextRecordMatchesSearch(record, searchValue) {
+      const terms = terms_(searchValue);
+      if (!terms.length) return true;
+
+      const haystack = recordText_(record);
+      return mode === "ALL"
+        ? terms.every(term => haystack.includes(term))
+        : terms.some(term => haystack.includes(term));
+    };
+  }
+
+  function readMode_() {
+    try {
+      const stored = localStorage.getItem(MODE_KEY);
+      if (stored === "ALL" || stored === "ANY") mode = stored;
+    } catch (_) {}
+  }
+
+  function saveMode_() {
+    try { localStorage.setItem(MODE_KEY, mode); } catch (_) {}
+  }
+
+  function applySearch_() {
+    const field = document.getElementById("searchInput");
+    if (!field || !window.PersonnelState) return;
+    PersonnelState.filters.search = field.value;
+    if (typeof window.handleFilterChange === "function") {
+      window.handleFilterChange();
+    } else if (typeof window.filterAndRenderPersonnel === "function") {
+      window.filterAndRenderPersonnel();
+    }
+    updateCounter_();
+  }
+
+  function updateCounter_() {
+    const field = document.getElementById("searchInput");
+    const counter = document.getElementById("multiSearchCounter");
+    if (!field || !counter) return;
+    const count = terms_(field.value).length;
+    counter.textContent = count
+      ? `${count} unique search term${count === 1 ? "" : "s"} · Match ${mode}`
+      : `Paste names or keywords · Match ${mode}`;
+  }
+
+  function renderMode_() {
+    document.querySelectorAll("[data-multi-search-mode]").forEach(button => {
+      const active = button.dataset.multiSearchMode === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    updateCounter_();
+  }
+
+  function installStyles_() {
+    if (document.getElementById("multiTextSearchStyles")) return;
+    const style = document.createElement("style");
+    style.id = "multiTextSearchStyles";
+    style.textContent = `
+      .multi-search-shell{flex:1;display:grid;gap:7px;min-width:280px}
+      .multi-search-box{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border:1px solid rgba(31,111,52,.2);border-radius:14px;background:#fff}
+      .multi-search-box .search-icon{padding-top:3px}
+      #searchInput.multi-search-input{width:100%;min-height:70px;max-height:150px;resize:vertical;border:0;outline:0;background:transparent;font:inherit;line-height:1.35}
+      .multi-search-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:0 2px}
+      .multi-search-counter{font-size:11px;font-weight:750;color:#52705a}
+      .multi-search-modes{display:flex;gap:5px}
+      .multi-search-mode{border:1px solid rgba(31,111,52,.2);border-radius:999px;background:#fff;padding:5px 9px;font:inherit;font-size:10px;font-weight:850;color:#275d36;cursor:pointer}
+      .multi-search-mode.active{background:#236b39;color:#fff;border-color:#236b39}
+      @media(max-width:700px){.multi-search-shell{min-width:100%}.search-row{flex-wrap:wrap}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function installUi_() {
+    const original = document.getElementById("searchInput");
+    if (!original || original.classList.contains("multi-search-input")) return;
+
+    const oldBox = original.closest(".search-box");
+    if (!oldBox) return;
+
+    const shell = document.createElement("div");
+    shell.className = "multi-search-shell";
+
+    const box = document.createElement("div");
+    box.className = "multi-search-box";
+    box.innerHTML = '<span class="search-icon">⌕</span>';
+
+    const textarea = document.createElement("textarea");
+    textarea.id = "searchInput";
+    textarea.className = "multi-search-input";
+    textarea.placeholder = "Search one or many names/keywords — separate with new lines, commas, or semicolons";
+    textarea.autocomplete = "off";
+    textarea.value = original.value || PersonnelState?.filters?.search || "";
+    textarea.addEventListener("input", applySearch_);
+    box.appendChild(textarea);
+
+    const tools = document.createElement("div");
+    tools.className = "multi-search-tools";
+    tools.innerHTML = `
+      <span id="multiSearchCounter" class="multi-search-counter"></span>
+      <span class="multi-search-modes" aria-label="Multi-search match mode">
+        <button type="button" class="multi-search-mode" data-multi-search-mode="ANY">Match ANY</button>
+        <button type="button" class="multi-search-mode" data-multi-search-mode="ALL">Match ALL</button>
+      </span>`;
+
+    tools.querySelectorAll("[data-multi-search-mode]").forEach(button => {
+      button.addEventListener("click", () => {
+        mode = button.dataset.multiSearchMode;
+        saveMode_();
+        renderMode_();
+        applySearch_();
+      });
+    });
+
+    shell.append(box, tools);
+    oldBox.replaceWith(shell);
+    renderMode_();
+  }
+
+  function install_() {
+    readMode_();
+    installStyles_();
+    installFilterOverride_();
+    installUi_();
+  }
+
+  window.getMultiSearchTerms = value => terms_(value);
+  window.getMultiSearchMode = () => mode;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
