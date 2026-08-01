@@ -48,7 +48,7 @@
       google.script.run
         .withSuccessHandler(resolve)
         .withFailureHandler(error => reject(new Error(error?.message || String(error))))
-        .getPersonnelWebAppDataOptimized();
+        .getPersonnelTableV2Data();
     });
   }
 
@@ -72,7 +72,7 @@
       .ptv2-toolbar { display:flex; align-items:center; gap:10px; padding:12px 18px; background:#f8fcf9; border-bottom:1px solid #c8ddce; }
       .ptv2-search { flex:1; min-width:180px; border:1px solid #aac6b2; border-radius:10px; padding:10px 12px; font-size:14px; background:#fff; }
       .ptv2-count { white-space:nowrap; font-weight:800; color:#245735; }
-      .ptv2-status { min-width:180px; text-align:right; color:#55725d; font-size:12px; }
+      .ptv2-status { min-width:260px; text-align:right; color:#55725d; font-size:12px; }
       .ptv2-table-wrap { flex:1; overflow:auto; margin:14px 18px 18px; background:#fff; border:1px solid #b9d2c0; border-radius:12px; }
       .ptv2-table { width:100%; border-collapse:separate; border-spacing:0; font-size:12px; }
       .ptv2-table th { position:sticky; top:0; z-index:2; background:#dcefe0; color:#174527; padding:10px; text-align:left; border-bottom:1px solid #a9c9b0; white-space:nowrap; }
@@ -94,7 +94,7 @@
       <header class="ptv2-header">
         <div class="ptv2-title">
           <h2>Personnel Table V2</h2>
-          <p>Independent live table reading FULL NAME directly from the LIST sheet.</p>
+          <p>Uncached direct read from the current LIST sheet.</p>
         </div>
         <div class="ptv2-actions">
           <button id="ptv2Reload" class="ptv2-btn primary" type="button">Reload Data</button>
@@ -138,7 +138,7 @@
     button.addEventListener("click", async () => {
       const root = document.getElementById("personnelTableV2Root");
       root.hidden = false;
-      if (!V2.records.length) await reload();
+      await reload();
     });
     actions.insertBefore(button, actions.firstChild);
   }
@@ -183,14 +183,22 @@
     const button = document.getElementById("ptv2Reload");
     const status = document.getElementById("ptv2Status");
     if (button) { button.disabled = true; button.textContent = "Loading..."; }
-    if (status) status.textContent = "Reading Google Sheets...";
+    if (status) status.textContent = "Directly reading Google Sheets...";
 
     try {
       const response = await loadFromServer();
       V2.records = Array.isArray(response?.records) ? response.records : [];
       filterAndRender();
-      if (status) status.textContent = `Loaded ${V2.records.length.toLocaleString()} rows at ${new Date().toLocaleTimeString()}`;
-      console.info("Personnel Table V2 loaded", V2.records.length, "rows");
+      if (status) {
+        status.textContent = `${response?.source || "direct"} • ${response?.sheetName || "sheet"} • ${V2.records.length.toLocaleString()} rows • ${new Date().toLocaleTimeString()}`;
+      }
+      console.info(
+        "Personnel Table V2 loaded",
+        V2.records.length,
+        "rows",
+        response?.source,
+        response?.loadedAt
+      );
     } catch (error) {
       console.error("Personnel Table V2 load failed:", error);
       V2.records = [];
