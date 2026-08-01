@@ -1,0 +1,122 @@
+<script>
+// Report generation retry safety.
+// Prevents the background bridge from clearing the submitted personnel
+// until generation succeeds. Failed reports keep the previous reassignment
+// selection available so the user can correct the issue and retry.
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const events = platform?.events;
+  const selection = platform?.engines?.get?.("selection");
+  if (!platform || !events || events.__retrySafetyInstalled) return;
+
+  let suppressImmediateClear = false;
+  const originalEmit = events.emit.bind(events);
+  const originalSelectionClear = selection?.clear?.bind(selection);
+  const originalSelectionReset = selection?.reset?.bind(selection);
+  const originalDeselectAll = typeof window.deselectAllPersonnelFromAo_ === "function"
+    ? window.deselectAllPersonnelFromAo_.bind(window)
+    : null;
+
+  function rerenderPersonnel_() {
+    try { window.filterAndRenderPersonnel?.(); } catch (_) {}
+    try { window.renderPreviewTable?.(); } catch (_) {}
+  }
+
+  function clearSubmittedSelection_() {
+    try {
+      if (originalDeselectAll) originalDeselectAll();
+      else if (originalSelectionClear) originalSelectionClear("ao-cart");
+      else if (originalSelectionReset) originalSelectionReset("ao-cart");
+    } catch (error) {
+      console.warn("Unable to clear completed report selection:", error);
+    }
+
+    document.querySelectorAll(
+      '[data-personnel-check], [data-ao-check], input[type="checkbox"][data-personnel-key]'
+    ).forEach(box => { box.checked = false; });
+
+    rerenderPersonnel_();
+  }
+
+  function reopenPreviousReassignment_() {
+    const plugin = platform.plugins?.get?.("reassignment-v1");
+    if (plugin?.open) {
+      plugin.open();
+      return;
+    }
+
+    const launch = document.querySelector("[data-rp1-launch]");
+    if (launch) launch.click();
+  }
+
+  function addRetryAction_() {
+    const toast = document.getElementById("reportGenerationProgressToast");
+    if (!toast || toast.querySelector("[data-retry-reassignment]")) return;
+
+    let actions = toast.querySelector(".rg-toast-actions");
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "rg-toast-actions";
+      toast.appendChild(actions);
+    }
+
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.dataset.retryReassignment = "true";
+    retry.textContent = "Return to Reassignment";
+    retry.addEventListener("click", reopenPreviousReassignment_);
+    actions.insertBefore(retry, actions.firstChild);
+  }
+
+  if (selection?.clear) {
+    selection.clear = function patchedSelectionClear(scopeId) {
+      if (suppressImmediateClear && String(scopeId || "") === "ao-cart") return;
+      return originalSelectionClear(scopeId);
+    };
+  }
+
+  if (selection?.reset) {
+    selection.reset = function patchedSelectionReset(scopeId) {
+      if (suppressImmediateClear && String(scopeId || "") === "ao-cart") return;
+      return originalSelectionReset(scopeId);
+    };
+  }
+
+  if (originalDeselectAll) {
+    window.deselectAllPersonnelFromAo_ = function patchedDeselectAllPersonnelFromAo_() {
+      if (suppressImmediateClear) return;
+      return originalDeselectAll();
+    };
+  }
+
+  events.emit = function retrySafeEmit(eventName, payload) {
+    const name = String(eventName || "");
+
+    if (name === "report:generation-requested") {
+      suppressImmediateClear = true;
+      try {
+        return originalEmit(eventName, payload);
+      } finally {
+        suppressImmediateClear = false;
+      }
+    }
+
+    const result = originalEmit(eventName, payload);
+
+    if (name === "report:generation-completed") {
+      clearSubmittedSelection_();
+    } else if (name === "report:generation-failed") {
+      // The failure toast is created immediately after this event is emitted.
+      // Wait one task, then add an action that returns to the preserved list.
+      setTimeout(addRetryAction_, 0);
+    }
+
+    return result;
+  };
+
+  events.__retrySafetyInstalled = true;
+  console.info("ReportGenerationRetrySafety v1.0.0 active.");
+})();
+</script>
