@@ -30,7 +30,8 @@ function include(filename) {
     "PerformanceClientJS",
     "PersonnelDataRefreshFixJS",
     "PersonnelTableV2JS",
-    "CanonicalTransferQueueClientJS"
+    "CanonicalTransferQueueClientJS",
+    "MultiTextSearchJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
