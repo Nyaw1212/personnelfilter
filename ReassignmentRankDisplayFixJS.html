@@ -1,0 +1,62 @@
+<script>
+// Reassignment V1 display fix — remove duplicated rank prefixes.
+
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  let observer = null;
+  let scheduled = false;
+
+  function cleanLabel(value) {
+    const text = String(value || "").trim();
+    return text.replace(/^(\S+)\s+\1\b\s*/i, "$1 ");
+  }
+
+  function normalizeRankLabels(root) {
+    if (!root) return;
+    root.querySelectorAll(".rp1-person-name, .rp1-assigned > span").forEach(node => {
+      const cleaned = cleanLabel(node.textContent);
+      if (cleaned !== node.textContent) node.textContent = cleaned;
+    });
+  }
+
+  function schedule(root) {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      normalizeRankLabels(root || document.getElementById(ROOT_ID));
+    });
+  }
+
+  function attach() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return false;
+    if (root.dataset.rankDisplayFix === "true") {
+      schedule(root);
+      return true;
+    }
+
+    root.dataset.rankDisplayFix = "true";
+    observer = new MutationObserver(() => schedule(root));
+    observer.observe(root, { childList: true, subtree: true });
+    schedule(root);
+    return true;
+  }
+
+  document.addEventListener("click", event => {
+    if (event.target.closest?.("[data-rp1-launch], #reassignmentPluginV1Root")) {
+      queueMicrotask(attach);
+    }
+  }, true);
+
+  document.addEventListener("change", event => {
+    if (event.target.closest?.("#reassignmentPluginV1Root")) queueMicrotask(attach);
+  }, true);
+
+  window.addEventListener("DOMContentLoaded", attach, { once: true });
+  window.$PF = window.$PF || {};
+  window.$PF.reassignmentRankDisplayFix = { version: "1.0.0", refresh: attach };
+})();
+</script>
