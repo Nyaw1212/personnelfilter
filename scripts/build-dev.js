@@ -72,6 +72,7 @@ function appJsBundle() {
     "ReassignmentPluginV1JS.html",
     "ReassignmentPluginV1GroupChangeFixJS.html",
     "ReassignmentPluginV1Phase3JS.html",
+    "PlatformNameHandlerEngineJS.html",
     "PlatformNameFormatEngineJS.html",
     "ReassignmentPluginV1PolishJS.html",
     "ReassignmentRankDisplayFixJS.html",
