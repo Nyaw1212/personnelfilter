@@ -1,0 +1,90 @@
+//----------------------------------
+// Multi-text search performance filter fix
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  function normalize_(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }
+
+  function terms_(value) {
+    if (typeof window.getMultiSearchTerms === "function") {
+      return window.getMultiSearchTerms(value);
+    }
+
+    const seen = new Set();
+    return String(value == null ? "" : value)
+      .split(/[\n,;]+/)
+      .map(normalize_)
+      .filter(term => {
+        if (!term || seen.has(term)) return false;
+        seen.add(term);
+        return true;
+      });
+  }
+
+  function install_() {
+    if (!window.PersonnelState || !window.PERSONNEL_APP_CONFIG) return;
+
+    window.filterPersonnelRecords = function multiTextPerformanceFilter() {
+      const searchTerms = terms_(PersonnelState.filters.search);
+      const mode = typeof window.getMultiSearchMode === "function"
+        ? window.getMultiSearchMode()
+        : "ANY";
+      const groups = PERSONNEL_APP_CONFIG.filterGroups;
+      const selectedRanks = PersonnelState.filters.ranks;
+
+      return PersonnelState.records.filter(record => {
+        const normalized = typeof window.normalizePersonnelRecord_ === "function"
+          ? window.normalizePersonnelRecord_(record)
+          : null;
+
+        for (const group of groups) {
+          const selected = PersonnelState.filters[group.key];
+          const recordValue = normalized
+            ? normalized[group.recordKey]
+            : String(record[group.recordKey] || "").trim();
+
+          if (selected.size && !selected.has(recordValue)) {
+            return false;
+          }
+        }
+
+        const rankValue = normalized
+          ? normalized.Rank
+          : String(record.Rank || "").trim();
+
+        if (selectedRanks.size && !selectedRanks.has(rankValue)) {
+          return false;
+        }
+
+        if (!searchTerms.length) return true;
+
+        const haystack = normalized?.searchText ||
+          PERSONNEL_APP_CONFIG.searchableColumns
+            .map(column => normalize_(record[column]))
+            .join("\u0001");
+
+        return mode === "ALL"
+          ? searchTerms.every(term => haystack.includes(term))
+          : searchTerms.some(term => haystack.includes(term));
+      });
+    };
+
+    try { window.handleFilterChange?.(); } catch (_) {}
+    console.info("MultiTextSearch performance filter fix active.");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      window.setTimeout(install_, 0);
+    }, { once: true });
+  } else {
+    window.setTimeout(install_, 0);
+  }
+})();
