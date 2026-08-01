@@ -7,6 +7,12 @@
   const report = platform?.engines?.get?.("report");
   if (!platform || !report) return;
 
+  const REASSIGNMENT_DEFAULT = Object.freeze({
+    office: "OFFICE OF THE SUPERINTENDENT",
+    role: "CHIEF",
+    officerName: "CSSUPT GARY A GARCIA",
+  });
+
   let records = [];
   let loadingPromise = null;
   let syncing = false;
@@ -94,6 +100,34 @@
     return signatories().find(item => key(item.name) === key(name)) || null;
   }
 
+  function preferredReassignmentSignatory() {
+    return signatories().find(item =>
+      item.role === REASSIGNMENT_DEFAULT.role &&
+      key(item.name) === key(REASSIGNMENT_DEFAULT.officerName)
+    ) || signatories().find(item =>
+      item.role === REASSIGNMENT_DEFAULT.role &&
+      key(item.office) === key(REASSIGNMENT_DEFAULT.office)
+    ) || null;
+  }
+
+  function isReassignmentDraft(draft) {
+    const metadata = draft?.metadata || {};
+    const signal = [
+      draft?.type,
+      draft?.name,
+      draft?.title,
+      metadata.reportType,
+      metadata.documentType,
+      metadata.templateType,
+      metadata.reportTitle,
+    ].map(text).filter(Boolean).join(" ");
+
+    // This report designer currently serves the reassignment workflow. If a
+    // future report type explicitly identifies itself, only reassignment types
+    // receive this default.
+    return !signal || /REASSIGN/i.test(signal);
+  }
+
   function currentDraft() {
     const id = window.$PF?.reportPreview?.activeDraftId;
     return id ? report.get(id) : null;
@@ -159,6 +193,24 @@
       signingOfficeCode: text(entry.officeCode),
       signingCamp: text(entry.camp),
     });
+  }
+
+  function applyReassignmentDefault(draft) {
+    const metadata = draft?.metadata || {};
+    const alreadySelected = text(metadata.signingOfficer) || text(metadata.signingOffice);
+    if (alreadySelected || !isReassignmentDraft(draft)) return false;
+
+    const preferred = preferredReassignmentSignatory();
+    if (!preferred) {
+      console.warn(
+        "Reassignment default signatory was not found in OFFICE_DIRECTORY:",
+        REASSIGNMENT_DEFAULT.officerName
+      );
+      return false;
+    }
+
+    applyOfficer(preferred.name);
+    return true;
   }
 
   function installStyles() {
@@ -242,6 +294,8 @@
       applyOfficer(metadata.signingOfficer);
     } else if (metadata.signingOffice) {
       applyOffice(metadata.signingOffice, metadata.signatoryRole || "CHIEF");
+    } else {
+      applyReassignmentDefault(draft);
     }
   }
 
@@ -263,11 +317,11 @@
   loadDirectory();
 
   window.$PF.reportSignatoryDirectory = {
-    version: "1.0.0",
+    version: "1.1.0",
     refresh: refreshUi,
     get records() { return records.slice(); },
   };
 
-  console.info("Report signatory directory active: OFFICE_DIRECTORY linked resolver.");
+  console.info("Report signatory directory active: reassignment defaults to the Superintendent.");
 })();
 </script>
