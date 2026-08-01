@@ -1,6 +1,6 @@
 <script>
-// Personnel Platform — canonical structured Name Handler Engine
-// Uses structured name fields first and falls back to Full Name parsing only when needed.
+// Personnel Platform — canonical Name Handler Engine
+// Uses LIST column A / Full Name for display and structured fields only as fallback/sort metadata.
 
 (function () {
   "use strict";
@@ -11,7 +11,7 @@
   const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
 
   function text(value) {
-    return String(value == null ? "" : value).trim();
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   }
 
   function upper(value) {
@@ -27,8 +27,18 @@
     return "";
   }
 
+  function canonicalFullName(person) {
+    return upper(field(person, [
+      "displayName",
+      "Display Name",
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+    ]));
+  }
+
   function parseFallback(value) {
-    const tokens = text(value).replace(/\s+/g, " ").split(" ").filter(Boolean);
+    const tokens = text(value).split(" ").filter(Boolean);
     let suffix = "";
     if (tokens.length > 1 && SUFFIXES.has(upper(tokens.at(-1)))) suffix = tokens.pop();
     if (tokens.length < 2) return { firstName: tokens[0] || "", middleName: "", lastName: "", suffix };
@@ -48,7 +58,7 @@
     let suffix = field(person, ["suffix", "Suffix", "SUFFIX"]);
 
     if (!firstName && !lastName) {
-      const parsed = parseFallback(field(person, ["fullName", "Full Name", "FULL NAME"]));
+      const parsed = parseFallback(canonicalFullName(person));
       firstName = parsed.firstName;
       middleName = parsed.middleName;
       lastName = parsed.lastName;
@@ -61,6 +71,7 @@
       middleName: upper(middleName),
       lastName: upper(lastName),
       suffix: upper(suffix).replace(/\.$/, ""),
+      fullName: canonicalFullName(person),
     };
   }
 
@@ -74,7 +85,7 @@
       .toUpperCase();
   }
 
-  function format(person, options = {}) {
+  function formatStructured(person, options = {}) {
     const parts = normalize(person);
     const includeRank = options.includeRank !== false;
     const order = options.order === "LAST_FIRST" ? "LAST_FIRST" : "FIRST_LAST";
@@ -92,18 +103,42 @@
     return [includeRank ? parts.rank : "", name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   }
 
+  function format(person, options = {}) {
+    const fullName = canonicalFullName(person);
+
+    // Column A / Full Name is the canonical display return. Structured fields
+    // remain available to SortEngine and as a fallback when column A is blank.
+    if (fullName && options.forceStructured !== true) return fullName;
+
+    return formatStructured(person, options);
+  }
+
   const engine = {
-    version: "1.0.0",
+    version: "1.1.0",
     normalize,
     format,
+    formatStructured,
+    canonicalFullName,
     formatWithoutRank(person, options = {}) {
-      return format(person, { ...options, includeRank: false });
+      const fullName = canonicalFullName(person);
+      if (fullName && options.forceStructured !== true) {
+        const rank = upper(field(person, ["rank", "Rank"]));
+        return rank && fullName.startsWith(`${rank} `)
+          ? fullName.slice(rank.length + 1)
+          : fullName;
+      }
+      return formatStructured(person, { ...options, includeRank: false });
     },
     formatForReport(person, options = {}) {
-      return format(person, { ...options, includeRank: true, middleInitial: true });
+      return format(person, { ...options, includeRank: true });
     },
     status() {
-      const report = { version: this.version, structuredFirst: true, fallbackParsing: true };
+      const report = {
+        version: this.version,
+        canonicalDisplay: "FULL_NAME_COLUMN_A",
+        structuredSortFields: true,
+        fallbackParsing: true,
+      };
       console.table(report);
       return report;
     },
@@ -114,6 +149,6 @@
 
   window.$PF = window.$PF || {};
   window.$PF.name = engine;
-  console.info("NameHandlerEngine v1.0.0 active.");
+  console.info("NameHandlerEngine v1.1.0 active: Full Name is canonical display.");
 })();
 </script>
