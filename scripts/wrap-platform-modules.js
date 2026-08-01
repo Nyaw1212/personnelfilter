@@ -13,6 +13,7 @@ const modules = [
   "PlatformGlassGreenThemeJS.html",
   "PlatformKeyboardEngineJS.html",
   "PlatformLegacyEngineAdaptersJS.html",
+  "PlatformNameHandlerEngineJS.html",
   "PlatformNameFormatEngineJS.html",
   "PlatformPerformanceEngineJS.html",
   "PlatformReportEngineJS.html",
