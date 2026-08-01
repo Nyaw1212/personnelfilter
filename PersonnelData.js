@@ -177,7 +177,10 @@ function normalizeWebPersonnelRecord_(
   const row = Array.isArray(rawRow) ? rawRow : [];
 
   // LIST positional source of truth:
+  // A = canonical Full Name shown by the app.
   // G = Rank, H = Last Name, I = First Name, J = Middle Name / extension.
+  // Structured fields remain available for sorting, but are not rebuilt for display.
+  const columnA = cleanWebCellValue_(row[0]).toUpperCase();
   const columnG = cleanWebCellValue_(row[6]);
   const columnH = cleanWebCellValue_(row[7]);
   const columnI = cleanWebCellValue_(row[8]);
@@ -239,7 +242,7 @@ function normalizeWebPersonnelRecord_(
     )
   ).toUpperCase();
 
-  const fullName = [
+  const structuredFallbackName = [
     nameParts.first,
     nameParts.middle,
     nameParts.last,
@@ -247,6 +250,19 @@ function normalizeWebPersonnelRecord_(
   ]
     .filter(Boolean)
     .join(" ");
+
+  const fullName =
+    columnA ||
+    cleanWebCellValue_(
+      getWebRecordValue_(
+        source,
+        [
+          "FULL NAME",
+          "Full Name",
+        ]
+      )
+    ).toUpperCase() ||
+    [rank, structuredFallbackName].filter(Boolean).join(" ");
 
   return {
 
@@ -269,7 +285,7 @@ function normalizeWebPersonnelRecord_(
       fullName,
 
     "Display Name":
-      [rank, fullName].filter(Boolean).join(" "),
+      fullName,
 
     "Rank":
       rank,
@@ -350,8 +366,6 @@ function normalizeWebNameParts_(
     suffix: normalizeWebSuffix_(explicitSuffix),
   };
 
-  // Some LIST rows place JR./SR./II/etc. inside the first, middle, or last-name
-  // cell. Pull that token out and always place it after the surname.
   ["first", "middle", "last"].forEach(key => {
     const tokens = parts[key]
       .split(/\s+/)
