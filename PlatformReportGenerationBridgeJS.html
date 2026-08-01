@@ -8,9 +8,11 @@
 
   const platform = window.PersonnelPlatform;
   const report = platform?.engines?.get?.("report");
+  const selection = platform?.engines?.get?.("selection");
   if (!platform || !report) return;
 
   const inFlight = new Set();
+  const TOAST_ID = "reportGenerationProgressToast";
 
   function text(value) {
     return String(value == null ? "" : value).trim();
@@ -57,6 +59,96 @@
     };
   }
 
+  function ensureToastStyles_() {
+    if (document.getElementById("reportGenerationProgressToastStyles")) return;
+    const style = document.createElement("style");
+    style.id = "reportGenerationProgressToastStyles";
+    style.textContent = `
+      #${TOAST_ID}{position:fixed;left:18px;bottom:22px;z-index:20050;display:flex;align-items:center;gap:12px;min-width:330px;max-width:min(620px,calc(100vw - 36px));padding:12px 14px;border:1px solid #c9ddcd;border-radius:14px;background:#f8fcf8;box-shadow:0 12px 34px rgba(0,0,0,.18);color:#153c21}
+      #${TOAST_ID}[hidden]{display:none!important}
+      #${TOAST_ID}.is-working{background:#fff9d6;border-color:#eadb7d}
+      #${TOAST_ID}.is-success{background:#edf9ef;border-color:#afd0b6}
+      #${TOAST_ID}.is-error{background:#fff0f0;border-color:#e3b1b1}
+      #${TOAST_ID} .rg-toast-main{min-width:0;flex:1}
+      #${TOAST_ID} strong,#${TOAST_ID} small{display:block}
+      #${TOAST_ID} small{margin-top:2px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #${TOAST_ID} .rg-toast-actions{display:flex;gap:7px;flex-wrap:wrap}
+      #${TOAST_ID} button,#${TOAST_ID} a{border:1px solid #bdd2c1;border-radius:9px;background:#fff;padding:7px 10px;color:inherit;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function showToast_(title, detail, type, actions) {
+    ensureToastStyles_();
+    let toast = document.getElementById(TOAST_ID);
+    if (!toast) {
+      toast = document.createElement("aside");
+      toast.id = TOAST_ID;
+      document.body.appendChild(toast);
+    }
+
+    toast.className = `is-${type || "working"}`;
+    toast.hidden = false;
+    toast.replaceChildren();
+
+    const main = document.createElement("div");
+    main.className = "rg-toast-main";
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const sub = document.createElement("small");
+    sub.textContent = detail || "";
+    main.append(heading, sub);
+    toast.appendChild(main);
+
+    if (Array.isArray(actions) && actions.length) {
+      const host = document.createElement("div");
+      host.className = "rg-toast-actions";
+      actions.forEach(action => {
+        const el = action.href ? document.createElement("a") : document.createElement("button");
+        el.textContent = action.label;
+        if (action.href) {
+          el.href = action.href;
+          el.target = "_blank";
+          el.rel = "noopener noreferrer";
+        } else {
+          el.type = "button";
+          el.addEventListener("click", action.onClick);
+        }
+        host.appendChild(el);
+      });
+      toast.appendChild(host);
+    }
+  }
+
+  function returnToPersonnelFilter_() {
+    window.$PF?.reportPreview?.close?.();
+    window.$PF?.reportLauncher?.close?.();
+
+    const reassignmentRoot = document.getElementById("reassignmentPluginV1Root");
+    if (reassignmentRoot) reassignmentRoot.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function clearPersonnelSelection_() {
+    try {
+      if (typeof window.deselectAllPersonnelFromAo_ === "function") {
+        window.deselectAllPersonnelFromAo_();
+      } else if (selection?.clear) {
+        selection.clear("ao-cart");
+      } else if (selection?.reset) {
+        selection.reset("ao-cart");
+      }
+    } catch (error) {
+      console.warn("Unable to clear AO selection through selection engine:", error);
+    }
+
+    document.querySelectorAll('[data-personnel-check], [data-ao-check], input[type="checkbox"][data-personnel-key]')
+      .forEach(box => { box.checked = false; });
+
+    try { window.filterAndRenderPersonnel?.(); } catch (_) {}
+    try { window.renderPreviewTable?.(); } catch (_) {}
+  }
+
   function fail(draftId, message) {
     const failureMessage = text(message) || "The report could not be generated.";
     const result = report.saveResult(draftId, {
@@ -67,8 +159,10 @@
     });
 
     platform.events.emit("report:generation-failed", result);
-    window.$PF.reportPreview?.open?.(draftId);
-    window.alert(failureMessage);
+    returnToPersonnelFilter_();
+    showToast_("Report generation failed", failureMessage, "error", [
+      { label: "View Reports", onClick: () => window.openGeneratedReportsDialog?.() }
+    ]);
     return result;
   }
 
@@ -83,32 +177,15 @@
     google.script.run
       .withSuccessHandler(queueResponse => {
         if (!queueResponse?.success) {
-          console.error(
-            "Report generated, but transfer queue write failed:",
-            queueResponse?.message || queueResponse
-          );
-          platform.events.emit("transfer-queue:enqueue-failed", {
-            draftId: draft?.id,
-            result,
-            response: queueResponse,
-          });
+          console.error("Report generated, but transfer queue write failed:", queueResponse?.message || queueResponse);
+          platform.events.emit("transfer-queue:enqueue-failed", { draftId: draft?.id, result, response: queueResponse });
           return;
         }
-
-        console.info("Generated report added to TRANSFER_QUEUE.", queueResponse);
-        platform.events.emit("transfer-queue:enqueued", {
-          draftId: draft?.id,
-          result,
-          response: queueResponse,
-        });
+        platform.events.emit("transfer-queue:enqueued", { draftId: draft?.id, result, response: queueResponse });
       })
       .withFailureHandler(error => {
         console.error("Report generated, but transfer queue request failed:", error);
-        platform.events.emit("transfer-queue:enqueue-failed", {
-          draftId: draft?.id,
-          result,
-          error,
-        });
+        platform.events.emit("transfer-queue:enqueue-failed", { draftId: draft?.id, result, error });
       })
       .enqueueTransferBatchCanonical(payload, response);
   }
@@ -128,6 +205,10 @@
     inFlight.add(draftId);
     const payload = serverPayload(draft);
 
+    returnToPersonnelFilter_();
+    clearPersonnelSelection_();
+    showToast_("Generating report…", "You may continue working while the report is being created.", "working");
+
     google.script.run
       .withSuccessHandler(response => {
         inFlight.delete(draftId);
@@ -145,11 +226,15 @@
           generatedAt: new Date().toISOString(),
         });
 
-        // Direct integration: every successfully generated reassignment is
-        // persisted to the canonical TRANSFER_QUEUE sheet.
         enqueueGeneratedTransfer_(draft, response, result);
+        returnToPersonnelFilter_();
 
-        window.$PF.reportPreview?.close?.();
+        showToast_("Report generated successfully", `Order ${payload.orderNumber || "reassignment"}`, "success", [
+          ...(text(response.url) ? [{ label: "Open Report", href: text(response.url) }] : []),
+          { label: "View Reports", onClick: () => window.openGeneratedReportsDialog?.() }
+        ]);
+
+        platform.events.emit("report:generation-completed", result);
         console.info("Apps Script report generation completed.", result);
       })
       .withFailureHandler(error => {
@@ -160,10 +245,8 @@
   });
 
   window.$PF.reportGenerationBridge = {
-    version: "1.1.0",
-    payload: draftOrId => serverPayload(
-      typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId
-    ),
+    version: "1.2.0",
+    payload: draftOrId => serverPayload(typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId),
     status() {
       const state = {
         version: this.version,
@@ -176,6 +259,6 @@
     },
   };
 
-  console.info("ReportGenerationBridge v1.1.0 active with canonical queue integration.");
+  console.info("ReportGenerationBridge v1.2.0 active with background generation workflow.");
 })();
 </script>
