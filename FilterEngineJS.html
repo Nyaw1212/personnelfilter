@@ -1,7 +1,5 @@
-  function filterPersonnelRecords() {
-  const searchTerm = PersonnelState.filters.search
-    .trim()
-    .toLowerCase();
+function filterPersonnelRecords() {
+  const searchText = String(PersonnelState.filters.search || "").trim();
 
   return PersonnelState.records.filter(record => {
     if (!recordMatchesGeneralFilters_(record)) {
@@ -12,7 +10,7 @@
       return false;
     }
 
-    if (!recordMatchesSearch_(record, searchTerm)) {
+    if (!recordMatchesSearch_(record, searchText)) {
       return false;
     }
 
@@ -46,16 +44,29 @@ function recordMatchesRanks_(record) {
   );
 }
 
-function recordMatchesSearch_(record, searchTerm) {
-  if (!searchTerm) {
+function parsePersonnelSearchTerms_(searchText) {
+  return [...new Set(
+    String(searchText || "")
+      .split(/[\n,;]+/)
+      .map(term => term.trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+function recordMatchesSearch_(record, searchText) {
+  const terms = parsePersonnelSearchTerms_(searchText);
+
+  if (!terms.length) {
     return true;
   }
 
-  return PERSONNEL_APP_CONFIG.searchableColumns.some(column => {
-    return normalizeValue_(record[column])
-      .toLowerCase()
-      .includes(searchTerm);
-  });
+  const searchableText = PERSONNEL_APP_CONFIG.searchableColumns
+    .map(column => normalizeValue_(record[column]).toLowerCase())
+    .join(" | ");
+
+  // Multi-search uses OR logic: a record is included when any pasted term
+  // matches any searchable personnel field.
+  return terms.some(term => searchableText.includes(term));
 }
 
 function toggleSetValue_(targetSet, value) {
