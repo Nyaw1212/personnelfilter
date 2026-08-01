@@ -62,18 +62,21 @@
       }
       #${ROOT_ID} .rp1-person input[type="checkbox"] { accent-color:#2b7444; }
       #${ROOT_ID} .rp1-step1-remove {
-        position:absolute;
-        top:50%;
-        right:9px;
-        transform:translateY(-50%);
-        width:27px;
-        min-width:27px;
-        height:27px;
-        min-height:27px;
-        display:grid;
-        place-items:center;
-        padding:0;
-        margin:0;
+        position:absolute !important;
+        top:calc(50% - 13.5px) !important;
+        right:9px !important;
+        transform:none !important;
+        translate:none !important;
+        width:27px !important;
+        min-width:27px !important;
+        max-width:27px !important;
+        height:27px !important;
+        min-height:27px !important;
+        max-height:27px !important;
+        display:grid !important;
+        place-items:center !important;
+        padding:0 !important;
+        margin:0 !important;
         border:1px solid rgba(92,128,103,.28);
         border-radius:9px;
         color:#45604d;
@@ -83,15 +86,23 @@
         line-height:1;
         cursor:pointer;
         box-sizing:border-box;
-        flex:0 0 27px;
+        flex:none !important;
         backdrop-filter:blur(8px);
         -webkit-backdrop-filter:blur(8px);
-        transition:color .15s ease,background-color .15s ease,border-color .15s ease,box-shadow .15s ease;
+        transition:color .15s ease,background-color .15s ease,border-color .15s ease,box-shadow .15s ease !important;
       }
       #${ROOT_ID} .rp1-step1-remove:hover,
+      #${ROOT_ID} .rp1-step1-remove:focus,
       #${ROOT_ID} .rp1-step1-remove:focus-visible,
       #${ROOT_ID} .rp1-step1-remove:active {
-        transform:translateY(-50%);
+        top:calc(50% - 13.5px) !important;
+        right:9px !important;
+        transform:none !important;
+        translate:none !important;
+        width:27px !important;
+        height:27px !important;
+        margin:0 !important;
+        padding:0 !important;
       }
       #${ROOT_ID} .rp1-step1-remove:hover {
         color:#8d2929;
@@ -194,12 +205,12 @@
   });
 
   window.$PF.reassignmentV1Polish = {
-    version: "1.0.1",
+    version: "1.0.2",
     decorate,
     removeFromWorkspace,
   };
 
   scheduleDecorate();
-  console.info("Reassignment V1 polish active: fixed Step 1 remove-button hover position.");
+  console.info("Reassignment V1 polish active: remove button anchored without transforms.");
 })();
 </script>
