@@ -116,9 +116,15 @@
         will-change: auto !important;
       }
 
-      .${MODE_CLASS} :hover,
-      .${MODE_CLASS} :focus,
-      .${MODE_CLASS} :active {
+      /* Disable decorative transforms only. Fixed dialogs rely on translate()
+         for centering, so a blanket :hover transform reset makes them jump. */
+      .${MODE_CLASS} button:hover,
+      .${MODE_CLASS} button:focus,
+      .${MODE_CLASS} button:active,
+      .${MODE_CLASS} a:hover,
+      .${MODE_CLASS} [role="button"]:hover,
+      .${MODE_CLASS} .rp1-person:hover,
+      .${MODE_CLASS} .rp1-chip:hover {
         transform: none !important;
       }
 
