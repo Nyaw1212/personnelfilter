@@ -89,68 +89,108 @@ function installTemporaryRefreshButton_() {
   button.textContent = "Refresh Data";
   button.title = "Reload current personnel data from Google Sheets";
 
-  button.addEventListener("click", async () => {
-    if (button.disabled) return;
-
-    button.disabled = true;
-    const originalText = button.textContent;
-    button.textContent = "Refreshing...";
-
-    setSyncStatus(
-      "Refreshing personnel...",
-      "working"
-    );
-
-    setLastSyncLabel(
-      "Reading current personnel data from Google Sheets..."
-    );
-
-    try {
-      const response =
-        await PersonnelAPI.loadPersonnel();
-
-      PersonnelState.records =
-        Array.isArray(response?.records)
-          ? response.records
-          : [];
-
-      populateFilterValuesFromRecords();
-      renderGeneralFilterGroups();
-      filterAndRenderPersonnel();
-
-      setSyncStatus(
-        "Preview ready",
-        "ready"
-      );
-
-      setLastSyncLabel(
-        `${PersonnelState.records.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
-      );
-    } catch (error) {
-      console.error(
-        "Personnel refresh error:",
-        error
-      );
-
-      setSyncStatus(
-        "Refresh failed",
-        "error"
-      );
-
-      setLastSyncLabel(
-        error?.message ||
-        "Personnel data could not be refreshed."
-      );
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
-  });
+  button.addEventListener("click", refreshPersonnelDataNow_);
 
   applyButton.parentElement.insertBefore(
     button,
     applyButton
   );
+}
+
+async function refreshPersonnelDataNow_(event) {
+  const button =
+    event?.currentTarget ||
+    document.getElementById("refreshPersonnelDataButton");
+
+  if (button?.disabled) return;
+
+  const originalText = button?.textContent || "Refresh Data";
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing...";
+  }
+
+  setSyncStatus(
+    "Refreshing personnel...",
+    "working"
+  );
+
+  setLastSyncLabel(
+    "Reading current personnel data from Google Sheets..."
+  );
+
+  try {
+    const response = await PersonnelAPI.loadPersonnel();
+    const freshRecords = Array.isArray(response?.records)
+      ? response.records
+      : [];
+
+    PersonnelState.records = freshRecords;
+    PersonnelState.__performanceAnalytics = null;
+
+    freshRecords.forEach(record => {
+      if (
+        record &&
+        Object.prototype.hasOwnProperty.call(
+          record,
+          "__personnelNormalized"
+        )
+      ) {
+        try {
+          delete record.__personnelNormalized;
+        } catch (_) {
+          record.__personnelNormalized = null;
+        }
+      }
+    });
+
+    populateFilterValuesFromRecords();
+    renderGeneralFilterGroups();
+
+    // Bypass the requestAnimationFrame performance wrapper so the refresh
+    // button updates the visible table immediately.
+    PersonnelState.filteredRecords = filterPersonnelRecords();
+    syncChipVisuals();
+    updateFilterCounts();
+    updateRankCounts();
+    renderPreviewTable();
+    renderActiveFilterSummary();
+
+    setSyncStatus(
+      "Preview ready",
+      "ready"
+    );
+
+    setLastSyncLabel(
+      `${freshRecords.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
+    );
+
+    console.info(
+      "Personnel data refreshed from Google Sheets.",
+      freshRecords.length
+    );
+  } catch (error) {
+    console.error(
+      "Personnel refresh error:",
+      error
+    );
+
+    setSyncStatus(
+      "Refresh failed",
+      "error"
+    );
+
+    setLastSyncLabel(
+      error?.message ||
+      "Personnel data could not be refreshed."
+    );
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function populateFilterValuesFromRecords() {
