@@ -1,6 +1,7 @@
 <script>
 // Personnel Platform — Name Format controls
-// Delegates structured formatting to NameHandlerEngine and keeps a safe fallback.
+// Delegates report formatting to NameHandlerEngine.
+// Reassignment card labels use their own structured-field formatter.
 
 (function () {
   "use strict";
@@ -19,12 +20,77 @@
     return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   }
 
+  function upper(value) {
+    return text(value).toUpperCase();
+  }
+
   function normalizeMode(value) {
     return MODES.includes(value) ? value : "FIRST_INITIAL_LAST";
   }
 
   function nameHandler() {
     return platform.engines.get("nameHandler") || window.$PF?.name;
+  }
+
+  function readField(person, names) {
+    const record = person?.record || person || {};
+    for (const name of names) {
+      const value = person?.[name] ?? record?.[name];
+      if (text(value)) return text(value);
+    }
+    return "";
+  }
+
+  function middleInitial(value) {
+    return text(value)
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(part => part.replace(/\./g, "").charAt(0))
+      .filter(Boolean)
+      .join(" ")
+      .toUpperCase();
+  }
+
+  // Scoped only to the two Reassignment Workspace card labels.
+  // Equivalent source order: G + I + J + H + K
+  // Rank + First Name + Middle Name + Last Name + Suffix.
+  function formatReassignmentCard(person, mode = currentMode) {
+    if (!person) return "";
+
+    const rank = upper(readField(person, ["rank", "Rank", "RANK"]));
+    const first = upper(readField(person, ["firstName", "First Name", "FIRST NAME"]));
+    const middleName = upper(readField(person, ["middleName", "Middle Name", "MIDDLE NAME"]));
+    const last = upper(readField(person, ["lastName", "Last Name", "LAST NAME"]));
+    const suffix = upper(readField(person, [
+      "suffix",
+      "Suffix",
+      "SUFFIX",
+      "nameExtension",
+      "Name Extension",
+      "NAME EXTENSION",
+    ])).replace(/\.$/, "");
+    const middle = middleInitial(middleName);
+
+    let structuredName = "";
+    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
+      const left = [last, suffix].filter(Boolean).join(" ");
+      const right = [first, middle].filter(Boolean).join(" ");
+      structuredName = left && right ? `${left}, ${right}` : left || right;
+    } else {
+      structuredName = [first, middle, last, suffix].filter(Boolean).join(" ");
+    }
+
+    // Use the old full-name source only when structured columns are unavailable.
+    const fallbackName = upper(readField(person, [
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+      "displayName",
+      "Display Name",
+    ]));
+
+    const name = structuredName || fallbackName;
+    return [rank, name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   }
 
   function formatPerson(person, mode = currentMode, includeRank = false) {
@@ -50,16 +116,24 @@
     const state = assignmentCore.get(SCOPE);
     const people = new Map(state?.participants || []);
 
+    // Issue area 1: Step 1 / To Be Assigned cards only.
     root.querySelectorAll(".rp1-person").forEach(row => {
       const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
       const label = row.querySelector(".rp1-person-name");
-      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
+      if (!label || !key) return;
+
+      const formatted = formatReassignmentCard(people.get(key), currentMode);
+      if (formatted) label.textContent = formatted;
     });
 
+    // Issue area 2: Step 3 / Assigned Personnel cards only.
     root.querySelectorAll(".rp1-assigned").forEach(row => {
       const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
-      const label = row.querySelector("span");
-      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
+      const label = row.querySelector(":scope > span");
+      if (!label || !key) return;
+
+      const formatted = formatReassignmentCard(people.get(key), currentMode);
+      if (formatted) label.textContent = formatted;
     });
   }
 
@@ -156,7 +230,7 @@
   platform.events.on("selection:changed", scheduleDecorate);
 
   const engine = {
-    version: "2.0.0",
+    version: "2.0.1",
     modes: [...MODES],
     format: formatPerson,
     formatPayload,
@@ -173,6 +247,7 @@
         version: this.version,
         mode: currentMode,
         nameHandler: Boolean(nameHandler()),
+        reassignmentCardFormatter: "G_I_J_H_K",
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -186,6 +261,6 @@
   window.$PF = window.$PF || {};
   window.$PF.nameFormat = engine;
   scheduleDecorate();
-  console.info("NameFormatEngine v2.0.0 active with NameHandlerEngine fallback.");
+  console.info("NameFormatEngine v2.0.1 active: reassignment card labels use structured names.");
 })();
 </script>
