@@ -3,24 +3,45 @@ document.addEventListener(
   initializePersonnelApp
 );
 
-let personnelRefreshPromise_ = null;
-let lastPersonnelRefreshAt_ = 0;
-const PERSONNEL_REFRESH_MIN_INTERVAL_MS_ = 3000;
-
 async function initializePersonnelApp() {
   bindPersonnelEvents();
 
   renderRankGroups();
   renderPreviewHeader();
 
+  setSyncStatus(
+    "Loading personnel...",
+    "working"
+  );
+
+  setLastSyncLabel(
+    "Reading personnel data from Google Sheets..."
+  );
+
   try {
-    await refreshPersonnelRecords_({
-      showStatus: true,
-      force: true,
-    });
+    const response =
+      await PersonnelAPI.loadPersonnel();
+
+    PersonnelState.records =
+      Array.isArray(response?.records)
+        ? response.records
+        : [];
+
+    populateFilterValuesFromRecords();
+    renderGeneralFilterGroups();
 
     PersonnelState.initialized = true;
+
     filterAndRenderPersonnel();
+
+    setSyncStatus(
+      "Preview ready",
+      "ready"
+    );
+
+    setLastSyncLabel(
+      `${PersonnelState.records.length.toLocaleString()} personnel rows loaded from Google Sheets.`
+    );
   } catch (error) {
     console.error(
       "Personnel load error:",
@@ -42,73 +63,6 @@ async function initializePersonnelApp() {
       error?.message ||
       "Personnel data could not be loaded."
     );
-  }
-}
-
-async function refreshPersonnelRecords_(options = {}) {
-  const showStatus = options.showStatus !== false;
-  const force = options.force === true;
-  const now = Date.now();
-
-  if (
-    !force &&
-    now - lastPersonnelRefreshAt_ <
-      PERSONNEL_REFRESH_MIN_INTERVAL_MS_
-  ) {
-    return PersonnelState.records;
-  }
-
-  if (personnelRefreshPromise_) {
-    return personnelRefreshPromise_;
-  }
-
-  personnelRefreshPromise_ = (async () => {
-    if (showStatus) {
-      setSyncStatus(
-        "Refreshing personnel...",
-        "working"
-      );
-
-      setLastSyncLabel(
-        "Reading current personnel data from Google Sheets..."
-      );
-    }
-
-    const response =
-      await PersonnelAPI.loadPersonnel();
-
-    PersonnelState.records =
-      Array.isArray(response?.records)
-        ? response.records
-        : [];
-
-    populateFilterValuesFromRecords();
-    renderGeneralFilterGroups();
-
-    lastPersonnelRefreshAt_ = Date.now();
-
-    if (PersonnelState.initialized) {
-      filterAndRenderPersonnel();
-    }
-
-    if (showStatus) {
-      setSyncStatus(
-        "Preview ready",
-        "ready"
-      );
-
-      setLastSyncLabel(
-        `${PersonnelState.records.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
-      );
-    }
-
-    return PersonnelState.records;
-  })();
-
-  try {
-    return await personnelRefreshPromise_;
-  } finally {
-    personnelRefreshPromise_ = null;
   }
 }
 
@@ -168,31 +122,7 @@ function bindPersonnelEvents() {
     .getElementById("applyNowButton")
     .addEventListener(
       "click",
-      async () => {
-        try {
-          await refreshPersonnelRecords_({
-            showStatus: true,
-            force: true,
-          });
-
-          await applyCurrentResultToSheet();
-        } catch (error) {
-          console.error(
-            "Personnel refresh/apply error:",
-            error
-          );
-
-          setSyncStatus(
-            "Refresh failed",
-            "error"
-          );
-
-          setLastSyncLabel(
-            error?.message ||
-            "Personnel data could not be refreshed."
-          );
-        }
-      }
+      applyCurrentResultToSheet
     );
 
   document
@@ -270,43 +200,6 @@ function bindPersonnelEvents() {
       "click",
       restoreApp
     );
-
-  window.addEventListener(
-    "focus",
-    () => {
-      if (!PersonnelState.initialized) return;
-
-      refreshPersonnelRecords_({
-        showStatus: false,
-      }).catch(error => {
-        console.warn(
-          "Background personnel refresh failed:",
-          error
-        );
-      });
-    }
-  );
-
-  document.addEventListener(
-    "visibilitychange",
-    () => {
-      if (
-        document.visibilityState !== "visible" ||
-        !PersonnelState.initialized
-      ) {
-        return;
-      }
-
-      refreshPersonnelRecords_({
-        showStatus: false,
-      }).catch(error => {
-        console.warn(
-          "Background personnel refresh failed:",
-          error
-        );
-      });
-    }
-  );
 }
 
 function handleChipClick(button) {
