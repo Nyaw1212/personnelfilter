@@ -1,0 +1,147 @@
+//----------------------------------
+// Generated Reports unread badge
+//----------------------------------
+
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "personnelFilter.generatedReports.lastSeenTotal.v1";
+  const BADGE_ID = "generatedReportsUnreadBadge";
+  let latestTotal = 0;
+  let loading = false;
+
+  function number_(value) {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+  }
+
+  function lastSeen_() {
+    try {
+      return number_(window.localStorage.getItem(STORAGE_KEY));
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function saveLastSeen_(value) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, String(number_(value)));
+    } catch (_) {}
+  }
+
+  function button_() {
+    return document.getElementById("openGeneratedReportsButton");
+  }
+
+  function ensureBadge_() {
+    const button = button_();
+    if (!button) return null;
+
+    let badge = document.getElementById(BADGE_ID);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.id = BADGE_ID;
+      badge.className = "generated-reports-unread-badge";
+      badge.hidden = true;
+      badge.setAttribute("aria-label", "Unread generated reports");
+      button.appendChild(badge);
+    }
+
+    if (!document.getElementById("generatedReportsUnreadBadgeStyles")) {
+      const style = document.createElement("style");
+      style.id = "generatedReportsUnreadBadgeStyles";
+      style.textContent = `
+        #openGeneratedReportsButton{position:relative}
+        .generated-reports-unread-badge{
+          position:absolute;top:-7px;right:-7px;display:grid;place-items:center;
+          min-width:18px;height:18px;padding:0 5px;border:2px solid #eef8ef;
+          border-radius:999px;background:#d93025;color:#fff;font-size:10px;
+          font-weight:900;line-height:1;box-sizing:border-box;box-shadow:0 2px 7px #0003;
+        }
+        .generated-reports-unread-badge[hidden]{display:none!important}
+      `;
+      document.head.appendChild(style);
+    }
+
+    return badge;
+  }
+
+  function render_() {
+    const badge = ensureBadge_();
+    if (!badge) return;
+
+    const unread = Math.max(0, latestTotal - lastSeen_());
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? "99+" : String(unread);
+    button_()?.classList.toggle("has-unread-reports", unread > 0);
+  }
+
+  function markRead_() {
+    saveLastSeen_(latestTotal);
+    render_();
+  }
+
+  function loadTotal_(initializeBaseline) {
+    if (loading || !window.google?.script?.run) return;
+    loading = true;
+
+    google.script.run
+      .withSuccessHandler(response => {
+        loading = false;
+        if (!response || response.success !== true) return;
+
+        latestTotal = number_(response.total);
+        const hasStoredBaseline = (() => {
+          try { return window.localStorage.getItem(STORAGE_KEY) !== null; }
+          catch (_) { return false; }
+        })();
+
+        if (initializeBaseline && !hasStoredBaseline) {
+          saveLastSeen_(latestTotal);
+        }
+        render_();
+      })
+      .withFailureHandler(() => { loading = false; })
+      .getGeneratedReportSummaries(1);
+  }
+
+  function install_() {
+    ensureBadge_();
+    loadTotal_(true);
+
+    document.addEventListener("click", event => {
+      if (event.target.closest("#openGeneratedReportsButton")) {
+        markRead_();
+        window.setTimeout(() => loadTotal_(false), 500);
+      }
+    }, true);
+
+    const platformEvents = window.PersonnelPlatform?.events;
+    if (platformEvents?.on) {
+      platformEvents.on("report:generation-completed", () => {
+        window.setTimeout(() => loadTotal_(false), 700);
+      });
+      platformEvents.on("report:completed", () => {
+        window.setTimeout(() => loadTotal_(false), 700);
+      });
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) loadTotal_(false);
+    });
+
+    new MutationObserver(() => {
+      ensureBadge_();
+      render_();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  window.markGeneratedReportsRead = markRead_;
+  window.refreshGeneratedReportsUnreadBadge = () => loadTotal_(false);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
