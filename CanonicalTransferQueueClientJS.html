@@ -7,12 +7,15 @@
     backdrop: "canonicalTransferQueueBackdrop",
     dialog: "canonicalTransferQueueDialog",
     body: "canonicalTransferQueueBody",
-    message: "canonicalTransferQueueMessage",
-    approve: "canonicalApproveTransfers"
+    message: "canonicalTransferQueueMessage"
   };
 
+  const STATUSES = ["ALL", "PENDING", "APPROVED", "APPLIED", "CANCELLED", "FAILED"];
   let selected = new Set();
+  let records = [];
+  let activeStatus = "ALL";
   let latestPayload = null;
+  let busy = false;
 
   function runServer_(method, ...args) {
     return new Promise((resolve, reject) => {
@@ -39,13 +42,8 @@
   }
 
   function removeCompetingQueueUi_() {
-    [
-      "openTransferQueueButton",
-      "transferQueueBackdrop",
-      "transferQueueDialog",
-      "pfTransferQueueBackdrop",
-      "pfTransferQueueDialog"
-    ].forEach(id => document.getElementById(id)?.remove());
+    ["openTransferQueueButton", "transferQueueBackdrop", "transferQueueDialog", "pfTransferQueueBackdrop", "pfTransferQueueDialog"]
+      .forEach(id => document.getElementById(id)?.remove());
 
     document.querySelectorAll("button").forEach(button => {
       if (button.id === IDS.button) return;
@@ -67,6 +65,7 @@
 
   function installDialog_() {
     if (document.getElementById(IDS.dialog)) return;
+
     const backdrop = document.createElement("div");
     backdrop.id = IDS.backdrop;
     backdrop.className = "ctq-backdrop";
@@ -78,31 +77,53 @@
     dialog.hidden = true;
     dialog.innerHTML = `
       <header class="ctq-header">
-        <div><small>PERSONNEL MOVEMENT</small><h2>Transfer Queue</h2><p>Records are read directly from the TRANSFER_QUEUE sheet.</p></div>
+        <div>
+          <small>PERSONNEL MOVEMENT</small>
+          <h2>Transfer Queue</h2>
+          <p>Monitor, approve, apply, cancel, and review personnel transfers.</p>
+        </div>
         <button type="button" data-close>Close</button>
       </header>
       <div id="${IDS.message}" class="ctq-message" hidden></div>
+      <nav class="ctq-tabs" data-tabs></nav>
       <div class="ctq-toolbar">
-        <button type="button" data-select>Select Pending</button>
-        <button type="button" data-refresh>Refresh</button>
+        <div class="ctq-toolbar-left">
+          <button type="button" data-select-visible>Select Visible</button>
+          <button type="button" data-clear-selection>Clear Selection</button>
+          <button type="button" data-refresh>Refresh</button>
+        </div>
         <strong data-count>0 selected</strong>
       </div>
-      <div class="ctq-wrap"><table class="ctq-table">
-        <thead><tr><th></th><th>Status</th><th>AO</th><th>Rank / Name</th><th>From</th><th>To</th><th>Document</th></tr></thead>
-        <tbody id="${IDS.body}"></tbody>
-      </table></div>
-      <footer class="ctq-actions"><button type="button" data-close>Close</button><button id="${IDS.approve}" type="button">Approve & Apply</button></footer>`;
+      <div class="ctq-wrap">
+        <table class="ctq-table">
+          <thead><tr><th></th><th>Status</th><th>AO</th><th>Rank / Name</th><th>From</th><th>To</th><th>Document</th><th>Actions</th></tr></thead>
+          <tbody id="${IDS.body}"></tbody>
+        </table>
+      </div>
+      <footer class="ctq-actions">
+        <button type="button" data-close>Close</button>
+        <button type="button" data-cancel-selected>Cancel Selected</button>
+        <button type="button" data-approve-selected>Approve Selected</button>
+        <button type="button" data-apply-selected>Apply Selected</button>
+        <button type="button" class="ctq-primary" data-approve-apply-selected>Approve & Apply Selected</button>
+      </footer>`;
 
     backdrop.addEventListener("click", close_);
     dialog.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", close_));
     dialog.querySelector("[data-refresh]").addEventListener("click", load_);
-    dialog.querySelector("[data-select]").addEventListener("click", selectPending_);
-    dialog.querySelector(`#${IDS.approve}`).addEventListener("click", approve_);
+    dialog.querySelector("[data-select-visible]").addEventListener("click", selectVisible_);
+    dialog.querySelector("[data-clear-selection]").addEventListener("click", clearSelection_);
+    dialog.querySelector("[data-approve-selected]").addEventListener("click", () => runSelectedAction_("approve"));
+    dialog.querySelector("[data-apply-selected]").addEventListener("click", () => runSelectedAction_("apply"));
+    dialog.querySelector("[data-approve-apply-selected]").addEventListener("click", () => runSelectedAction_("approveApply"));
+    dialog.querySelector("[data-cancel-selected]").addEventListener("click", () => runSelectedAction_("cancel"));
     document.body.append(backdrop, dialog);
+    renderTabs_({});
   }
 
   function open_() {
     selected.clear();
+    activeStatus = "ALL";
     updateCount_();
     document.getElementById(IDS.backdrop).hidden = false;
     document.getElementById(IDS.dialog).hidden = false;
@@ -119,79 +140,186 @@
     try {
       const response = await runServer_("getTransferQueueRecordsCanonical");
       if (!response?.success) throw new Error(response?.message || "Unable to load queue.");
-      render_(response.records || []);
-      show_(`${response.records?.length || 0} queue record(s) loaded.`, "success");
+      records = Array.isArray(response.records) ? response.records : [];
+      selected = new Set([...selected].filter(id => records.some(record => record.transferId === id)));
+      renderTabs_(response.counts || {});
+      render_();
+      updateCount_();
+      show_(`${records.length} queue record(s) loaded.`, "success");
     } catch (error) {
       show_(error.message, "error");
     }
   }
 
-  function render_(records) {
+  function renderTabs_(counts) {
+    const host = document.querySelector(`#${IDS.dialog} [data-tabs]`);
+    if (!host) return;
+    host.replaceChildren();
+    STATUSES.forEach(status => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `ctq-tab${activeStatus === status ? " active" : ""}`;
+      button.dataset.status = status;
+      button.textContent = `${status} ${Number(counts[status] || 0)}`;
+      button.addEventListener("click", () => {
+        activeStatus = status;
+        renderTabs_(countStatuses_());
+        render_();
+      });
+      host.appendChild(button);
+    });
+  }
+
+  function countStatuses_() {
+    const counts = Object.fromEntries(STATUSES.map(status => [status, 0]));
+    records.forEach(record => {
+      counts.ALL++;
+      if (Object.prototype.hasOwnProperty.call(counts, record.status)) counts[record.status]++;
+    });
+    return counts;
+  }
+
+  function visibleRecords_() {
+    return activeStatus === "ALL" ? records : records.filter(record => record.status === activeStatus);
+  }
+
+  function render_() {
     const body = document.getElementById(IDS.body);
     body.replaceChildren();
-    if (!records.length) {
+    const visible = visibleRecords_();
+
+    if (!visible.length) {
       const row = body.insertRow();
       const cell = row.insertCell();
-      cell.colSpan = 7;
-      cell.textContent = "No records in TRANSFER_QUEUE.";
+      cell.colSpan = 8;
+      cell.textContent = `No ${activeStatus === "ALL" ? "" : activeStatus.toLowerCase() + " "}records.`;
       cell.className = "ctq-empty";
       return;
     }
 
-    records.forEach(record => {
+    visible.forEach(record => {
       const row = body.insertRow();
+      row.dataset.status = record.status;
+
       const checkCell = row.insertCell();
       const box = document.createElement("input");
       box.type = "checkbox";
       box.value = record.transferId;
-      box.disabled = ["APPLIED", "CANCELLED"].includes(String(record.status).toUpperCase());
+      box.disabled = ["APPLIED", "CANCELLED"].includes(record.status);
+      box.checked = selected.has(record.transferId);
       box.addEventListener("change", () => {
         box.checked ? selected.add(box.value) : selected.delete(box.value);
         updateCount_();
       });
       checkCell.appendChild(box);
-      row.insertCell().textContent = record.status || "PENDING";
+
+      const statusCell = row.insertCell();
+      const badge = document.createElement("span");
+      badge.className = `ctq-status is-${record.status.toLowerCase()}`;
+      badge.textContent = record.status;
+      statusCell.appendChild(badge);
+
       row.insertCell().textContent = record.orderNumber || "—";
       row.insertCell().textContent = [record.rank, record.fullName].filter(Boolean).join(" ");
-      row.insertCell().textContent = [record.previousOffice, record.previousCamp].filter(Boolean).join(" / ");
-      row.insertCell().textContent = [record.newOffice, record.newCamp].filter(Boolean).join(" / ");
+      row.insertCell().textContent = [record.previousOffice, record.previousCamp].filter(Boolean).join(" / ") || "—";
+      row.insertCell().textContent = [record.newOffice, record.newCamp].filter(Boolean).join(" / ") || "—";
+
       const doc = row.insertCell();
       if (record.documentUrl) {
         const link = document.createElement("a");
-        link.href = record.documentUrl; link.target = "_blank"; link.textContent = "Open AO";
+        link.href = record.documentUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open AO";
         doc.appendChild(link);
       } else doc.textContent = "—";
+
+      const actions = row.insertCell();
+      actions.className = "ctq-row-actions";
+      addRowActions_(actions, record);
       if (record.errorMessage) row.title = record.errorMessage;
     });
   }
 
-  function selectPending_() {
-    document.querySelectorAll(`#${IDS.body} input[type=checkbox]:not(:disabled)`).forEach(box => {
-      box.checked = true;
-      selected.add(box.value);
+  function addRowActions_(host, record) {
+    if (["PENDING", "FAILED"].includes(record.status)) {
+      host.appendChild(actionButton_("Approve", () => runIdsAction_("approve", [record.transferId])));
+      host.appendChild(actionButton_("Approve & Apply", () => runIdsAction_("approveApply", [record.transferId]), true));
+    } else if (record.status === "APPROVED") {
+      host.appendChild(actionButton_("Apply", () => runIdsAction_("apply", [record.transferId]), true));
+    }
+
+    if (!["APPLIED", "CANCELLED"].includes(record.status)) {
+      host.appendChild(actionButton_("Cancel", () => runIdsAction_("cancel", [record.transferId])));
+    }
+
+    if (!host.children.length) host.textContent = "—";
+  }
+
+  function actionButton_(label, handler, primary) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.className = primary ? "ctq-mini primary" : "ctq-mini";
+    button.addEventListener("click", handler);
+    return button;
+  }
+
+  function selectVisible_() {
+    visibleRecords_().forEach(record => {
+      if (!["APPLIED", "CANCELLED"].includes(record.status)) selected.add(record.transferId);
     });
+    render_();
     updateCount_();
   }
 
-  async function approve_() {
-    if (!selected.size) return show_("Select at least one pending transfer.", "error");
-    if (!confirm(`Approve and apply ${selected.size} transfer(s) to LIST?`)) return;
-    const button = document.getElementById(IDS.approve);
-    button.disabled = true;
-    show_("Updating LIST and verifying writes...", "working");
+  function clearSelection_() {
+    selected.clear();
+    render_();
+    updateCount_();
+  }
+
+  async function runSelectedAction_(action) {
+    if (!selected.size) return show_("Select at least one transfer.", "error");
+    await runIdsAction_(action, [...selected]);
+  }
+
+  async function runIdsAction_(action, ids) {
+    if (busy || !ids.length) return;
+    const config = {
+      approve: { method: "approveTransfersCanonical", verb: "approve" },
+      apply: { method: "applyTransfersCanonical", verb: "apply" },
+      approveApply: { method: "approveAndApplyTransfersCanonical", verb: "approve and apply" },
+      cancel: { method: "cancelTransfersCanonical", verb: "cancel" }
+    }[action];
+    if (!config) return;
+
+    if (!confirm(`${config.verb.charAt(0).toUpperCase() + config.verb.slice(1)} ${ids.length} transfer(s)?`)) return;
+    busy = true;
+    setButtonsDisabled_(true);
+    show_(`${config.verb.charAt(0).toUpperCase() + config.verb.slice(1)}ing ${ids.length} transfer(s)...`, "working");
+
     try {
-      const response = await runServer_("approveAndApplyTransfersCanonical", [...selected]);
-      show_(response?.message || "Transfer processing completed.", response?.success ? "success" : "error");
+      const response = await runServer_(config.method, ids);
+      show_(response?.message || "Transfer action completed.", response?.success ? "success" : "error");
       selected.clear();
-      updateCount_();
       await load_();
-      if (typeof window.reloadPersonnelDataFromSheet === "function") await window.reloadPersonnelDataFromSheet({ showStatus: false });
-      else if (typeof window.initializePersonnelApp === "function") await window.initializePersonnelApp();
+      if (["apply", "approveApply"].includes(action)) {
+        if (typeof window.reloadPersonnelDataFromSheet === "function") await window.reloadPersonnelDataFromSheet({ showStatus: false });
+        else if (typeof window.initializePersonnelApp === "function") await window.initializePersonnelApp();
+      }
     } catch (error) {
       show_(error.message, "error");
     } finally {
-      button.disabled = false;
+      busy = false;
+      setButtonsDisabled_(false);
     }
+  }
+
+  function setButtonsDisabled_(disabled) {
+    document.querySelectorAll(`#${IDS.dialog} button`).forEach(button => {
+      if (!button.hasAttribute("data-close")) button.disabled = disabled;
+    });
   }
 
   function patchGeneration_() {
@@ -229,10 +357,10 @@
   }
 
   function show_(message, type) {
-    const el = document.getElementById(IDS.message);
-    el.hidden = false;
-    el.className = `ctq-message is-${type}`;
-    el.textContent = message;
+    const element = document.getElementById(IDS.message);
+    element.hidden = false;
+    element.className = `ctq-message is-${type}`;
+    element.textContent = message;
   }
 
   function installStyles_() {
@@ -241,9 +369,14 @@
     style.id = "canonicalTransferQueueStyles";
     style.textContent = `
       .ctq-backdrop{position:fixed;inset:0;background:rgba(7,25,12,.48);z-index:15000}
-      .ctq-dialog{position:fixed;inset:6vh 4vw;z-index:15001;background:#f7fcf8;border-radius:16px;padding:18px;overflow:auto;box-shadow:0 20px 70px #0005}
+      .ctq-dialog{position:fixed;inset:5vh 3vw;z-index:15001;background:#f7fcf8;border-radius:16px;padding:18px;overflow:auto;box-shadow:0 20px 70px #0005}
       .ctq-header,.ctq-toolbar,.ctq-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.ctq-header h2{margin:2px 0}.ctq-header p{margin:0;color:#58705d}
-      .ctq-toolbar{margin:12px 0}.ctq-wrap{overflow:auto;border:1px solid #c9dfce;border-radius:12px;background:#fff}.ctq-table{width:100%;border-collapse:collapse;min-width:900px}.ctq-table th,.ctq-table td{padding:9px;border-bottom:1px solid #e4eee6;text-align:left}.ctq-table th{background:#e5f3e8;position:sticky;top:0}.ctq-actions{justify-content:flex-end;margin-top:12px}.ctq-message{padding:9px;margin:10px 0;border-radius:8px}.ctq-message.is-success{background:#ddf4e2}.ctq-message.is-error{background:#ffe0e0}.ctq-message.is-working{background:#fff2b8}.ctq-empty{text-align:center;padding:30px!important}
+      .ctq-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.ctq-tab{border:1px solid #c4d9c9;border-radius:999px;background:#fff;padding:7px 11px;font-weight:800;cursor:pointer}.ctq-tab.active{background:#236b39;color:#fff;border-color:#236b39}
+      .ctq-toolbar{margin:10px 0}.ctq-toolbar-left{display:flex;gap:7px;flex-wrap:wrap}.ctq-wrap{overflow:auto;border:1px solid #c9dfce;border-radius:12px;background:#fff}
+      .ctq-table{width:100%;border-collapse:collapse;min-width:1120px}.ctq-table th,.ctq-table td{padding:9px;border-bottom:1px solid #e4eee6;text-align:left;vertical-align:middle}.ctq-table th{background:#e5f3e8;position:sticky;top:0;z-index:1}
+      .ctq-row-actions{display:flex;gap:5px;white-space:nowrap}.ctq-mini{border:1px solid #bfd3c4;background:#fff;border-radius:7px;padding:5px 7px;cursor:pointer}.ctq-mini.primary,.ctq-primary{background:#ffe600;border-color:#d7c400;font-weight:800}
+      .ctq-status{display:inline-block;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ctq-status.is-pending{background:#fff0a6}.ctq-status.is-approved{background:#cde6ff}.ctq-status.is-applied{background:#d3f1d9;color:#175a26}.ctq-status.is-cancelled{background:#e5e5e5}.ctq-status.is-failed{background:#ffd8d8;color:#8b2020}
+      .ctq-actions{justify-content:flex-end;margin-top:12px;flex-wrap:wrap}.ctq-message{padding:9px;margin:10px 0;border-radius:8px}.ctq-message.is-success{background:#ddf4e2}.ctq-message.is-error{background:#ffe0e0}.ctq-message.is-working{background:#fff2b8}.ctq-empty{text-align:center;padding:30px!important}
     `;
     document.head.appendChild(style);
   }
