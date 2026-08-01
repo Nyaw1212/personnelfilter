@@ -20,9 +20,6 @@ function readClientModule(name) {
 function appJsBundle() {
   const entry = read("PersonnelWebApp.js");
 
-  // Developer Mode now runs the clean Reassignment V1 plugin. These legacy
-  // reassignment partials stay in the Apps Script project for production
-  // rollback safety, but are no longer bundled into dev/index.html.
   const excludedLegacyReassignment = new Set([
     "ReassignmentGenerateJS",
     "ReassignmentJS",
@@ -77,6 +74,7 @@ function appJsBundle() {
     "ReassignmentPluginV1Phase3JS.html",
     "PlatformNameFormatEngineJS.html",
     "ReassignmentPluginV1PolishJS.html",
+    "ReassignmentRankDisplayFixJS.html",
     "PlatformReportLauncherUXJS.html",
     "PlatformUIControlBridgeFixJS.html",
     "PlatformKeyboardEngineJS.html",
