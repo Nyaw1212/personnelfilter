@@ -13,8 +13,8 @@
   }
 
   function terms_(value) {
-    if (typeof window.getMultiSearchTerms === "function") {
-      return window.getMultiSearchTerms(value);
+    if (typeof getMultiSearchTerms === "function") {
+      return getMultiSearchTerms(value);
     }
 
     const seen = new Set();
@@ -29,19 +29,26 @@
   }
 
   function install_() {
-    if (!window.PersonnelState || !window.PERSONNEL_APP_CONFIG) return;
+    if (
+      typeof PersonnelState === "undefined" ||
+      typeof PERSONNEL_APP_CONFIG === "undefined" ||
+      typeof filterPersonnelRecords !== "function"
+    ) {
+      window.setTimeout(install_, 50);
+      return;
+    }
 
-    window.filterPersonnelRecords = function multiTextPerformanceFilter() {
+    filterPersonnelRecords = function multiTextPerformanceFilter() {
       const searchTerms = terms_(PersonnelState.filters.search);
-      const mode = typeof window.getMultiSearchMode === "function"
-        ? window.getMultiSearchMode()
+      const mode = typeof getMultiSearchMode === "function"
+        ? getMultiSearchMode()
         : "ANY";
       const groups = PERSONNEL_APP_CONFIG.filterGroups;
       const selectedRanks = PersonnelState.filters.ranks;
 
       return PersonnelState.records.filter(record => {
-        const normalized = typeof window.normalizePersonnelRecord_ === "function"
-          ? window.normalizePersonnelRecord_(record)
+        const normalized = typeof normalizePersonnelRecord_ === "function"
+          ? normalizePersonnelRecord_(record)
           : null;
 
         for (const group of groups) {
@@ -76,8 +83,14 @@
       });
     };
 
-    try { window.handleFilterChange?.(); } catch (_) {}
-    console.info("MultiTextSearch performance filter fix active.");
+    window.filterPersonnelRecords = filterPersonnelRecords;
+
+    try {
+      if (typeof handleFilterChange === "function") handleFilterChange();
+      else if (typeof filterAndRenderPersonnel === "function") filterAndRenderPersonnel();
+    } catch (_) {}
+
+    console.info("MultiTextSearch performance filter fix v1.1.0 active.");
   }
 
   if (document.readyState === "loading") {
