@@ -62,6 +62,7 @@ function includePlatformBundle() {
     "PlatformReportEngineJS",
     "PlatformReportPreviewUIJS",
     "PlatformReportGenerationBridgeJS",
+    "ReportGenerationRetrySafetyJS",
     "ReportToastDedupFixJS",
     "ReassignmentPluginV1JS",
     "ReassignmentPluginV1GroupChangeFixJS",
