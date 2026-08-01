@@ -80,7 +80,6 @@
       structuredName = [first, middle, last, suffix].filter(Boolean).join(" ");
     }
 
-    // Use the old full-name source only when structured columns are unavailable.
     const fallbackName = upper(readField(person, [
       "fullName",
       "Full Name",
@@ -99,6 +98,7 @@
       return handler.format(person, {
         includeRank,
         middleInitial: true,
+        forceStructured: true,
         order: normalizeMode(mode) === "LAST_FIRST_INITIAL" ? "LAST_FIRST" : "FIRST_LAST",
       });
     }
@@ -114,15 +114,17 @@
     if (!root || root.hidden || !assignmentCore) return;
 
     const state = assignmentCore.get(SCOPE);
-    const people = new Map(state?.participants || []);
+    const people = new Map(
+      (state?.participants || []).map(([key, person]) => [String(key), person])
+    );
 
     // Issue area 1: Step 1 / To Be Assigned cards only.
     root.querySelectorAll(".rp1-person").forEach(row => {
       const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
       const label = row.querySelector(".rp1-person-name");
-      if (!label || !key) return;
+      if (!label || key == null) return;
 
-      const formatted = formatReassignmentCard(people.get(key), currentMode);
+      const formatted = formatReassignmentCard(people.get(String(key)), currentMode);
       if (formatted) label.textContent = formatted;
     });
 
@@ -130,9 +132,9 @@
     root.querySelectorAll(".rp1-assigned").forEach(row => {
       const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
       const label = row.querySelector(":scope > span");
-      if (!label || !key) return;
+      if (!label || key == null) return;
 
-      const formatted = formatReassignmentCard(people.get(key), currentMode);
+      const formatted = formatReassignmentCard(people.get(String(key)), currentMode);
       if (formatted) label.textContent = formatted;
     });
   }
@@ -230,7 +232,7 @@
   platform.events.on("selection:changed", scheduleDecorate);
 
   const engine = {
-    version: "2.0.1",
+    version: "2.0.2",
     modes: [...MODES],
     format: formatPerson,
     formatPayload,
@@ -248,6 +250,7 @@
         mode: currentMode,
         nameHandler: Boolean(nameHandler()),
         reassignmentCardFormatter: "G_I_J_H_K",
+        normalizedParticipantKeys: true,
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -261,6 +264,6 @@
   window.$PF = window.$PF || {};
   window.$PF.nameFormat = engine;
   scheduleDecorate();
-  console.info("NameFormatEngine v2.0.1 active: reassignment card labels use structured names.");
+  console.info("NameFormatEngine v2.0.2 active: reassignment name switching fixed.");
 })();
 </script>
