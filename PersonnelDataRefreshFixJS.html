@@ -1,0 +1,119 @@
+<script>
+// Permanent personnel data refresh fix.
+// Replaces records in place so every renderer/patch sees the same array reference.
+
+(function () {
+  "use strict";
+
+  function replaceRecordsInPlace_(nextRecords) {
+    const records = Array.isArray(nextRecords) ? nextRecords : [];
+
+    if (!Array.isArray(PersonnelState.records)) {
+      PersonnelState.records = [];
+    }
+
+    PersonnelState.records.splice(
+      0,
+      PersonnelState.records.length,
+      ...records
+    );
+
+    PersonnelState.filteredRecords = [];
+    PersonnelState.__performanceAnalytics = null;
+
+    PersonnelState.records.forEach(record => {
+      if (!record || typeof record !== "object") return;
+      try {
+        delete record.__personnelNormalized;
+      } catch (_) {
+        record.__personnelNormalized = undefined;
+      }
+    });
+
+    return PersonnelState.records;
+  }
+
+  function renderFreshPersonnel_() {
+    populateFilterValuesFromRecords();
+    renderGeneralFilterGroups();
+
+    PersonnelState.filteredRecords = filterPersonnelRecords();
+
+    syncChipVisuals();
+    updateFilterCounts();
+    updateRankCounts();
+    renderPreviewTable();
+    renderActiveFilterSummary();
+  }
+
+  async function reloadPersonnelDataFromSheet_(options = {}) {
+    const showStatus = options.showStatus !== false;
+
+    if (showStatus) {
+      setSyncStatus("Refreshing personnel...", "working");
+      setLastSyncLabel("Reading current personnel data from Google Sheets...");
+    }
+
+    const response = await PersonnelAPI.loadPersonnel();
+    replaceRecordsInPlace_(response?.records);
+    renderFreshPersonnel_();
+
+    if (showStatus) {
+      setSyncStatus("Preview ready", "ready");
+      setLastSyncLabel(
+        `${PersonnelState.records.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
+      );
+    }
+
+    return PersonnelState.records;
+  }
+
+  function installPermanentRefreshButton_() {
+    const oldButton = document.getElementById("refreshPersonnelDataButton");
+    const applyButton = document.getElementById("applyNowButton");
+    const parent = oldButton?.parentElement || applyButton?.parentElement;
+
+    if (!parent || !applyButton) return;
+
+    const button = oldButton
+      ? oldButton.cloneNode(true)
+      : document.createElement("button");
+
+    if (oldButton) oldButton.replaceWith(button);
+    else parent.insertBefore(button, applyButton);
+
+    button.id = "refreshPersonnelDataButton";
+    button.type = "button";
+    button.className = applyButton.className;
+    button.textContent = "Refresh Data";
+    button.title = "Reload current personnel data from Google Sheets";
+
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+
+      button.disabled = true;
+      const label = button.textContent;
+      button.textContent = "Refreshing...";
+
+      try {
+        await reloadPersonnelDataFromSheet_({ showStatus: true });
+      } catch (error) {
+        console.error("Permanent personnel refresh failed:", error);
+        setSyncStatus("Refresh failed", "error");
+        setLastSyncLabel(
+          error?.message || "Personnel data could not be refreshed."
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    });
+  }
+
+  window.reloadPersonnelDataFromSheet = reloadPersonnelDataFromSheet_;
+
+  window.addEventListener("DOMContentLoaded", () => {
+    installPermanentRefreshButton_();
+  });
+})();
+</script>
