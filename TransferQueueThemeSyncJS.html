@@ -1,0 +1,187 @@
+// Transfer Queue theme synchronization
+(function () {
+  "use strict";
+
+  function installStyles_() {
+    if (document.getElementById("transferQueueThemeSyncStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "transferQueueThemeSyncStyles";
+    style.textContent = `
+      #canonicalTransferQueueDialog.ctq-dialog {
+        background:linear-gradient(145deg,#f8fcf8 0%,#edf8ef 100%) !important;
+        border:1px solid rgba(54,122,73,.22) !important;
+        border-radius:20px !important;
+        box-shadow:0 24px 70px rgba(12,45,22,.28) !important;
+      }
+
+      #canonicalTransferQueueDialog .ctq-header {
+        padding-bottom:12px !important;
+        border-bottom:1px solid rgba(54,122,73,.14) !important;
+      }
+
+      #canonicalTransferQueueDialog button {
+        min-height:32px;
+        padding:7px 12px;
+        border:1px solid #c9dccd;
+        border-radius:10px;
+        background:#fff;
+        color:#24452f;
+        font:inherit;
+        font-weight:750;
+        cursor:pointer;
+        box-sizing:border-box;
+        transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease;
+      }
+
+      #canonicalTransferQueueDialog button:hover:not(:disabled) {
+        background:#eef7f0;
+        border-color:#9fc4a8;
+        box-shadow:0 4px 12px rgba(38,107,62,.10);
+      }
+
+      #canonicalTransferQueueDialog button:disabled {
+        opacity:.48;
+        cursor:not-allowed;
+        box-shadow:none;
+      }
+
+      #canonicalTransferQueueDialog .ctq-tab {
+        min-height:34px;
+        padding:7px 13px;
+        border-radius:999px;
+        background:rgba(255,255,255,.82);
+        border-color:#c9dccd;
+        color:#24452f;
+        font-weight:850;
+      }
+
+      #canonicalTransferQueueDialog .ctq-tab.active {
+        background:#236b39 !important;
+        border-color:#236b39 !important;
+        color:#fff !important;
+        box-shadow:0 5px 14px rgba(35,107,57,.20);
+      }
+
+      #canonicalTransferQueueDialog .ctq-toolbar {
+        padding:8px 0;
+      }
+
+      #canonicalTransferQueueDialog .ctq-wrap {
+        border:1px solid #c9dccd !important;
+        border-radius:14px !important;
+        background:#fff !important;
+        box-shadow:0 5px 18px rgba(38,107,62,.06);
+      }
+
+      #canonicalTransferQueueDialog .ctq-table {
+        border-collapse:separate;
+        border-spacing:0;
+        width:100%;
+      }
+
+      #canonicalTransferQueueDialog .ctq-table thead th {
+        position:sticky;
+        top:0;
+        z-index:5;
+        background:#eef7f0 !important;
+        border-bottom:1px solid #c9dccd !important;
+        color:#24452f;
+        font-weight:800;
+        letter-spacing:.02em;
+        text-transform:uppercase;
+        box-shadow:0 2px 4px rgba(0,0,0,.03);
+      }
+
+      #canonicalTransferQueueDialog .ctq-table tbody tr:hover td {
+        background:#f6fbf7;
+      }
+
+      #canonicalTransferQueueDialog .ctq-status {
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:22px;
+        padding:3px 9px;
+        border-radius:999px;
+        font-size:11px;
+        font-weight:850;
+        letter-spacing:.02em;
+      }
+
+      #canonicalTransferQueueDialog .ctq-status.is-pending {background:#fff1a8;color:#655100}
+      #canonicalTransferQueueDialog .ctq-status.is-approved {background:#dcecff;color:#1f4f80}
+      #canonicalTransferQueueDialog .ctq-status.is-applied {background:#d8f1dc;color:#1e6632}
+      #canonicalTransferQueueDialog .ctq-status.is-cancelled {background:#f7dddd;color:#8a2f2f}
+      #canonicalTransferQueueDialog .ctq-status.is-failed {background:#ffe2d3;color:#8a3d16}
+
+      #canonicalTransferQueueDialog .ctq-row-actions {
+        display:flex;
+        align-items:center;
+        gap:7px;
+        flex-wrap:wrap;
+      }
+
+      #canonicalTransferQueueDialog .ctq-mini {
+        min-height:30px;
+        padding:5px 10px;
+        white-space:nowrap;
+      }
+
+      #canonicalTransferQueueDialog .ctq-mini.primary,
+      #canonicalTransferQueueDialog .ctq-primary,
+      #canonicalTransferQueueDialog [data-approve-apply-selected],
+      #canonicalTransferQueueDialog [data-apply-selected] {
+        background:linear-gradient(180deg,rgba(72,156,100,.24),rgba(72,156,100,.14)) !important;
+        border-color:rgba(40,119,67,.38) !important;
+        color:#174d2b !important;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 5px 14px rgba(38,107,62,.10);
+      }
+
+      #canonicalTransferQueueDialog .ctq-mini.primary:hover:not(:disabled),
+      #canonicalTransferQueueDialog .ctq-primary:hover:not(:disabled),
+      #canonicalTransferQueueDialog [data-approve-apply-selected]:hover:not(:disabled),
+      #canonicalTransferQueueDialog [data-apply-selected]:hover:not(:disabled) {
+        background:linear-gradient(180deg,rgba(72,156,100,.34),rgba(72,156,100,.21)) !important;
+        border-color:rgba(36,111,61,.54) !important;
+      }
+
+      #canonicalTransferQueueDialog [data-cancel-selected],
+      #canonicalTransferQueueDialog .ctq-row-actions button:last-child:not(.primary) {
+        border-color:#efb2b2;
+        color:#a33434;
+        background:#fffafa;
+      }
+
+      #canonicalTransferQueueDialog [data-cancel-selected]:hover:not(:disabled),
+      #canonicalTransferQueueDialog .ctq-row-actions button:last-child:not(.primary):hover:not(:disabled) {
+        background:#fff0f0;
+        border-color:#dd8585;
+      }
+
+      #canonicalTransferQueueDialog .ctq-actions {
+        margin-top:12px;
+        padding-top:12px;
+        border-top:1px solid rgba(54,122,73,.14);
+        justify-content:flex-end;
+        flex-wrap:wrap;
+      }
+
+      #canonicalTransferQueueDialog a {
+        color:#236b39;
+        font-weight:750;
+        text-decoration-thickness:1px;
+        text-underline-offset:2px;
+      }
+    `;
+
+    document.head.appendChild(style);
+    console.info("Transfer Queue theme synchronized with Personnel Filter.");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installStyles_, { once:true });
+  } else {
+    installStyles_();
+  }
+})();
