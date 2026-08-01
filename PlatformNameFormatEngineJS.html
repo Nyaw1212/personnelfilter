@@ -1,6 +1,7 @@
 <script>
 // Personnel Platform — Name Format controls
-// Reassignment card names are formatted directly from stored display parts.
+// Delegates report formatting to NameHandlerEngine.
+// Reassignment card labels use their own structured-field formatter.
 
 (function () {
   "use strict";
@@ -10,8 +11,8 @@
 
   const STORAGE_KEY = "reassignment-v1:name-format";
   const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
   const MODES = ["FIRST_INITIAL_LAST", "LAST_FIRST_INITIAL"];
-  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
   let currentMode = sessionStorage.getItem(STORAGE_KEY) || "FIRST_INITIAL_LAST";
   let scheduled = false;
 
@@ -31,6 +32,15 @@
     return platform.engines.get("nameHandler") || window.$PF?.name;
   }
 
+  function readField(person, names) {
+    const record = person?.record || person || {};
+    for (const name of names) {
+      const value = person?.[name] ?? record?.[name];
+      if (text(value)) return text(value);
+    }
+    return "";
+  }
+
   function middleInitial(value) {
     return text(value)
       .split(/\s+/)
@@ -41,67 +51,90 @@
       .toUpperCase();
   }
 
-  // Reads the currently correct card label once and stores its parts on the element.
-  // Expected initial display order: Rank + First + Middle + Last + Suffix.
-  function captureDisplayParts(label) {
-    if (!label || label.dataset.namePartsReady === "true") return;
+  // Scoped only to the two Reassignment Workspace card labels.
+  // Equivalent source order: G + I + J + H + K
+  // Rank + First Name + Middle Name + Last Name + Suffix.
+  function formatReassignmentCard(person, mode = currentMode) {
+    if (!person) return "";
 
-    const tokens = upper(label.textContent).split(/\s+/).filter(Boolean);
-    if (!tokens.length) return;
+    const rank = upper(readField(person, ["rank", "Rank", "RANK"]));
+    const first = upper(readField(person, ["firstName", "First Name", "FIRST NAME"]));
+    const middleName = upper(readField(person, ["middleName", "Middle Name", "MIDDLE NAME"]));
+    const last = upper(readField(person, ["lastName", "Last Name", "LAST NAME"]));
+    const suffix = upper(readField(person, [
+      "suffix",
+      "Suffix",
+      "SUFFIX",
+      "nameExtension",
+      "Name Extension",
+      "NAME EXTENSION",
+    ])).replace(/\.$/, "");
+    const middle = middleInitial(middleName);
 
-    const rank = tokens.shift() || "";
-    let suffix = "";
-    if (tokens.length && SUFFIXES.has(tokens[tokens.length - 1])) {
-      suffix = tokens.pop().replace(/\.$/, "");
-    }
-
-    const first = tokens.shift() || "";
-    let middle = "";
-    let last = "";
-
-    if (tokens.length === 1) {
-      last = tokens[0];
-    } else if (tokens.length > 1) {
-      middle = tokens.shift() || "";
-      last = tokens.join(" ");
-    }
-
-    label.dataset.rank = rank;
-    label.dataset.first = first;
-    label.dataset.middle = middle;
-    label.dataset.last = last;
-    label.dataset.suffix = suffix;
-    label.dataset.namePartsReady = "true";
-  }
-
-  // Formula-style formatter equivalent to joining G, I, J, H, K.
-  function formatLabel(label, mode = currentMode) {
-    captureDisplayParts(label);
-
-    const rank = upper(label?.dataset.rank);
-    const first = upper(label?.dataset.first);
-    const middle = middleInitial(label?.dataset.middle);
-    const last = upper(label?.dataset.last);
-    const suffix = upper(label?.dataset.suffix).replace(/\.$/, "");
-
-    let name = "";
+    let structuredName = "";
     if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
       const left = [last, suffix].filter(Boolean).join(" ");
       const right = [first, middle].filter(Boolean).join(" ");
-      name = left && right ? `${left}, ${right}` : left || right;
+      structuredName = left && right ? `${left}, ${right}` : left || right;
     } else {
-      name = [first, middle, last, suffix].filter(Boolean).join(" ");
+      structuredName = [first, middle, last, suffix].filter(Boolean).join(" ");
     }
 
+    const fallbackName = upper(readField(person, [
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+      "displayName",
+      "Display Name",
+    ]));
+
+    const name = structuredName || fallbackName;
     return [rank, name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  function formatPerson(person, mode = currentMode, includeRank = false) {
+    const handler = nameHandler();
+    if (handler?.format) {
+      return handler.format(person, {
+        includeRank,
+        middleInitial: true,
+        forceStructured: true,
+        order: normalizeMode(mode) === "LAST_FIRST_INITIAL" ? "LAST_FIRST" : "FIRST_LAST",
+      });
+    }
+
+    const rank = text(person?.rank || person?.record?.Rank || person?.Rank);
+    const fullName = text(person?.fullName || person?.record?.["Full Name"] || person?.["Full Name"]);
+    return [includeRank ? rank : "", fullName].filter(Boolean).join(" ").toUpperCase();
   }
 
   function updateVisibleNames() {
     const root = document.getElementById(ROOT_ID);
-    if (!root || root.hidden) return;
+    const assignmentCore = platform.engines.get("assignmentCore");
+    if (!root || root.hidden || !assignmentCore) return;
 
-    root.querySelectorAll(".rp1-person-name, .rp1-assigned > span").forEach(label => {
-      const formatted = formatLabel(label, currentMode);
+    const state = assignmentCore.get(SCOPE);
+    const people = new Map(
+      (state?.participants || []).map(([key, person]) => [String(key), person])
+    );
+
+    // Issue area 1: Step 1 / To Be Assigned cards only.
+    root.querySelectorAll(".rp1-person").forEach(row => {
+      const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
+      const label = row.querySelector(".rp1-person-name");
+      if (!label || key == null) return;
+
+      const formatted = formatReassignmentCard(people.get(String(key)), currentMode);
+      if (formatted) label.textContent = formatted;
+    });
+
+    // Issue area 2: Step 3 / Assigned Personnel cards only.
+    root.querySelectorAll(".rp1-assigned").forEach(row => {
+      const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
+      const label = row.querySelector(":scope > span");
+      if (!label || key == null) return;
+
+      const formatted = formatReassignmentCard(people.get(String(key)), currentMode);
       if (formatted) label.textContent = formatted;
     });
   }
@@ -165,19 +198,6 @@
     requestAnimationFrame(decorate);
   }
 
-  function formatPerson(person, mode = currentMode, includeRank = false) {
-    const handler = nameHandler();
-    if (handler?.format) {
-      return handler.format(person, {
-        includeRank,
-        middleInitial: true,
-        forceStructured: true,
-        order: normalizeMode(mode) === "LAST_FIRST_INITIAL" ? "LAST_FIRST" : "FIRST_LAST",
-      });
-    }
-    return text(person?.fullName || person?.record?.["Full Name"] || person?.["Full Name"]);
-  }
-
   function formatPayload(payload) {
     if (!payload || text(payload.reportType).toUpperCase() !== "REASSIGNMENT") return payload;
     const next = structuredClone(payload);
@@ -208,20 +228,19 @@
     platform.events.emit("name-format:changed", { mode: currentMode });
   });
 
+  platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
   platform.events.on("selection:changed", scheduleDecorate);
-  platform.events.on("assignment-core:changed:reassignment-v1", scheduleDecorate);
 
   const engine = {
-    version: "2.1.0",
+    version: "2.0.2",
     modes: [...MODES],
     format: formatPerson,
     formatPayload,
-    updateVisibleNames,
     get mode() { return currentMode; },
     setMode(value) {
       currentMode = normalizeMode(value);
       sessionStorage.setItem(STORAGE_KEY, currentMode);
-      updateVisibleNames();
+      scheduleDecorate();
       platform.events.emit("name-format:changed", { mode: currentMode });
       return currentMode;
     },
@@ -229,7 +248,9 @@
       const report = {
         version: this.version,
         mode: currentMode,
-        formatter: "DIRECT_DOM_FORMULA_STYLE",
+        nameHandler: Boolean(nameHandler()),
+        reassignmentCardFormatter: "G_I_J_H_K",
+        normalizedParticipantKeys: true,
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -243,6 +264,6 @@
   window.$PF = window.$PF || {};
   window.$PF.nameFormat = engine;
   scheduleDecorate();
-  console.info("NameFormatEngine v2.1.0 active: direct formula-style card formatter.");
+  console.info("NameFormatEngine v2.0.2 active: reassignment name switching fixed.");
 })();
 </script>
