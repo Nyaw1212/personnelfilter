@@ -16,6 +16,16 @@ const PERSONNEL_WEB_CONFIG =
 
   });
 
+const PERSONNEL_NAME_SUFFIXES_ =
+  new Set([
+    "JR",
+    "SR",
+    "II",
+    "III",
+    "IV",
+    "V",
+  ]);
+
 //----------------------------------
 // Get Personnel Web App Data
 //----------------------------------
@@ -48,10 +58,6 @@ function getPersonnelWebAppData() {
 
   }
 
-  //----------------------------------
-  // Read Sheet
-  //----------------------------------
-
   const values =
     sheet
       .getRange(
@@ -71,10 +77,6 @@ function getPersonnelWebAppData() {
       value =>
         String(value).trim()
     );
-
-  //----------------------------------
-  // Build Personnel Records
-  //----------------------------------
 
   const records =
     values
@@ -174,32 +176,14 @@ function normalizeWebPersonnelRecord_(
 
   const row = Array.isArray(rawRow) ? rawRow : [];
 
-  // LIST sheet positional source of truth:
-  // G = Rank, I = first name, J = middle/name extension, H = last name.
-  // Full Name intentionally excludes column G so the UI can prepend Rank once.
+  // LIST positional source of truth:
+  // G = Rank, H = Last Name, I = First Name, J = Middle Name / extension.
   const columnG = cleanWebCellValue_(row[6]);
   const columnH = cleanWebCellValue_(row[7]);
   const columnI = cleanWebCellValue_(row[8]);
   const columnJ = cleanWebCellValue_(row[9]);
 
-  const positionalFullName = [
-    columnI,
-    columnJ,
-    columnH,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const positionalDisplayName = [
-    columnG,
-    columnI,
-    columnJ,
-    columnH,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const firstName =
+  const headerFirstName =
     getWebRecordValue_(
       source,
       [
@@ -208,7 +192,7 @@ function normalizeWebPersonnelRecord_(
       ]
     );
 
-  const middleName =
+  const headerMiddleName =
     getWebRecordValue_(
       source,
       [
@@ -217,7 +201,7 @@ function normalizeWebPersonnelRecord_(
       ]
     );
 
-  const lastName =
+  const headerLastName =
     getWebRecordValue_(
       source,
       [
@@ -226,27 +210,25 @@ function normalizeWebPersonnelRecord_(
       ]
     );
 
-  const suffix =
+  const headerSuffix =
     getWebRecordValue_(
       source,
       [
         "SUFFIX",
         "Suffix",
+        "NAME EXTENSION",
+        "Name Extension",
       ]
     );
 
-  const generatedName = [
+  const nameParts = normalizeWebNameParts_(
+    columnI || headerFirstName,
+    columnJ || headerMiddleName,
+    columnH || headerLastName,
+    headerSuffix
+  );
 
-    firstName,
-    middleName,
-    lastName,
-    suffix,
-
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const rank =
+  const rank = cleanWebCellValue_(
     columnG ||
     getWebRecordValue_(
       source,
@@ -254,29 +236,39 @@ function normalizeWebPersonnelRecord_(
         "RANK",
         "Rank",
       ]
-    );
+    )
+  ).toUpperCase();
 
-  const fullName =
-    positionalFullName ||
-    generatedName ||
-    getWebRecordValue_(
-      source,
-      [
-        "FULL NAME",
-        "Full Name",
-      ]
-    );
+  const fullName = [
+    nameParts.first,
+    nameParts.middle,
+    nameParts.last,
+    nameParts.suffix,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return {
 
     __sheetRow:
       sheetRow,
 
+    "First Name":
+      nameParts.first,
+
+    "Middle Name":
+      nameParts.middle,
+
+    "Last Name":
+      nameParts.last,
+
+    "Suffix":
+      nameParts.suffix,
+
     "Full Name":
       fullName,
 
     "Display Name":
-      positionalDisplayName ||
       [rank, fullName].filter(Boolean).join(" "),
 
     "Rank":
@@ -341,11 +333,73 @@ function normalizeWebPersonnelRecord_(
 }
 
 //----------------------------------
+// Normalize Structured Name Parts
+//----------------------------------
+
+function normalizeWebNameParts_(
+  firstName,
+  middleName,
+  lastName,
+  explicitSuffix
+) {
+
+  const parts = {
+    first: cleanWebCellValue_(firstName),
+    middle: cleanWebCellValue_(middleName),
+    last: cleanWebCellValue_(lastName),
+    suffix: normalizeWebSuffix_(explicitSuffix),
+  };
+
+  // Some LIST rows place JR./SR./II/etc. inside the first, middle, or last-name
+  // cell. Pull that token out and always place it after the surname.
+  ["first", "middle", "last"].forEach(key => {
+    const tokens = parts[key]
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const kept = [];
+
+    tokens.forEach(token => {
+      const normalizedSuffix = normalizeWebSuffix_(token);
+      if (!parts.suffix && normalizedSuffix) {
+        parts.suffix = normalizedSuffix;
+      } else {
+        kept.push(token);
+      }
+    });
+
+    parts[key] = kept.join(" ");
+  });
+
+  Object.keys(parts).forEach(key => {
+    parts[key] = cleanWebCellValue_(parts[key]).toUpperCase();
+  });
+
+  return parts;
+}
+
+//----------------------------------
+// Normalize Suffix
+//----------------------------------
+
+function normalizeWebSuffix_(value) {
+  const normalized = cleanWebCellValue_(value)
+    .replace(/[.,]/g, "")
+    .toUpperCase();
+
+  return PERSONNEL_NAME_SUFFIXES_.has(normalized)
+    ? normalized
+    : "";
+}
+
+//----------------------------------
 // Clean Raw Sheet Cell
 //----------------------------------
 
 function cleanWebCellValue_(value) {
-  return String(value == null ? "" : value).trim();
+  return String(value == null ? "" : value)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 //----------------------------------
