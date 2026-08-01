@@ -1,0 +1,86 @@
+<script>
+// Report toast deduplication and auto-hide fix.
+(function () {
+  "use strict";
+
+  const PRIMARY_ID = "reportGenerationProgressToast";
+  const SUCCESS_TEXT = "report generated successfully";
+  const AUTO_HIDE_MS = 10000;
+  let hideTimer = 0;
+
+  function normalizedText_(element) {
+    return String(element?.innerText || element?.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function looksLikeReportSuccess_(element) {
+    const text = normalizedText_(element);
+    if (!text.includes(SUCCESS_TEXT)) return false;
+
+    const buttons = [...element.querySelectorAll?.("button, a") || []]
+      .map(node => normalizedText_(node));
+
+    return buttons.some(label => label.includes("open report")) ||
+      buttons.some(label => label.includes("view reports"));
+  }
+
+  function removeDuplicateSuccessToasts_() {
+    const primary = document.getElementById(PRIMARY_ID);
+    if (!primary || primary.hidden) return;
+
+    const candidates = document.querySelectorAll(
+      "aside, [role='alert'], [role='status'], .toast, .notification, .snackbar, div"
+    );
+
+    candidates.forEach(element => {
+      if (element === primary || primary.contains(element) || element.contains(primary)) return;
+      if (!looksLikeReportSuccess_(element)) return;
+
+      // Remove only the smallest matching notification container so that
+      // surrounding application panels are never affected.
+      const matchingChild = [...element.children].find(child => looksLikeReportSuccess_(child));
+      if (matchingChild) return;
+      element.remove();
+    });
+  }
+
+  function schedulePrimaryAutoHide_() {
+    const primary = document.getElementById(PRIMARY_ID);
+    if (!primary || primary.hidden || !normalizedText_(primary).includes(SUCCESS_TEXT)) return;
+
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      const current = document.getElementById(PRIMARY_ID);
+      if (current) current.hidden = true;
+    }, AUTO_HIDE_MS);
+  }
+
+  function reconcile_() {
+    removeDuplicateSuccessToasts_();
+    schedulePrimaryAutoHide_();
+  }
+
+  const observer = new MutationObserver(() => {
+    window.requestAnimationFrame(reconcile_);
+  });
+
+  function install_() {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["hidden", "class"]
+    });
+    reconcile_();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install_, { once: true });
+  } else {
+    install_();
+  }
+})();
+</script>
