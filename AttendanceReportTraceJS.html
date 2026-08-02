@@ -1,0 +1,156 @@
+<script>
+(function () {
+  "use strict";
+
+  const STATUS_BY_CELL = {
+    1: "PRESENT",
+    2: "ABSENT",
+    3: "LEAVE",
+    4: "OB",
+    5: "OFF",
+    6: "UNRECORDED",
+    7: "TOTAL"
+  };
+
+  let locked = null;
+  let hoverToken = 0;
+
+  function installStyles() {
+    if (document.getElementById("attendanceReportTraceStyles")) return;
+    const style = document.createElement("style");
+    style.id = "attendanceReportTraceStyles";
+    style.textContent = `
+      #attendanceReportBackdrop .arr-summary-row td:not(:first-child){cursor:crosshair;transition:background-color .12s ease,box-shadow .12s ease,transform .12s ease}
+      #attendanceReportBackdrop .arr-summary-row td.arr-trace-cell{background:#cfead6!important;box-shadow:inset 0 0 0 2px #347f49;font-weight:900;color:#173d23;transform:translateY(-1px)}
+      #attendanceReportBackdrop .arr-summary-row td.arr-trace-locked{background:#bfe2c8!important;box-shadow:inset 0 0 0 3px #245f36;font-weight:900;color:#123c20}
+      #attendanceReportBackdrop #arrDetail tbody tr{transition:opacity .12s ease,background-color .12s ease,box-shadow .12s ease}
+      #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td{background:#e3f4e7!important}
+      #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td:first-child{box-shadow:inset 5px 0 0 #347f49}
+      #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-dim{opacity:.22}
+      #attendanceReportBackdrop #arrDetailTitle.arr-trace-title::after{content:attr(data-trace-label);display:inline-flex;margin-left:8px;padding:3px 7px;border-radius:999px;background:#dff1e4;color:#245f36;font-size:9px;font-weight:900;vertical-align:middle}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function reportOpen() {
+    const backdrop = document.getElementById("attendanceReportBackdrop");
+    return Boolean(backdrop && !backdrop.hidden);
+  }
+
+  function clearVisuals() {
+    document.querySelectorAll("#attendanceReportBackdrop .arr-trace-cell, #attendanceReportBackdrop .arr-trace-locked")
+      .forEach(cell => cell.classList.remove("arr-trace-cell", "arr-trace-locked"));
+    document.querySelectorAll("#attendanceReportBackdrop #arrDetail tbody tr")
+      .forEach(row => row.classList.remove("arr-trace-match", "arr-trace-dim"));
+    const title = document.getElementById("arrDetailTitle");
+    if (title) {
+      title.classList.remove("arr-trace-title");
+      title.removeAttribute("data-trace-label");
+    }
+  }
+
+  function rowStatus(row) {
+    const badge = row.querySelector(".arr-status");
+    return String(badge && badge.textContent || "").trim().toUpperCase();
+  }
+
+  function applyTrace(cell, status, isLocked) {
+    if (!cell || !status) return;
+    clearVisuals();
+    cell.classList.add(isLocked ? "arr-trace-locked" : "arr-trace-cell");
+
+    const detailRows = Array.from(document.querySelectorAll("#attendanceReportBackdrop #arrDetail tbody tr"));
+    detailRows.forEach(row => {
+      const match = status === "TOTAL" || rowStatus(row) === status;
+      row.classList.toggle("arr-trace-match", match);
+      row.classList.toggle("arr-trace-dim", !match);
+    });
+
+    const matched = detailRows.filter(row => row.classList.contains("arr-trace-match")).length;
+    const title = document.getElementById("arrDetailTitle");
+    if (title) {
+      title.classList.add("arr-trace-title");
+      title.setAttribute("data-trace-label", status === "TOTAL" ? matched + " personnel" : status + " · " + matched);
+    }
+  }
+
+  function ensureOfficeSelected(summaryRow, callback) {
+    if (!summaryRow) return;
+    const office = String(summaryRow.dataset.office || "");
+    const isActive = summaryRow.classList.contains("is-active");
+    if (isActive) {
+      callback();
+      return;
+    }
+    summaryRow.click();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(callback));
+  }
+
+  function traceFromCell(cell, isLocked) {
+    const row = cell && cell.closest(".arr-summary-row");
+    if (!row) return;
+    const status = STATUS_BY_CELL[cell.cellIndex];
+    if (!status) return;
+    const token = ++hoverToken;
+    ensureOfficeSelected(row, function () {
+      if (token !== hoverToken && !isLocked) return;
+      applyTrace(cell, status, isLocked);
+    });
+  }
+
+  document.addEventListener("pointerover", function (event) {
+    if (!reportOpen() || locked) return;
+    const cell = event.target.closest && event.target.closest("#arrSummary .arr-summary-row td");
+    if (!cell || cell.cellIndex === 0) return;
+    traceFromCell(cell, false);
+  });
+
+  document.addEventListener("pointerout", function (event) {
+    if (!reportOpen() || locked) return;
+    const cell = event.target.closest && event.target.closest("#arrSummary .arr-summary-row td");
+    if (!cell) return;
+    const next = event.relatedTarget;
+    if (next && cell.contains(next)) return;
+    ++hoverToken;
+    clearVisuals();
+  });
+
+  document.addEventListener("click", function (event) {
+    if (!reportOpen()) return;
+    const cell = event.target.closest && event.target.closest("#arrSummary .arr-summary-row td");
+    if (!cell || cell.cellIndex === 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const office = String(cell.closest(".arr-summary-row")?.dataset.office || "");
+    const status = STATUS_BY_CELL[cell.cellIndex];
+    const same = locked && locked.office === office && locked.status === status;
+
+    if (same) {
+      locked = null;
+      clearVisuals();
+      return;
+    }
+
+    locked = { office, status };
+    traceFromCell(cell, true);
+  }, true);
+
+  document.addEventListener("click", function (event) {
+    if (!locked || !reportOpen()) return;
+    if (event.target.closest && event.target.closest("#arrSummary .arr-summary-row td")) return;
+    locked = null;
+    clearVisuals();
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !locked) return;
+    locked = null;
+    clearVisuals();
+  });
+
+  document.addEventListener("DOMContentLoaded", installStyles);
+  installStyles();
+})();
+</script>
