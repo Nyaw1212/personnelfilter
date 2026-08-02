@@ -42,7 +42,8 @@ function include(filename) {
     "AttendanceCenterUXHardFixJS",
     "AttendanceCenter70x70PatchJS",
     "AttendanceCenterHoverGuideJS",
-    "AttendanceReportJS"
+    "AttendanceReportJS",
+    "AttendanceReportTraceJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
