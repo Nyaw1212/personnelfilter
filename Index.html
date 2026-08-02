@@ -129,10 +129,6 @@
             </div>
 
             <div class="rank-layout">
-              <!-- ================================== -->
-              <!-- Commissioned Officers -->
-              <!-- ================================== -->
-
               <article class="rank-card commissioned-card">
                 <div class="rank-card-header">
                   <h3>Commissioned Officers</h3>
@@ -148,10 +144,6 @@
                 ></div>
               </article>
 
-              <!-- ================================== -->
-              <!-- Non-Commissioned -->
-              <!-- ================================== -->
-
               <article class="rank-card">
                 <div class="rank-card-header">
                   <h3>Non-Commissioned</h3>
@@ -163,10 +155,6 @@
 
                 <div id="nonCommissionedRanks" class="rank-chip-grid"></div>
               </article>
-
-              <!-- ================================== -->
-              <!-- Technical Non-Commissioned -->
-              <!-- ================================== -->
 
               <article class="rank-card">
                 <div class="rank-card-header">
@@ -182,10 +170,6 @@
             </div>
           </section>
         </section>
-
-        <!-- ================================== -->
-        <!-- Preview Panel -->
-        <!-- ================================== -->
 
         <section class="preview-panel">
           <div class="preview-toolbar">
@@ -232,10 +216,6 @@
           </div>
         </section>
 
-        <!-- ================================== -->
-        <!-- Counting Reports -->
-        <!-- ================================== -->
-
         <aside class="report-panel">
           <div class="report-panel-header">
             <span class="section-eyebrow"> LIVE COUNTS </span>
@@ -247,92 +227,52 @@
 
           <div class="report-panel-content">
             <section class="report-card">
-              <div class="report-card-header">
-                <h3>Gender</h3>
-              </div>
-
+              <div class="report-card-header"><h3>Gender</h3></div>
               <div id="genderReport" class="report-list"></div>
             </section>
 
             <section class="report-card">
-              <div class="report-card-header">
-                <h3>Category</h3>
-              </div>
-
+              <div class="report-card-header"><h3>Category</h3></div>
               <div id="categoryReport" class="report-list"></div>
             </section>
 
             <section class="report-card">
-              <div class="report-card-header">
-                <h3>Type</h3>
-              </div>
-
+              <div class="report-card-header"><h3>Type</h3></div>
               <div id="typeReport" class="report-list"></div>
             </section>
 
             <section class="report-card">
-              <div class="report-card-header">
-                <h3>Offices</h3>
-              </div>
-
-              <div
-                id="officeReport"
-                class="report-list report-list-offices"
-              ></div>
+              <div class="report-card-header"><h3>Offices</h3></div>
+              <div id="officeReport" class="report-list report-list-offices"></div>
             </section>
 
             <section class="report-card">
-              <div class="report-card-header">
-                <h3>Ranks</h3>
-              </div>
-
+              <div class="report-card-header"><h3>Ranks</h3></div>
               <div id="rankReport" class="report-list report-list-ranks"></div>
             </section>
           </div>
         </aside>
 
-        <!-- ================================== -->
-        <!-- Duplicate Panel Backdrop -->
-        <!-- ================================== -->
-
-        <div
-          id="duplicatePanelBackdrop"
-          class="duplicate-panel-backdrop"
-          hidden
-        ></div>
-
-        <!-- ================================== -->
-        <!-- Duplicate Personnel Panel -->
-        <!-- ================================== -->
+        <div id="duplicatePanelBackdrop" class="duplicate-panel-backdrop" hidden></div>
 
         <aside id="duplicatePanel" class="duplicate-panel" hidden>
           <div class="duplicate-panel-header">
             <div>
               <span class="section-eyebrow"> DATA QUALITY </span>
-
               <h2>Duplicated Personnel Names</h2>
             </div>
 
-            <button
-              id="closeDuplicatePanelButton"
-              class="duplicate-close-button"
-              type="button"
-              title="Close"
-            >
-              ×
-            </button>
+            <button id="closeDuplicatePanelButton" class="duplicate-close-button" type="button" title="Close">×</button>
           </div>
 
           <div class="duplicate-panel-summary">
             <div class="duplicate-summary-card">
               <span> Duplicate Names </span>
-
               <strong id="duplicateNameCount"> 0 </strong>
             </div>
 
             <div class="duplicate-summary-card">
               <span> Duplicate Rows </span>
-
               <strong id="duplicateRowCount"> 0 </strong>
             </div>
           </div>
@@ -341,67 +281,32 @@
         </aside>
       </main>
 
-      <!-- ================================== -->
-      <!-- Footer -->
-      <!-- ================================== -->
-
       <footer id="appFooter" class="app-footer">
         <div>
-          <div id="activeFilterSummary" class="active-filter-summary">
-            No active filters
-          </div>
-
-          <div id="lastSyncLabel" class="last-sync-label">
-            Connected to Google Sheets through Apps Script.
-          </div>
+          <div id="activeFilterSummary" class="active-filter-summary">No active filters</div>
+          <div id="lastSyncLabel" class="last-sync-label">Connected to Google Sheets through Apps Script.</div>
         </div>
 
         <div class="footer-actions">
           <label class="toggle-control">
             <input id="autoApplyToggle" type="checkbox" checked />
-
             <span class="toggle-slider"></span>
-
             <span class="toggle-label"> Auto Apply </span>
           </label>
 
-          <button
-            id="applyNowButton"
-            class="button button-primary"
-            type="button"
-          >
-            Apply Now
-          </button>
+          <button id="applyNowButton" class="button button-primary" type="button">Apply Now</button>
         </div>
       </footer>
-
-      <!-- ================================== -->
-      <!-- Minimized Bar -->
-      <!-- ================================== -->
 
       <div id="minimizedBar" class="minimized-bar" hidden>
         <div>
           <strong> Personnel Filter </strong>
-
           <span id="minimizedResultCount"> 0 personnel </span>
         </div>
 
-        <button
-          id="restoreFromBarButton"
-          class="button button-primary button-small"
-          type="button"
-        >
-          Restore
-        </button>
+        <button id="restoreFromBarButton" class="button button-primary button-small" type="button">Restore</button>
       </div>
     </div>
-    <!-- ================================== -->
-    <!-- Apps Script JavaScript Includes -->
-    <!-- ================================== -->
-
-<!-- ================================== -->
-<!-- Apps Script JavaScript -->
-<!-- ================================== -->
 
 <script>
 
@@ -416,6 +321,8 @@
   <?!= include("RenderersJS"); ?>
 
   <?!= include("SyncEngineJS"); ?>
+
+  <?!= include("AttendanceCenterJS"); ?>
 
   <?!= include("AppJS"); ?>
 
