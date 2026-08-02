@@ -12,6 +12,10 @@
     7: "TOTAL"
   };
 
+  const CELL_BY_STATUS = Object.fromEntries(
+    Object.entries(STATUS_BY_CELL).map(([index, status]) => [status, Number(index)])
+  );
+
   let locked = null;
   let hoverToken = 0;
 
@@ -20,15 +24,23 @@
     const style = document.createElement("style");
     style.id = "attendanceReportTraceStyles";
     style.textContent = `
-      #attendanceReportBackdrop .arr-summary-row td:not(:first-child){cursor:crosshair;transition:background-color .12s ease,box-shadow .12s ease,transform .12s ease}
+      #attendanceReportBackdrop .arr-summary-row td:not(:first-child){position:relative;cursor:crosshair;transition:background-color .12s ease,box-shadow .12s ease,transform .12s ease}
       #attendanceReportBackdrop .arr-summary-row td.arr-trace-cell{background:#cfead6!important;box-shadow:inset 0 0 0 2px #347f49;font-weight:900;color:#173d23;transform:translateY(-1px)}
       #attendanceReportBackdrop .arr-summary-row td.arr-trace-locked{background:#bfe2c8!important;box-shadow:inset 0 0 0 3px #245f36;font-weight:900;color:#123c20}
+      #attendanceReportBackdrop .arr-summary-row td.arr-trace-locked::after{content:"✓";position:absolute;right:3px;top:1px;font-size:8px;color:#245f36}
       #attendanceReportBackdrop #arrDetail tbody tr{transition:opacity .12s ease,background-color .12s ease,box-shadow .12s ease}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td{background:#e3f4e7!important}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td:first-child{box-shadow:inset 5px 0 0 #347f49}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-dim{opacity:.22}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-revealed td{animation:arrTraceReveal .75s ease}
       #attendanceReportBackdrop #arrDetailTitle.arr-trace-title::after{content:attr(data-trace-label);display:inline-flex;margin-left:8px;padding:3px 7px;border-radius:999px;background:#dff1e4;color:#245f36;font-size:9px;font-weight:900;vertical-align:middle}
+      #attendanceReportBackdrop .arr-trace-audit{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 9px;border-top:1px solid #d8e5db;background:#f5faf6}
+      #attendanceReportBackdrop .arr-trace-audit[hidden]{display:none}
+      #attendanceReportBackdrop .arr-trace-stat{border:1px solid #dbe8de;border-radius:8px;background:#fff;padding:6px 8px}
+      #attendanceReportBackdrop .arr-trace-stat span{display:block;font-size:8px;font-weight:900;letter-spacing:.04em;color:#6c7e71;text-transform:uppercase}
+      #attendanceReportBackdrop .arr-trace-stat strong{display:block;margin-top:2px;font-size:14px;color:#203d29}
+      #attendanceReportBackdrop .arr-trace-stat.is-active{background:#e3f4e7;border-color:#b8d9c0}
+      #attendanceReportBackdrop .arr-trace-help{grid-column:1/-1;font-size:9px;color:#6b7d70;text-align:center;padding-top:1px}
       @keyframes arrTraceReveal{0%{box-shadow:inset 0 0 0 3px #2f7d45,0 0 0 0 rgba(47,125,69,.35)}55%{box-shadow:inset 0 0 0 3px #2f7d45,0 0 0 7px rgba(47,125,69,.12)}100%{box-shadow:inset 0 0 0 0 transparent,0 0 0 0 transparent}}
     `;
     document.head.appendChild(style);
@@ -37,6 +49,29 @@
   function reportOpen() {
     const backdrop = document.getElementById("attendanceReportBackdrop");
     return Boolean(backdrop && !backdrop.hidden);
+  }
+
+  function ensureAuditStrip() {
+    const totals = document.getElementById("arrDetailTotals");
+    if (!totals || document.getElementById("arrTraceAudit")) return;
+    const strip = document.createElement("div");
+    strip.id = "arrTraceAudit";
+    strip.className = "arr-trace-audit";
+    strip.hidden = true;
+    totals.insertAdjacentElement("beforebegin", strip);
+  }
+
+  function updateAuditStrip(status, matched, total, isLocked) {
+    ensureAuditStrip();
+    const strip = document.getElementById("arrTraceAudit");
+    if (!strip) return;
+    const hidden = Math.max(0, total - matched);
+    strip.hidden = false;
+    strip.innerHTML = `
+      <div class="arr-trace-stat is-active"><span>Inspecting</span><strong>${status === "TOTAL" ? "ALL" : status}</strong></div>
+      <div class="arr-trace-stat"><span>Visible</span><strong>${matched}</strong></div>
+      <div class="arr-trace-stat"><span>Hidden</span><strong>${hidden}</strong></div>
+      <div class="arr-trace-help">${isLocked ? "Locked · use ← → to inspect another status · Esc to clear" : "Hover preview · click the number to lock"}</div>`;
   }
 
   function clearVisuals() {
@@ -48,6 +83,11 @@
     if (title) {
       title.classList.remove("arr-trace-title");
       title.removeAttribute("data-trace-label");
+    }
+    const strip = document.getElementById("arrTraceAudit");
+    if (strip) {
+      strip.hidden = true;
+      strip.innerHTML = "";
     }
   }
 
@@ -90,8 +130,13 @@
     const title = document.getElementById("arrDetailTitle");
     if (title) {
       title.classList.add("arr-trace-title");
-      title.setAttribute("data-trace-label", status === "TOTAL" ? matched + " personnel" : status + " · " + matched);
+      title.setAttribute(
+        "data-trace-label",
+        status === "TOTAL" ? matched + " personnel" : status + " · " + matched + " of " + detailRows.length
+      );
     }
+
+    updateAuditStrip(status, matched, detailRows.length, isLocked);
 
     if (matched && status !== "TOTAL") {
       window.requestAnimationFrame(() => revealFirstMatch(detailRows));
@@ -119,6 +164,28 @@
       if (token !== hoverToken && !isLocked) return;
       applyTrace(cell, status, isLocked);
     });
+  }
+
+  function lockedCell() {
+    if (!locked) return null;
+    const rows = Array.from(document.querySelectorAll("#arrSummary .arr-summary-row"));
+    const row = rows.find(item => String(item.dataset.office || "") === locked.office);
+    const index = CELL_BY_STATUS[locked.status];
+    return row && index ? row.cells[index] : null;
+  }
+
+  function moveLocked(direction) {
+    if (!locked) return;
+    const currentIndex = CELL_BY_STATUS[locked.status] || 1;
+    const nextIndex = Math.min(7, Math.max(1, currentIndex + direction));
+    if (nextIndex === currentIndex) return;
+    const currentCell = lockedCell();
+    const row = currentCell && currentCell.closest(".arr-summary-row");
+    const nextCell = row && row.cells[nextIndex];
+    if (!nextCell) return;
+    locked.status = STATUS_BY_CELL[nextIndex];
+    traceFromCell(nextCell, true);
+    nextCell.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   }
 
   document.addEventListener("pointerover", function (event) {
@@ -168,12 +235,21 @@
   });
 
   document.addEventListener("keydown", function (event) {
-    if (event.key !== "Escape" || !locked) return;
-    locked = null;
-    clearVisuals();
+    if (!reportOpen()) return;
+    if (event.key === "Escape" && locked) {
+      locked = null;
+      clearVisuals();
+      return;
+    }
+    if (!locked || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+    event.preventDefault();
+    moveLocked(event.key === "ArrowRight" ? 1 : -1);
   });
 
-  document.addEventListener("DOMContentLoaded", installStyles);
+  document.addEventListener("DOMContentLoaded", function () {
+    installStyles();
+    ensureAuditStrip();
+  });
   installStyles();
 })();
 </script>
