@@ -1,27 +1,435 @@
-(function(){
+(function () {
   "use strict";
-  const state={roster:[],statuses:new Map(),remarks:new Map(),presets:[]};
-  const norm=v=>String(v||"").trim().replace(/\s+/g," ").toUpperCase();
-  const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
-  const server=(method,arg)=>new Promise((resolve,reject)=>{let r=google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(new Error(e&&e.message?e.message:String(e))));arg===undefined?r[method]():r[method](arg);});
 
-  function records(){return typeof PersonnelState!=="undefined"&&Array.isArray(PersonnelState.records)?PersonnelState.records:[];}
-  function styles(){if(document.getElementById("acStyles"))return;const s=document.createElement("style");s.id="acStyles";s.textContent=`
-  .ac-backdrop{position:fixed;inset:0;z-index:5000;background:rgba(18,38,25,.48);display:grid;place-items:center;padding:18px}.ac-backdrop[hidden]{display:none}.ac-shell{width:min(1180px,100%);height:min(860px,95vh);background:#f7fbf8;border:1px solid #c7dccd;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto;box-shadow:0 30px 80px rgba(0,0,0,.25)}.ac-head,.ac-foot{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;background:#eef7f0;border-bottom:1px solid #d3e3d6}.ac-foot{border-top:1px solid #d3e3d6;border-bottom:0;background:white}.ac-head h2{margin:0;color:#173d23}.ac-head p{margin:3px 0 0;color:#607566;font-size:12px}.ac-close,.ac-btn{border:1px solid #bfd3c4;background:#fff;color:#214b2d;border-radius:10px;font-weight:700;cursor:pointer}.ac-close{width:34px;height:34px;font-size:20px}.ac-btn{height:39px;padding:0 13px}.ac-primary{background:#347f49;color:#fff;border-color:#347f49}.ac-controls{display:grid;grid-template-columns:160px 1fr 1fr 1fr auto;gap:10px;padding:14px 18px;background:white;border-bottom:1px solid #dce9df}.ac-field{display:grid;gap:5px}.ac-field label{font-size:10px;font-weight:800;letter-spacing:.05em;color:#55705e}.ac-field input,.ac-field select,.ac-search,.ac-status,.ac-remarks{height:39px;border:1px solid #c9d9cd;border-radius:9px;background:white;padding:0 10px}.ac-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;padding:12px 18px}.ac-stat{background:white;border:1px solid #d8e5db;border-radius:11px;padding:9px 11px}.ac-stat span{display:block;font-size:9px;font-weight:800;color:#6b7d70}.ac-stat strong{font-size:21px;color:#203d29}.ac-work{overflow:auto;padding:0 18px 18px}.ac-tools{position:sticky;top:0;z-index:2;display:flex;gap:8px;padding:11px 0;background:#f7fbf8}.ac-search{flex:1}.ac-table{width:100%;border-collapse:collapse;background:white;border:1px solid #d6e4d9}.ac-table th{position:sticky;top:60px;background:#eaf5ed;text-align:left;padding:10px;font-size:10px}.ac-table td{padding:8px 10px;border-top:1px solid #edf2ee}.ac-name{font-weight:800}.ac-sub{font-size:10px;color:#718178}.ac-empty{text-align:center;padding:50px;color:#718178}.ac-msg{font-size:12px;color:#607566}@media(max-width:850px){.ac-controls{grid-template-columns:1fr 1fr}.ac-summary{grid-template-columns:repeat(3,1fr)}.ac-table{min-width:720px}}
-  `;document.head.appendChild(s);}
+  const STATUSES = ["PRESENT", "OFF", "LEAVE", "OB", "ABSENT", "UNRECORDED"];
+  const SHORT = {
+    PRESENT: "P",
+    OFF: "O",
+    LEAVE: "L",
+    OB: "OB",
+    ABSENT: "A",
+    UNRECORDED: "—",
+  };
+  const KEY_STATUS = {
+    p: "PRESENT",
+    o: "OFF",
+    l: "LEAVE",
+    b: "OB",
+    a: "ABSENT",
+    u: "UNRECORDED",
+  };
 
-  function build(){if(document.getElementById("attendanceCenterBackdrop"))return;styles();const b=document.createElement("div");b.id="attendanceCenterBackdrop";b.className="ac-backdrop";b.hidden=true;b.innerHTML=`<section class="ac-shell"><header class="ac-head"><div><h2>Attendance Center</h2><p>Office-based attendance recorder</p></div><button id="acClose" class="ac-close" type="button">×</button></header><div class="ac-controls"><div class="ac-field"><label>ATTENDANCE DATE</label><input id="acDate" type="date"></div><div class="ac-field"><label>CAMP</label><select id="acCamp"><option value="">Select camp</option></select></div><div class="ac-field"><label>OFFICE</label><select id="acOffice"><option value="">Select office</option></select></div><div class="ac-field"><label>DUTY DETAIL</label><select id="acPreset"><option>Normal Office Days</option></select></div><button id="acLoad" class="ac-btn ac-primary" type="button">Load Personnel</button></div><div id="acSummary" class="ac-summary"></div><div class="ac-work"><div class="ac-tools"><input id="acSearch" class="ac-search" type="search" placeholder="Search personnel..."><button id="acMarkAll" class="ac-btn">Mark All Present</button><button id="acClear" class="ac-btn">Clear</button></div><div id="acTableWrap" class="ac-empty">Select a date, camp, and office.</div></div><footer class="ac-foot"><div id="acMessage" class="ac-msg">Ready.</div><button id="acSave" class="ac-btn ac-primary" type="button">Save Attendance</button></footer></section>`;document.body.appendChild(b);document.getElementById("acDate").value=new Date().toISOString().slice(0,10);document.getElementById("acClose").onclick=close;document.getElementById("acCamp").onchange=populateOffices;document.getElementById("acLoad").onclick=loadRoster;document.getElementById("acMarkAll").onclick=()=>setAll("PRESENT");document.getElementById("acClear").onclick=()=>setAll("UNRECORDED");document.getElementById("acSearch").oninput=render;document.getElementById("acSave").onclick=save;b.addEventListener("click",e=>{if(e.target===b)close();});renderSummary();}
-  function populateCamps(){const vals=[...new Set(records().map(r=>String(r.Camp||"").trim()).filter(Boolean))].sort();const el=document.getElementById("acCamp");el.innerHTML='<option value="">Select camp</option>'+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");populateOffices();}
-  function populateOffices(){const camp=norm(document.getElementById("acCamp").value);const vals=[...new Set(records().filter(r=>!camp||norm(r.Camp)===camp).map(r=>String(r.Office||"").trim()).filter(Boolean))].sort();document.getElementById("acOffice").innerHTML='<option value="">Select office</option>'+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");}
-  async function open(){build();document.getElementById("attendanceCenterBackdrop").hidden=false;try{const boot=await server("getAttendanceCenterBootstrap");state.presets=Array.isArray(boot&&boot.presets)?boot.presets:[];if(state.presets.length)document.getElementById("acPreset").innerHTML=state.presets.map(p=>`<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");populateCamps();msg("Select an office and load personnel.");}catch(e){msg(e.message,true);}}
-  function close(){const b=document.getElementById("attendanceCenterBackdrop");if(b)b.hidden=true;}
-  async function loadRoster(){const date=document.getElementById("acDate").value,camp=document.getElementById("acCamp").value,office=document.getElementById("acOffice").value;if(!date||!camp||!office){msg("Select a date, camp, and office first.",true);return;}state.roster=records().filter(r=>norm(r.Camp)===norm(camp)&&norm(r.Office)===norm(office)).map(r=>({employeeKey:String(r.__sheetRow||r["Employee ID"]||r["Full Name"]||""),sheetRow:r.__sheetRow||"",fullName:String(r["Full Name"]||"").trim(),rank:String(r.Rank||"").trim(),office:String(r.Office||"").trim(),camp:String(r.Camp||"").trim()})).filter(r=>r.fullName).sort((a,b)=>a.fullName.localeCompare(b.fullName));state.statuses=new Map(state.roster.map(r=>[r.employeeKey,"UNRECORDED"]));state.remarks=new Map();try{const saved=await server("loadAttendanceCenterRecords",{date,camp,office});(saved&&saved.records||[]).forEach(r=>{const k=String(r.employeeKey);if(state.statuses.has(k)){state.statuses.set(k,norm(r.status)||"UNRECORDED");state.remarks.set(k,String(r.remarks||""));}});render();renderSummary();msg(`${state.roster.length} personnel loaded for ${office}.`);}catch(e){render();renderSummary();msg(e.message,true);}}
-  function setAll(s){state.roster.forEach(r=>state.statuses.set(r.employeeKey,s));render();renderSummary();}
-  function render(){const wrap=document.getElementById("acTableWrap");if(!state.roster.length){wrap.className="ac-empty";wrap.textContent="No personnel loaded.";return;}const q=norm(document.getElementById("acSearch").value);const rows=state.roster.filter(r=>!q||norm(r.fullName+" "+r.rank).includes(q));wrap.className="";wrap.innerHTML=`<table class="ac-table"><thead><tr><th>Personnel</th><th>Rank</th><th>Status</th><th>Remarks</th></tr></thead><tbody>${rows.map(r=>`<tr><td><div class="ac-name">${esc(r.fullName)}</div><div class="ac-sub">Row ${esc(r.sheetRow||"—")}</div></td><td>${esc(r.rank)}</td><td><select class="ac-status" data-k="${esc(r.employeeKey)}">${["PRESENT","ABSENT","LEAVE","OB","UNRECORDED"].map(s=>`<option ${state.statuses.get(r.employeeKey)===s?"selected":""}>${s}</option>`).join("")}</select></td><td><input class="ac-remarks" data-r="${esc(r.employeeKey)}" value="${esc(state.remarks.get(r.employeeKey)||"")}"></td></tr>`).join("")}</tbody></table>`;wrap.querySelectorAll("[data-k]").forEach(el=>el.onchange=e=>{state.statuses.set(e.target.dataset.k,e.target.value);renderSummary();});wrap.querySelectorAll("[data-r]").forEach(el=>el.oninput=e=>state.remarks.set(e.target.dataset.r,e.target.value));}
-  function counts(){const c={TOTAL:state.roster.length,PRESENT:0,ABSENT:0,LEAVE:0,OB:0,UNRECORDED:0};state.roster.forEach(r=>c[state.statuses.get(r.employeeKey)||"UNRECORDED"]++);return c;}
-  function renderSummary(){const c=counts();document.getElementById("acSummary").innerHTML=[["Total",c.TOTAL],["Present",c.PRESENT],["Absent",c.ABSENT],["Leave",c.LEAVE],["OB",c.OB],["Unrecorded",c.UNRECORDED]].map(x=>`<div class="ac-stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join("");}
-  async function save(){if(!state.roster.length){msg("Load personnel first.",true);return;}const btn=document.getElementById("acSave");btn.disabled=true;btn.textContent="Saving...";try{const payload={date:document.getElementById("acDate").value,camp:document.getElementById("acCamp").value,office:document.getElementById("acOffice").value,dutyDetail:document.getElementById("acPreset").value,records:state.roster.map(r=>({...r,status:state.statuses.get(r.employeeKey)||"UNRECORDED",remarks:state.remarks.get(r.employeeKey)||""}))};const res=await server("saveAttendanceCenterSubmission",payload);if(!res||!res.success)throw new Error(res&&res.message||"Save failed.");msg(res.message+" Submission: "+res.submissionId);}catch(e){msg(e.message,true);}finally{btn.disabled=false;btn.textContent="Save Attendance";}}
-  function msg(t,err){const e=document.getElementById("acMessage");if(e){e.textContent=t;e.style.color=err?"#a23f3f":"#607566";}}
-  document.addEventListener("DOMContentLoaded",build);
-  window.AttendanceCenterPrototype={open,close,getState:()=>({roster:state.roster.slice(),counts:counts()})};
+  const state = {
+    roster: [],
+    cells: new Map(),
+    presets: [],
+    week: [],
+    selected: null,
+  };
+
+  const norm = value => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
+  const esc = value => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  const server = (method, argument) => new Promise((resolve, reject) => {
+    let runner = google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(error => reject(new Error(error && error.message ? error.message : String(error))));
+    argument === undefined ? runner[method]() : runner[method](argument);
+  });
+
+  function records() {
+    return typeof PersonnelState !== "undefined" && Array.isArray(PersonnelState.records)
+      ? PersonnelState.records
+      : [];
+  }
+
+  function iso(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function weekFrom(value) {
+    const source = value ? new Date(`${value}T12:00:00`) : new Date();
+    const start = new Date(source);
+    start.setDate(source.getDate() - source.getDay());
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      return day;
+    });
+  }
+
+  function cellKey(employeeKey, dateText) {
+    return `${employeeKey}|${dateText}`;
+  }
+
+  function defaultForDay(dayIndex) {
+    return dayIndex === 0 || dayIndex === 6 ? "OFF" : "PRESENT";
+  }
+
+  function styles() {
+    if (document.getElementById("acStyles")) return;
+    const style = document.createElement("style");
+    style.id = "acStyles";
+    style.textContent = `
+      .ac-backdrop{position:fixed;inset:0;z-index:5000;background:rgba(18,38,25,.48);display:grid;place-items:center;padding:14px}.ac-backdrop[hidden]{display:none}
+      .ac-shell{width:min(1420px,100%);height:min(900px,96vh);background:#f7fbf8;border:1px solid #c7dccd;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto;box-shadow:0 30px 80px rgba(0,0,0,.25)}
+      .ac-head,.ac-foot{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:#eef7f0;border-bottom:1px solid #d3e3d6}.ac-foot{border-top:1px solid #d3e3d6;border-bottom:0;background:#fff}.ac-head h2{margin:0;color:#173d23}.ac-head p{margin:3px 0 0;color:#607566;font-size:12px}
+      .ac-close,.ac-btn{border:1px solid #bfd3c4;background:#fff;color:#214b2d;border-radius:10px;font-weight:700;cursor:pointer}.ac-close{width:34px;height:34px;font-size:20px}.ac-btn{min-height:38px;padding:0 12px}.ac-primary{background:#347f49;color:#fff;border-color:#347f49}
+      .ac-controls{display:grid;grid-template-columns:170px 1fr 1fr 1fr auto auto;gap:9px;padding:12px 16px;background:#fff;border-bottom:1px solid #dce9df}.ac-field{display:grid;gap:4px}.ac-field label{font-size:10px;font-weight:800;letter-spacing:.05em;color:#55705e}.ac-field input,.ac-field select,.ac-search{height:38px;border:1px solid #c9d9cd;border-radius:9px;background:#fff;padding:0 10px}
+      .ac-summary{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:10px 16px}.ac-stat{background:#fff;border:1px solid #d8e5db;border-radius:11px;padding:8px 10px}.ac-stat span{display:block;font-size:9px;font-weight:800;color:#6b7d70}.ac-stat strong{font-size:20px;color:#203d29}
+      .ac-work{overflow:auto;padding:0 16px 16px}.ac-tools{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:10px 0;background:#f7fbf8}.ac-search{flex:1}.ac-help{font-size:11px;color:#64786a;white-space:nowrap}
+      .ac-grid{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d6e4d9;border-radius:12px;overflow:hidden;table-layout:fixed}.ac-grid th{position:sticky;top:58px;z-index:3;background:#eaf5ed;padding:8px 5px;font-size:10px;color:#31543d;border-bottom:1px solid #cadbce}.ac-grid th:first-child{left:0;z-index:4;width:260px;text-align:left}.ac-grid td{border-top:1px solid #edf2ee;padding:5px;text-align:center}.ac-grid td:first-child{position:sticky;left:0;z-index:2;background:#fff;text-align:left;padding:8px 10px}.ac-name{font-weight:800;color:#173d23}.ac-sub{font-size:10px;color:#718178;margin-top:2px}
+      .ac-day-label{display:block;font-weight:900}.ac-date-label{display:block;font-size:10px;color:#718178;margin-top:2px}.ac-cell{width:44px;height:36px;border:1px solid #cbd9ce;border-radius:8px;font-weight:900;cursor:pointer;background:#fff;color:#405047}.ac-cell:hover{transform:none;box-shadow:0 0 0 2px rgba(52,127,73,.12)}.ac-cell.is-selected{outline:3px solid #173d23;outline-offset:1px}
+      .ac-cell[data-status="PRESENT"]{background:#dff3e3;color:#17612c;border-color:#9dccaa}.ac-cell[data-status="OFF"]{background:#e7e9e8;color:#59615d;border-color:#c6cbc8}.ac-cell[data-status="LEAVE"]{background:#fff1ad;color:#695400;border-color:#e7cf59}.ac-cell[data-status="OB"]{background:#dceeff;color:#15598b;border-color:#92c6ef}.ac-cell[data-status="ABSENT"]{background:#ffe0df;color:#9a2924;border-color:#e7aaa7}.ac-cell[data-status="UNRECORDED"]{background:#fff;color:#8a948e;border-style:dashed}
+      .ac-empty{text-align:center;padding:50px;color:#718178}.ac-msg{font-size:12px;color:#607566}.ac-week-title{font-size:12px;font-weight:800;color:#31543d}
+      @media(max-width:900px){.ac-controls{grid-template-columns:1fr 1fr}.ac-summary{grid-template-columns:repeat(4,1fr)}.ac-grid{min-width:920px}.ac-help{display:none}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function build() {
+    if (document.getElementById("attendanceCenterBackdrop")) return;
+    styles();
+    const backdrop = document.createElement("div");
+    backdrop.id = "attendanceCenterBackdrop";
+    backdrop.className = "ac-backdrop";
+    backdrop.hidden = true;
+    backdrop.innerHTML = `
+      <section class="ac-shell" role="dialog" aria-modal="true" aria-label="Attendance Center">
+        <header class="ac-head">
+          <div><h2>Attendance Center</h2><p>Weekly office attendance recorder</p></div>
+          <button id="acClose" class="ac-close" type="button">×</button>
+        </header>
+        <div class="ac-controls">
+          <div class="ac-field"><label>WEEK CONTAINING</label><input id="acDate" type="date"></div>
+          <div class="ac-field"><label>CAMP</label><select id="acCamp"><option value="">Select camp</option></select></div>
+          <div class="ac-field"><label>OFFICE</label><select id="acOffice"><option value="">Select office</option></select></div>
+          <div class="ac-field"><label>DUTY PRESET</label><select id="acPreset"><option>Normal Office Days</option></select></div>
+          <button id="acLoad" class="ac-btn ac-primary" type="button">Load Week</button>
+          <button id="acApplyPreset" class="ac-btn" type="button">Apply Preset</button>
+        </div>
+        <div id="acSummary" class="ac-summary"></div>
+        <div class="ac-work">
+          <div class="ac-tools">
+            <button id="acPrev" class="ac-btn" type="button">‹ Previous</button>
+            <div id="acWeekTitle" class="ac-week-title"></div>
+            <button id="acNext" class="ac-btn" type="button">Next ›</button>
+            <input id="acSearch" class="ac-search" type="search" placeholder="Search personnel...">
+            <span class="ac-help">Keys: P O L B A U · arrows move · Ctrl+S save</span>
+            <button id="acClear" class="ac-btn" type="button">Clear Week</button>
+          </div>
+          <div id="acTableWrap" class="ac-empty">Select a week, camp, and office.</div>
+        </div>
+        <footer class="ac-foot">
+          <div id="acMessage" class="ac-msg">Ready.</div>
+          <button id="acSave" class="ac-btn ac-primary" type="button">Save Week</button>
+        </footer>
+      </section>`;
+    document.body.appendChild(backdrop);
+
+    document.getElementById("acDate").value = iso(new Date());
+    document.getElementById("acClose").onclick = close;
+    document.getElementById("acCamp").onchange = populateOffices;
+    document.getElementById("acLoad").onclick = loadRoster;
+    document.getElementById("acApplyPreset").onclick = applyPreset;
+    document.getElementById("acClear").onclick = () => setAll("UNRECORDED");
+    document.getElementById("acSearch").oninput = render;
+    document.getElementById("acSave").onclick = save;
+    document.getElementById("acPrev").onclick = () => moveWeek(-7);
+    document.getElementById("acNext").onclick = () => moveWeek(7);
+    document.getElementById("acDate").onchange = updateWeek;
+    backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
+    document.addEventListener("keydown", handleKeyboard);
+    updateWeek();
+    renderSummary();
+  }
+
+  function updateWeek() {
+    state.week = weekFrom(document.getElementById("acDate").value);
+    const first = state.week[0];
+    const last = state.week[6];
+    document.getElementById("acWeekTitle").textContent = `${first.toLocaleDateString()} – ${last.toLocaleDateString()}`;
+  }
+
+  function moveWeek(days) {
+    const current = new Date(`${document.getElementById("acDate").value}T12:00:00`);
+    current.setDate(current.getDate() + days);
+    document.getElementById("acDate").value = iso(current);
+    updateWeek();
+    if (state.roster.length) loadRoster();
+  }
+
+  function populateCamps() {
+    const values = [...new Set(records().map(record => String(record.Camp || "").trim()).filter(Boolean))].sort();
+    const element = document.getElementById("acCamp");
+    element.innerHTML = '<option value="">Select camp</option>' + values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+    populateOffices();
+  }
+
+  function populateOffices() {
+    const camp = norm(document.getElementById("acCamp").value);
+    const values = [...new Set(records()
+      .filter(record => !camp || norm(record.Camp) === camp)
+      .map(record => String(record.Office || "").trim())
+      .filter(Boolean))].sort();
+    document.getElementById("acOffice").innerHTML = '<option value="">Select office</option>' + values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+  }
+
+  async function open() {
+    build();
+    document.getElementById("attendanceCenterBackdrop").hidden = false;
+    try {
+      const bootstrap = await server("getAttendanceCenterBootstrap");
+      state.presets = Array.isArray(bootstrap && bootstrap.presets) ? bootstrap.presets : [];
+      if (state.presets.length) {
+        document.getElementById("acPreset").innerHTML = state.presets.map(preset => `<option value="${esc(preset.name)}">${esc(preset.name)}</option>`).join("");
+      }
+      populateCamps();
+      msg("Select an office and load the week.");
+    } catch (error) {
+      msg(error.message, true);
+    }
+  }
+
+  function close() {
+    const backdrop = document.getElementById("attendanceCenterBackdrop");
+    if (backdrop) backdrop.hidden = true;
+  }
+
+  async function loadRoster() {
+    updateWeek();
+    const camp = document.getElementById("acCamp").value;
+    const office = document.getElementById("acOffice").value;
+    if (!camp || !office) {
+      msg("Select a camp and office first.", true);
+      return;
+    }
+
+    state.roster = records()
+      .filter(record => norm(record.Camp) === norm(camp) && norm(record.Office) === norm(office))
+      .map(record => ({
+        employeeKey: String(record.__sheetRow || record["Employee ID"] || record["Full Name"] || ""),
+        sheetRow: record.__sheetRow || "",
+        fullName: String(record["Full Name"] || "").trim(),
+        rank: String(record.Rank || "").trim(),
+        office: String(record.Office || "").trim(),
+        camp: String(record.Camp || "").trim(),
+      }))
+      .filter(record => record.fullName)
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    state.cells = new Map();
+    state.roster.forEach(person => {
+      state.week.forEach((day, dayIndex) => {
+        state.cells.set(cellKey(person.employeeKey, iso(day)), defaultForDay(dayIndex));
+      });
+    });
+
+    msg(`Loading saved attendance for ${office}...`);
+    try {
+      const responses = await Promise.all(state.week.map(day => server("loadAttendanceCenterRecords", {
+        date: iso(day), camp, office,
+      })));
+      responses.forEach((response, dayIndex) => {
+        const dateText = iso(state.week[dayIndex]);
+        (response && response.records || []).forEach(record => {
+          const key = cellKey(String(record.employeeKey), dateText);
+          if (state.cells.has(key)) state.cells.set(key, norm(record.status) || "UNRECORDED");
+        });
+      });
+      render();
+      renderSummary();
+      msg(`${state.roster.length} personnel loaded for ${office}.`);
+    } catch (error) {
+      render();
+      renderSummary();
+      msg(error.message, true);
+    }
+  }
+
+  function applyPreset() {
+    if (!state.roster.length) return;
+    state.roster.forEach(person => {
+      state.week.forEach((day, dayIndex) => {
+        state.cells.set(cellKey(person.employeeKey, iso(day)), defaultForDay(dayIndex));
+      });
+    });
+    render();
+    renderSummary();
+    msg("Normal Office Days preset applied to the visible week.");
+  }
+
+  function setAll(status) {
+    state.roster.forEach(person => state.week.forEach(day => {
+      state.cells.set(cellKey(person.employeeKey, iso(day)), status);
+    }));
+    render();
+    renderSummary();
+  }
+
+  function cycleStatus(current) {
+    const index = STATUSES.indexOf(current);
+    return STATUSES[(index + 1) % STATUSES.length];
+  }
+
+  function setCell(employeeKey, dateText, status, moveNext) {
+    state.cells.set(cellKey(employeeKey, dateText), status);
+    renderSummary();
+    render();
+    selectCell(employeeKey, dateText, moveNext ? 1 : 0);
+  }
+
+  function selectCell(employeeKey, dateText, delta) {
+    if (!state.roster.length) return;
+    let row = state.roster.findIndex(person => person.employeeKey === employeeKey);
+    let col = state.week.findIndex(day => iso(day) === dateText);
+    if (row < 0 || col < 0) return;
+    if (delta) {
+      col += delta;
+      if (col > 6) { col = 0; row = Math.min(state.roster.length - 1, row + 1); }
+      if (col < 0) { col = 6; row = Math.max(0, row - 1); }
+    }
+    state.selected = { employeeKey: state.roster[row].employeeKey, date: iso(state.week[col]) };
+    document.querySelector(`[data-ac-cell="${CSS.escape(state.selected.employeeKey)}|${state.selected.date}"]`)?.focus();
+  }
+
+  function render() {
+    const wrap = document.getElementById("acTableWrap");
+    if (!state.roster.length) {
+      wrap.className = "ac-empty";
+      wrap.textContent = "No personnel loaded.";
+      return;
+    }
+    const query = norm(document.getElementById("acSearch").value);
+    const visible = state.roster.filter(person => !query || norm(`${person.fullName} ${person.rank}`).includes(query));
+    wrap.className = "";
+    wrap.innerHTML = `<table class="ac-grid"><thead><tr><th>Personnel</th>${state.week.map(day => `<th><span class="ac-day-label">${["SUN","MON","TUE","WED","THU","FRI","SAT"][day.getDay()]}</span><span class="ac-date-label">${day.getMonth()+1}/${day.getDate()}</span></th>`).join("")}</tr></thead><tbody>${visible.map(person => `<tr><td><div class="ac-name">${esc(person.fullName)}</div><div class="ac-sub">${esc(person.rank)} · Row ${esc(person.sheetRow || "—")}</div></td>${state.week.map(day => { const dateText=iso(day); const status=state.cells.get(cellKey(person.employeeKey,dateText))||"UNRECORDED"; const selected=state.selected&&state.selected.employeeKey===person.employeeKey&&state.selected.date===dateText; return `<td><button class="ac-cell${selected?" is-selected":""}" data-ac-cell="${esc(person.employeeKey)}|${dateText}" data-employee="${esc(person.employeeKey)}" data-date="${dateText}" data-status="${status}" title="${status}" type="button">${SHORT[status]}</button></td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
+    wrap.querySelectorAll(".ac-cell").forEach(button => {
+      button.onclick = () => {
+        const employeeKey = button.dataset.employee;
+        const dateText = button.dataset.date;
+        state.selected = { employeeKey, date: dateText };
+        setCell(employeeKey, dateText, cycleStatus(button.dataset.status), false);
+      };
+      button.onfocus = () => {
+        state.selected = { employeeKey: button.dataset.employee, date: button.dataset.date };
+        wrap.querySelectorAll(".ac-cell.is-selected").forEach(cell => cell.classList.remove("is-selected"));
+        button.classList.add("is-selected");
+      };
+    });
+  }
+
+  function counts() {
+    const result = { PERSONNEL: state.roster.length, PRESENT: 0, OFF: 0, LEAVE: 0, OB: 0, ABSENT: 0, UNRECORDED: 0 };
+    state.cells.forEach(status => { if (result[status] !== undefined) result[status]++; });
+    return result;
+  }
+
+  function renderSummary() {
+    const count = counts();
+    document.getElementById("acSummary").innerHTML = [
+      ["Personnel", count.PERSONNEL], ["Present", count.PRESENT], ["Off", count.OFF],
+      ["Leave", count.LEAVE], ["OB", count.OB], ["Absent", count.ABSENT], ["Unrecorded", count.UNRECORDED],
+    ].map(item => `<div class="ac-stat"><span>${item[0]}</span><strong>${item[1]}</strong></div>`).join("");
+  }
+
+  function handleKeyboard(event) {
+    const backdrop = document.getElementById("attendanceCenterBackdrop");
+    if (!backdrop || backdrop.hidden) return;
+    if (event.ctrlKey && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      save();
+      return;
+    }
+    if (event.key === "Escape") {
+      state.selected = null;
+      render();
+      return;
+    }
+    if (!state.selected) return;
+    const targetTag = String(event.target && event.target.tagName || "").toLowerCase();
+    if (["input", "select", "textarea"].includes(targetTag)) return;
+
+    const shortcut = KEY_STATUS[event.key.toLowerCase()];
+    if (shortcut) {
+      event.preventDefault();
+      setCell(state.selected.employeeKey, state.selected.date, shortcut, true);
+      return;
+    }
+
+    const row = state.roster.findIndex(person => person.employeeKey === state.selected.employeeKey);
+    const col = state.week.findIndex(day => iso(day) === state.selected.date);
+    let nextRow = row;
+    let nextCol = col;
+    if (event.key === "ArrowRight") nextCol++;
+    else if (event.key === "ArrowLeft") nextCol--;
+    else if (event.key === "ArrowDown") nextRow++;
+    else if (event.key === "ArrowUp") nextRow--;
+    else return;
+    event.preventDefault();
+    nextRow = Math.max(0, Math.min(state.roster.length - 1, nextRow));
+    nextCol = Math.max(0, Math.min(6, nextCol));
+    state.selected = { employeeKey: state.roster[nextRow].employeeKey, date: iso(state.week[nextCol]) };
+    render();
+    document.querySelector(`[data-ac-cell="${CSS.escape(state.selected.employeeKey)}|${state.selected.date}"]`)?.focus();
+  }
+
+  async function save() {
+    if (!state.roster.length) {
+      msg("Load personnel first.", true);
+      return;
+    }
+    const button = document.getElementById("acSave");
+    button.disabled = true;
+    button.textContent = "Saving Week...";
+    try {
+      const payload = {
+        camp: document.getElementById("acCamp").value,
+        office: document.getElementById("acOffice").value,
+        dutyDetail: document.getElementById("acPreset").value,
+        days: state.week.map(day => {
+          const dateText = iso(day);
+          return {
+            date: dateText,
+            records: state.roster.map(person => ({
+              ...person,
+              status: state.cells.get(cellKey(person.employeeKey, dateText)) || "UNRECORDED",
+              remarks: "",
+            })),
+          };
+        }),
+      };
+      const response = await server("saveAttendanceCenterWeek", payload);
+      if (!response || !response.success) throw new Error(response && response.message || "Save failed.");
+      msg(`${response.message} ${response.recordsSaved} record(s) updated.`);
+    } catch (error) {
+      msg(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Save Week";
+    }
+  }
+
+  function msg(text, error) {
+    const element = document.getElementById("acMessage");
+    if (element) {
+      element.textContent = text;
+      element.style.color = error ? "#a23f3f" : "#607566";
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", build);
+  window.AttendanceCenterPrototype = {
+    open,
+    close,
+    getState: () => ({ roster: state.roster.slice(), counts: counts(), week: state.week.map(iso) }),
+  };
 })();
