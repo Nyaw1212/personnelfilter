@@ -1,0 +1,103 @@
+(function () {
+  "use strict";
+
+  const STYLE_ID = "attendanceHoverGuideStyles";
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr:hover td {
+        background: #f1f9f3 !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr:hover td:first-child {
+        background: #e8f5eb !important;
+        box-shadow: inset 4px 0 0 #347f49;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid th.acw-column-hover,
+      #attendanceCenterWeeklyBackdrop .acw-grid td.acw-column-hover {
+        background: #e5f4e9 !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid th.acw-column-hover {
+        color: #173d23;
+        box-shadow: inset 0 -3px 0 #347f49;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid td.acw-column-hover .acw-cell {
+        box-shadow: 0 0 0 3px rgba(52,127,73,.18);
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid td:hover {
+        background: #dcefe1 !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid td:hover .acw-cell {
+        transform: scale(1.06);
+        box-shadow: 0 0 0 3px rgba(52,127,73,.28), 0 4px 10px rgba(23,61,35,.12);
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-cell {
+        transition: transform .12s ease, box-shadow .12s ease;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  function clearColumn(table) {
+    table.querySelectorAll(".acw-column-hover").forEach(function (cell) {
+      cell.classList.remove("acw-column-hover");
+    });
+  }
+
+  function bindHoverGuide() {
+    const wrap = document.getElementById("acwTable");
+    if (!wrap || wrap.dataset.hoverGuideBound === "true") return;
+
+    wrap.dataset.hoverGuideBound = "true";
+
+    wrap.addEventListener("mouseover", function (event) {
+      const button = event.target.closest(".acw-cell");
+      const table = event.target.closest(".acw-grid");
+      if (!button || !table) return;
+
+      const td = button.closest("td");
+      if (!td) return;
+
+      clearColumn(table);
+      const columnNumber = td.cellIndex + 1;
+      table.querySelectorAll(
+        "th:nth-child(" + columnNumber + "), td:nth-child(" + columnNumber + ")"
+      ).forEach(function (cell) {
+        cell.classList.add("acw-column-hover");
+      });
+    });
+
+    wrap.addEventListener("mouseleave", function () {
+      const table = wrap.querySelector(".acw-grid");
+      if (table) clearColumn(table);
+    });
+  }
+
+  function initialize() {
+    installStyles();
+    bindHoverGuide();
+  }
+
+  const observer = new MutationObserver(initialize);
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+})();
