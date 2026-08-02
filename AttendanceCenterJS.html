@@ -1,31 +1,11 @@
+<script>
 (function () {
   "use strict";
 
   const STATUSES = ["PRESENT", "OFF", "LEAVE", "OB", "ABSENT", "UNRECORDED"];
-  const SHORT = {
-    PRESENT: "P",
-    OFF: "O",
-    LEAVE: "L",
-    OB: "OB",
-    ABSENT: "A",
-    UNRECORDED: "—",
-  };
-  const KEY_STATUS = {
-    p: "PRESENT",
-    o: "OFF",
-    l: "LEAVE",
-    b: "OB",
-    a: "ABSENT",
-    u: "UNRECORDED",
-  };
-
-  const state = {
-    roster: [],
-    cells: new Map(),
-    presets: [],
-    week: [],
-    selected: null,
-  };
+  const LABELS = { PRESENT: "P", OFF: "O", LEAVE: "L", OB: "OB", ABSENT: "A", UNRECORDED: "—" };
+  const SHORTCUTS = { p: "PRESENT", o: "OFF", l: "LEAVE", b: "OB", a: "ABSENT", u: "UNRECORDED" };
+  const state = { roster: [], week: [], cells: new Map(), selected: null, presets: [] };
 
   const norm = value => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
   const esc = value => String(value ?? "")
@@ -36,7 +16,7 @@
     .replace(/'/g, "&#039;");
 
   const server = (method, argument) => new Promise((resolve, reject) => {
-    let runner = google.script.run
+    const runner = google.script.run
       .withSuccessHandler(resolve)
       .withFailureHandler(error => reject(new Error(error && error.message ? error.message : String(error))));
     argument === undefined ? runner[method]() : runner[method](argument);
@@ -49,103 +29,90 @@
   }
 
   function iso(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
   }
 
   function weekFrom(value) {
-    const source = value ? new Date(`${value}T12:00:00`) : new Date();
-    const start = new Date(source);
-    start.setDate(source.getDate() - source.getDay());
+    const source = value ? new Date(value + "T12:00:00") : new Date();
+    const sunday = new Date(source);
+    sunday.setDate(source.getDate() - source.getDay());
     return Array.from({ length: 7 }, (_, index) => {
-      const day = new Date(start);
-      day.setDate(start.getDate() + index);
+      const day = new Date(sunday);
+      day.setDate(sunday.getDate() + index);
       return day;
     });
   }
 
-  function cellKey(employeeKey, dateText) {
-    return `${employeeKey}|${dateText}`;
+  function key(employeeKey, dateText) {
+    return employeeKey + "|" + dateText;
   }
 
-  function defaultForDay(dayIndex) {
+  function defaultStatus(dayIndex) {
     return dayIndex === 0 || dayIndex === 6 ? "OFF" : "PRESENT";
   }
 
-  function styles() {
-    if (document.getElementById("acStyles")) return;
+  function installStyles() {
+    if (document.getElementById("acWeeklyStyles")) return;
     const style = document.createElement("style");
-    style.id = "acStyles";
+    style.id = "acWeeklyStyles";
     style.textContent = `
-      .ac-backdrop{position:fixed;inset:0;z-index:5000;background:rgba(18,38,25,.48);display:grid;place-items:center;padding:14px}.ac-backdrop[hidden]{display:none}
-      .ac-shell{width:min(1420px,100%);height:min(900px,96vh);background:#f7fbf8;border:1px solid #c7dccd;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto;box-shadow:0 30px 80px rgba(0,0,0,.25)}
-      .ac-head,.ac-foot{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:#eef7f0;border-bottom:1px solid #d3e3d6}.ac-foot{border-top:1px solid #d3e3d6;border-bottom:0;background:#fff}.ac-head h2{margin:0;color:#173d23}.ac-head p{margin:3px 0 0;color:#607566;font-size:12px}
-      .ac-close,.ac-btn{border:1px solid #bfd3c4;background:#fff;color:#214b2d;border-radius:10px;font-weight:700;cursor:pointer}.ac-close{width:34px;height:34px;font-size:20px}.ac-btn{min-height:38px;padding:0 12px}.ac-primary{background:#347f49;color:#fff;border-color:#347f49}
-      .ac-controls{display:grid;grid-template-columns:170px 1fr 1fr 1fr auto auto;gap:9px;padding:12px 16px;background:#fff;border-bottom:1px solid #dce9df}.ac-field{display:grid;gap:4px}.ac-field label{font-size:10px;font-weight:800;letter-spacing:.05em;color:#55705e}.ac-field input,.ac-field select,.ac-search{height:38px;border:1px solid #c9d9cd;border-radius:9px;background:#fff;padding:0 10px}
-      .ac-summary{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:10px 16px}.ac-stat{background:#fff;border:1px solid #d8e5db;border-radius:11px;padding:8px 10px}.ac-stat span{display:block;font-size:9px;font-weight:800;color:#6b7d70}.ac-stat strong{font-size:20px;color:#203d29}
-      .ac-work{overflow:auto;padding:0 16px 16px}.ac-tools{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:10px 0;background:#f7fbf8}.ac-search{flex:1}.ac-help{font-size:11px;color:#64786a;white-space:nowrap}
-      .ac-grid{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d6e4d9;border-radius:12px;overflow:hidden;table-layout:fixed}.ac-grid th{position:sticky;top:58px;z-index:3;background:#eaf5ed;padding:8px 5px;font-size:10px;color:#31543d;border-bottom:1px solid #cadbce}.ac-grid th:first-child{left:0;z-index:4;width:260px;text-align:left}.ac-grid td{border-top:1px solid #edf2ee;padding:5px;text-align:center}.ac-grid td:first-child{position:sticky;left:0;z-index:2;background:#fff;text-align:left;padding:8px 10px}.ac-name{font-weight:800;color:#173d23}.ac-sub{font-size:10px;color:#718178;margin-top:2px}
-      .ac-day-label{display:block;font-weight:900}.ac-date-label{display:block;font-size:10px;color:#718178;margin-top:2px}.ac-cell{width:44px;height:36px;border:1px solid #cbd9ce;border-radius:8px;font-weight:900;cursor:pointer;background:#fff;color:#405047}.ac-cell:hover{transform:none;box-shadow:0 0 0 2px rgba(52,127,73,.12)}.ac-cell.is-selected{outline:3px solid #173d23;outline-offset:1px}
-      .ac-cell[data-status="PRESENT"]{background:#dff3e3;color:#17612c;border-color:#9dccaa}.ac-cell[data-status="OFF"]{background:#e7e9e8;color:#59615d;border-color:#c6cbc8}.ac-cell[data-status="LEAVE"]{background:#fff1ad;color:#695400;border-color:#e7cf59}.ac-cell[data-status="OB"]{background:#dceeff;color:#15598b;border-color:#92c6ef}.ac-cell[data-status="ABSENT"]{background:#ffe0df;color:#9a2924;border-color:#e7aaa7}.ac-cell[data-status="UNRECORDED"]{background:#fff;color:#8a948e;border-style:dashed}
-      .ac-empty{text-align:center;padding:50px;color:#718178}.ac-msg{font-size:12px;color:#607566}.ac-week-title{font-size:12px;font-weight:800;color:#31543d}
-      @media(max-width:900px){.ac-controls{grid-template-columns:1fr 1fr}.ac-summary{grid-template-columns:repeat(4,1fr)}.ac-grid{min-width:920px}.ac-help{display:none}}
+      .acw-backdrop{position:fixed;inset:0;z-index:6000;background:rgba(18,38,25,.48);display:grid;place-items:center;padding:14px}.acw-backdrop[hidden]{display:none}
+      .acw-shell{width:min(1420px,100%);height:min(900px,96vh);background:#f7fbf8;border:1px solid #c7dccd;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto;box-shadow:0 30px 80px rgba(0,0,0,.25)}
+      .acw-head,.acw-foot{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:#eef7f0;border-bottom:1px solid #d3e3d6}.acw-foot{border-top:1px solid #d3e3d6;border-bottom:0;background:#fff}.acw-head h2{margin:0;color:#173d23}.acw-head p{margin:3px 0 0;color:#607566;font-size:12px}
+      .acw-btn,.acw-close{border:1px solid #bfd3c4;background:#fff;color:#214b2d;border-radius:10px;font-weight:700;cursor:pointer}.acw-btn{min-height:38px;padding:0 12px}.acw-close{width:34px;height:34px;font-size:20px}.acw-primary{background:#347f49;color:#fff;border-color:#347f49}
+      .acw-controls{display:grid;grid-template-columns:170px 1fr 1fr 1fr auto auto;gap:9px;padding:12px 16px;background:#fff;border-bottom:1px solid #dce9df}.acw-field{display:grid;gap:4px}.acw-field label{font-size:10px;font-weight:800;letter-spacing:.05em;color:#55705e}.acw-field input,.acw-field select,.acw-search{height:38px;border:1px solid #c9d9cd;border-radius:9px;background:#fff;padding:0 10px}
+      .acw-summary{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:10px 16px}.acw-stat{background:#fff;border:1px solid #d8e5db;border-radius:11px;padding:8px 10px}.acw-stat span{display:block;font-size:9px;font-weight:800;color:#6b7d70}.acw-stat strong{font-size:20px;color:#203d29}
+      .acw-work{overflow:auto;padding:0 16px 16px}.acw-tools{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:10px 0;background:#f7fbf8}.acw-search{flex:1}.acw-help{font-size:11px;color:#64786a;white-space:nowrap}.acw-week-title{font-size:12px;font-weight:800;color:#31543d}
+      .acw-grid{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d6e4d9;border-radius:12px;overflow:hidden;table-layout:fixed}.acw-grid th{position:sticky;top:58px;z-index:3;background:#eaf5ed;padding:8px 5px;font-size:10px;color:#31543d;border-bottom:1px solid #cadbce}.acw-grid th:first-child{left:0;z-index:4;width:270px;text-align:left}.acw-grid td{border-top:1px solid #edf2ee;padding:5px;text-align:center}.acw-grid td:first-child{position:sticky;left:0;z-index:2;background:#fff;text-align:left;padding:8px 10px}.acw-name{font-weight:800;color:#173d23}.acw-sub{font-size:10px;color:#718178;margin-top:2px}
+      .acw-day{display:block;font-weight:900}.acw-date{display:block;font-size:10px;color:#718178;margin-top:2px}.acw-cell{width:46px;height:37px;border:1px solid #cbd9ce;border-radius:8px;font-weight:900;cursor:pointer;background:#fff;color:#405047}.acw-cell:hover{box-shadow:0 0 0 2px rgba(52,127,73,.12)}.acw-cell.is-selected{outline:3px solid #173d23;outline-offset:1px}
+      .acw-cell[data-status="PRESENT"]{background:#dff3e3;color:#17612c;border-color:#9dccaa}.acw-cell[data-status="OFF"]{background:#e7e9e8;color:#59615d;border-color:#c6cbc8}.acw-cell[data-status="LEAVE"]{background:#fff1ad;color:#695400;border-color:#e7cf59}.acw-cell[data-status="OB"]{background:#dceeff;color:#15598b;border-color:#92c6ef}.acw-cell[data-status="ABSENT"]{background:#ffe0df;color:#9a2924;border-color:#e7aaa7}.acw-cell[data-status="UNRECORDED"]{background:#fff;color:#8a948e;border-style:dashed}
+      .acw-empty{text-align:center;padding:50px;color:#718178}.acw-msg{font-size:12px;color:#607566}
+      @media(max-width:900px){.acw-controls{grid-template-columns:1fr 1fr}.acw-summary{grid-template-columns:repeat(4,1fr)}.acw-grid{min-width:930px}.acw-help{display:none}}
     `;
     document.head.appendChild(style);
   }
 
   function build() {
-    if (document.getElementById("attendanceCenterBackdrop")) return;
-    styles();
+    const legacy = document.getElementById("attendanceCenterBackdrop");
+    if (legacy) legacy.remove();
+    if (document.getElementById("attendanceCenterWeeklyBackdrop")) return;
+
+    installStyles();
     const backdrop = document.createElement("div");
-    backdrop.id = "attendanceCenterBackdrop";
-    backdrop.className = "ac-backdrop";
+    backdrop.id = "attendanceCenterWeeklyBackdrop";
+    backdrop.className = "acw-backdrop";
     backdrop.hidden = true;
     backdrop.innerHTML = `
-      <section class="ac-shell" role="dialog" aria-modal="true" aria-label="Attendance Center">
-        <header class="ac-head">
-          <div><h2>Attendance Center</h2><p>Weekly office attendance recorder</p></div>
-          <button id="acClose" class="ac-close" type="button">×</button>
-        </header>
-        <div class="ac-controls">
-          <div class="ac-field"><label>WEEK CONTAINING</label><input id="acDate" type="date"></div>
-          <div class="ac-field"><label>CAMP</label><select id="acCamp"><option value="">Select camp</option></select></div>
-          <div class="ac-field"><label>OFFICE</label><select id="acOffice"><option value="">Select office</option></select></div>
-          <div class="ac-field"><label>DUTY PRESET</label><select id="acPreset"><option>Normal Office Days</option></select></div>
-          <button id="acLoad" class="ac-btn ac-primary" type="button">Load Week</button>
-          <button id="acApplyPreset" class="ac-btn" type="button">Apply Preset</button>
+      <section class="acw-shell" role="dialog" aria-modal="true" aria-label="Attendance Center">
+        <header class="acw-head"><div><h2>Attendance Center</h2><p>Weekly office attendance recorder</p></div><button id="acwClose" class="acw-close" type="button">×</button></header>
+        <div class="acw-controls">
+          <div class="acw-field"><label>WEEK CONTAINING</label><input id="acwDate" type="date"></div>
+          <div class="acw-field"><label>CAMP</label><select id="acwCamp"><option value="">Select camp</option></select></div>
+          <div class="acw-field"><label>OFFICE</label><select id="acwOffice"><option value="">Select office</option></select></div>
+          <div class="acw-field"><label>DUTY PRESET</label><select id="acwPreset"><option>Normal Office Days</option></select></div>
+          <button id="acwLoad" class="acw-btn acw-primary" type="button">Load Week</button>
+          <button id="acwPresetApply" class="acw-btn" type="button">Apply Preset</button>
         </div>
-        <div id="acSummary" class="ac-summary"></div>
-        <div class="ac-work">
-          <div class="ac-tools">
-            <button id="acPrev" class="ac-btn" type="button">‹ Previous</button>
-            <div id="acWeekTitle" class="ac-week-title"></div>
-            <button id="acNext" class="ac-btn" type="button">Next ›</button>
-            <input id="acSearch" class="ac-search" type="search" placeholder="Search personnel...">
-            <span class="ac-help">Keys: P O L B A U · arrows move · Ctrl+S save</span>
-            <button id="acClear" class="ac-btn" type="button">Clear Week</button>
-          </div>
-          <div id="acTableWrap" class="ac-empty">Select a week, camp, and office.</div>
+        <div id="acwSummary" class="acw-summary"></div>
+        <div class="acw-work">
+          <div class="acw-tools"><button id="acwPrev" class="acw-btn" type="button">‹ Previous</button><div id="acwWeekTitle" class="acw-week-title"></div><button id="acwNext" class="acw-btn" type="button">Next ›</button><input id="acwSearch" class="acw-search" type="search" placeholder="Search personnel..."><span class="acw-help">Keys: P O L B A U · arrows move · Ctrl+S save</span><button id="acwClear" class="acw-btn" type="button">Clear Week</button></div>
+          <div id="acwTable" class="acw-empty">Select a week, camp, and office.</div>
         </div>
-        <footer class="ac-foot">
-          <div id="acMessage" class="ac-msg">Ready.</div>
-          <button id="acSave" class="ac-btn ac-primary" type="button">Save Week</button>
-        </footer>
+        <footer class="acw-foot"><div id="acwMessage" class="acw-msg">Ready.</div><button id="acwSave" class="acw-btn acw-primary" type="button">Save Week</button></footer>
       </section>`;
     document.body.appendChild(backdrop);
 
-    document.getElementById("acDate").value = iso(new Date());
-    document.getElementById("acClose").onclick = close;
-    document.getElementById("acCamp").onchange = populateOffices;
-    document.getElementById("acLoad").onclick = loadRoster;
-    document.getElementById("acApplyPreset").onclick = applyPreset;
-    document.getElementById("acClear").onclick = () => setAll("UNRECORDED");
-    document.getElementById("acSearch").oninput = render;
-    document.getElementById("acSave").onclick = save;
-    document.getElementById("acPrev").onclick = () => moveWeek(-7);
-    document.getElementById("acNext").onclick = () => moveWeek(7);
-    document.getElementById("acDate").onchange = updateWeek;
+    document.getElementById("acwDate").value = iso(new Date());
+    document.getElementById("acwClose").onclick = close;
+    document.getElementById("acwCamp").onchange = populateOffices;
+    document.getElementById("acwLoad").onclick = loadWeek;
+    document.getElementById("acwPresetApply").onclick = applyPreset;
+    document.getElementById("acwClear").onclick = () => setAll("UNRECORDED");
+    document.getElementById("acwSearch").oninput = render;
+    document.getElementById("acwSave").onclick = saveWeek;
+    document.getElementById("acwPrev").onclick = () => moveWeek(-7);
+    document.getElementById("acwNext").onclick = () => moveWeek(7);
+    document.getElementById("acwDate").onchange = updateWeek;
     backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
     document.addEventListener("keydown", handleKeyboard);
     updateWeek();
@@ -153,177 +120,135 @@
   }
 
   function updateWeek() {
-    state.week = weekFrom(document.getElementById("acDate").value);
-    const first = state.week[0];
-    const last = state.week[6];
-    document.getElementById("acWeekTitle").textContent = `${first.toLocaleDateString()} – ${last.toLocaleDateString()}`;
+    state.week = weekFrom(document.getElementById("acwDate").value);
+    document.getElementById("acwWeekTitle").textContent = state.week[0].toLocaleDateString() + " – " + state.week[6].toLocaleDateString();
   }
 
   function moveWeek(days) {
-    const current = new Date(`${document.getElementById("acDate").value}T12:00:00`);
-    current.setDate(current.getDate() + days);
-    document.getElementById("acDate").value = iso(current);
+    const date = new Date(document.getElementById("acwDate").value + "T12:00:00");
+    date.setDate(date.getDate() + days);
+    document.getElementById("acwDate").value = iso(date);
     updateWeek();
-    if (state.roster.length) loadRoster();
+    if (state.roster.length) loadWeek();
   }
 
   function populateCamps() {
-    const values = [...new Set(records().map(record => String(record.Camp || "").trim()).filter(Boolean))].sort();
-    const element = document.getElementById("acCamp");
-    element.innerHTML = '<option value="">Select camp</option>' + values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+    const camps = [...new Set(records().map(row => String(row.Camp || "").trim()).filter(Boolean))].sort();
+    document.getElementById("acwCamp").innerHTML = '<option value="">Select camp</option>' + camps.map(value => '<option value="' + esc(value) + '">' + esc(value) + '</option>').join("");
     populateOffices();
   }
 
   function populateOffices() {
-    const camp = norm(document.getElementById("acCamp").value);
-    const values = [...new Set(records()
-      .filter(record => !camp || norm(record.Camp) === camp)
-      .map(record => String(record.Office || "").trim())
-      .filter(Boolean))].sort();
-    document.getElementById("acOffice").innerHTML = '<option value="">Select office</option>' + values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+    const camp = norm(document.getElementById("acwCamp").value);
+    const offices = [...new Set(records().filter(row => !camp || norm(row.Camp) === camp).map(row => String(row.Office || "").trim()).filter(Boolean))].sort();
+    document.getElementById("acwOffice").innerHTML = '<option value="">Select office</option>' + offices.map(value => '<option value="' + esc(value) + '">' + esc(value) + '</option>').join("");
   }
 
   async function open() {
     build();
-    document.getElementById("attendanceCenterBackdrop").hidden = false;
+    document.getElementById("attendanceCenterWeeklyBackdrop").hidden = false;
     try {
       const bootstrap = await server("getAttendanceCenterBootstrap");
       state.presets = Array.isArray(bootstrap && bootstrap.presets) ? bootstrap.presets : [];
       if (state.presets.length) {
-        document.getElementById("acPreset").innerHTML = state.presets.map(preset => `<option value="${esc(preset.name)}">${esc(preset.name)}</option>`).join("");
+        document.getElementById("acwPreset").innerHTML = state.presets.map(item => '<option value="' + esc(item.name) + '">' + esc(item.name) + '</option>').join("");
       }
       populateCamps();
-      msg("Select an office and load the week.");
+      message("Select an office and load the week.");
     } catch (error) {
-      msg(error.message, true);
+      message(error.message, true);
     }
   }
 
   function close() {
-    const backdrop = document.getElementById("attendanceCenterBackdrop");
+    const backdrop = document.getElementById("attendanceCenterWeeklyBackdrop");
     if (backdrop) backdrop.hidden = true;
   }
 
-  async function loadRoster() {
+  async function loadWeek() {
     updateWeek();
-    const camp = document.getElementById("acCamp").value;
-    const office = document.getElementById("acOffice").value;
-    if (!camp || !office) {
-      msg("Select a camp and office first.", true);
-      return;
-    }
+    const camp = document.getElementById("acwCamp").value;
+    const office = document.getElementById("acwOffice").value;
+    if (!camp || !office) return message("Select a camp and office first.", true);
 
     state.roster = records()
-      .filter(record => norm(record.Camp) === norm(camp) && norm(record.Office) === norm(office))
-      .map(record => ({
-        employeeKey: String(record.__sheetRow || record["Employee ID"] || record["Full Name"] || ""),
-        sheetRow: record.__sheetRow || "",
-        fullName: String(record["Full Name"] || "").trim(),
-        rank: String(record.Rank || "").trim(),
-        office: String(record.Office || "").trim(),
-        camp: String(record.Camp || "").trim(),
-      }))
-      .filter(record => record.fullName)
+      .filter(row => norm(row.Camp) === norm(camp) && norm(row.Office) === norm(office))
+      .map(row => ({ employeeKey: String(row.__sheetRow || row["Employee ID"] || row["Full Name"] || ""), sheetRow: row.__sheetRow || "", fullName: String(row["Full Name"] || "").trim(), rank: String(row.Rank || "").trim(), office: String(row.Office || "").trim(), camp: String(row.Camp || "").trim() }))
+      .filter(row => row.fullName)
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
     state.cells = new Map();
-    state.roster.forEach(person => {
-      state.week.forEach((day, dayIndex) => {
-        state.cells.set(cellKey(person.employeeKey, iso(day)), defaultForDay(dayIndex));
-      });
-    });
+    state.roster.forEach(person => state.week.forEach((day, index) => state.cells.set(key(person.employeeKey, iso(day)), defaultStatus(index))));
 
-    msg(`Loading saved attendance for ${office}...`);
+    message("Loading saved attendance for " + office + "...");
     try {
-      const responses = await Promise.all(state.week.map(day => server("loadAttendanceCenterRecords", {
-        date: iso(day), camp, office,
-      })));
-      responses.forEach((response, dayIndex) => {
-        const dateText = iso(state.week[dayIndex]);
+      const savedDays = await Promise.all(state.week.map(day => server("loadAttendanceCenterRecords", { date: iso(day), camp, office })));
+      savedDays.forEach((response, index) => {
+        const dateText = iso(state.week[index]);
         (response && response.records || []).forEach(record => {
-          const key = cellKey(String(record.employeeKey), dateText);
-          if (state.cells.has(key)) state.cells.set(key, norm(record.status) || "UNRECORDED");
+          const cellKey = key(String(record.employeeKey), dateText);
+          if (state.cells.has(cellKey)) state.cells.set(cellKey, norm(record.status) || "UNRECORDED");
         });
       });
       render();
       renderSummary();
-      msg(`${state.roster.length} personnel loaded for ${office}.`);
+      message(state.roster.length + " personnel loaded for " + office + ".");
     } catch (error) {
       render();
       renderSummary();
-      msg(error.message, true);
+      message(error.message, true);
     }
   }
 
   function applyPreset() {
-    if (!state.roster.length) return;
-    state.roster.forEach(person => {
-      state.week.forEach((day, dayIndex) => {
-        state.cells.set(cellKey(person.employeeKey, iso(day)), defaultForDay(dayIndex));
-      });
-    });
+    state.roster.forEach(person => state.week.forEach((day, index) => state.cells.set(key(person.employeeKey, iso(day)), defaultStatus(index))));
     render();
     renderSummary();
-    msg("Normal Office Days preset applied to the visible week.");
+    message("Normal Office Days preset applied.");
   }
 
   function setAll(status) {
-    state.roster.forEach(person => state.week.forEach(day => {
-      state.cells.set(cellKey(person.employeeKey, iso(day)), status);
-    }));
+    state.roster.forEach(person => state.week.forEach(day => state.cells.set(key(person.employeeKey, iso(day)), status)));
     render();
     renderSummary();
   }
 
-  function cycleStatus(current) {
-    const index = STATUSES.indexOf(current);
-    return STATUSES[(index + 1) % STATUSES.length];
+  function cycle(status) {
+    return STATUSES[(STATUSES.indexOf(status) + 1) % STATUSES.length];
   }
 
-  function setCell(employeeKey, dateText, status, moveNext) {
-    state.cells.set(cellKey(employeeKey, dateText), status);
-    renderSummary();
+  function setCell(employeeKey, dateText, status, advance) {
+    state.cells.set(key(employeeKey, dateText), status);
     render();
-    selectCell(employeeKey, dateText, moveNext ? 1 : 0);
+    renderSummary();
+    selectCell(employeeKey, dateText, advance ? 1 : 0);
   }
 
   function selectCell(employeeKey, dateText, delta) {
-    if (!state.roster.length) return;
     let row = state.roster.findIndex(person => person.employeeKey === employeeKey);
-    let col = state.week.findIndex(day => iso(day) === dateText);
-    if (row < 0 || col < 0) return;
-    if (delta) {
-      col += delta;
-      if (col > 6) { col = 0; row = Math.min(state.roster.length - 1, row + 1); }
-      if (col < 0) { col = 6; row = Math.max(0, row - 1); }
-    }
-    state.selected = { employeeKey: state.roster[row].employeeKey, date: iso(state.week[col]) };
-    document.querySelector(`[data-ac-cell="${CSS.escape(state.selected.employeeKey)}|${state.selected.date}"]`)?.focus();
+    let column = state.week.findIndex(day => iso(day) === dateText);
+    if (row < 0 || column < 0) return;
+    column += delta || 0;
+    if (column > 6) { column = 0; row = Math.min(state.roster.length - 1, row + 1); }
+    if (column < 0) { column = 6; row = Math.max(0, row - 1); }
+    state.selected = { employeeKey: state.roster[row].employeeKey, date: iso(state.week[column]) };
+    const selector = '[data-acw-cell="' + CSS.escape(state.selected.employeeKey + "|" + state.selected.date) + '"]';
+    const target = document.querySelector(selector);
+    if (target) target.focus();
   }
 
   function render() {
-    const wrap = document.getElementById("acTableWrap");
-    if (!state.roster.length) {
-      wrap.className = "ac-empty";
-      wrap.textContent = "No personnel loaded.";
-      return;
-    }
-    const query = norm(document.getElementById("acSearch").value);
-    const visible = state.roster.filter(person => !query || norm(`${person.fullName} ${person.rank}`).includes(query));
+    const wrap = document.getElementById("acwTable");
+    if (!state.roster.length) { wrap.className = "acw-empty"; wrap.textContent = "No personnel loaded."; return; }
+    const query = norm(document.getElementById("acwSearch").value);
+    const visible = state.roster.filter(person => !query || norm(person.fullName + " " + person.rank).includes(query));
+    const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
     wrap.className = "";
-    wrap.innerHTML = `<table class="ac-grid"><thead><tr><th>Personnel</th>${state.week.map(day => `<th><span class="ac-day-label">${["SUN","MON","TUE","WED","THU","FRI","SAT"][day.getDay()]}</span><span class="ac-date-label">${day.getMonth()+1}/${day.getDate()}</span></th>`).join("")}</tr></thead><tbody>${visible.map(person => `<tr><td><div class="ac-name">${esc(person.fullName)}</div><div class="ac-sub">${esc(person.rank)} · Row ${esc(person.sheetRow || "—")}</div></td>${state.week.map(day => { const dateText=iso(day); const status=state.cells.get(cellKey(person.employeeKey,dateText))||"UNRECORDED"; const selected=state.selected&&state.selected.employeeKey===person.employeeKey&&state.selected.date===dateText; return `<td><button class="ac-cell${selected?" is-selected":""}" data-ac-cell="${esc(person.employeeKey)}|${dateText}" data-employee="${esc(person.employeeKey)}" data-date="${dateText}" data-status="${status}" title="${status}" type="button">${SHORT[status]}</button></td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
-    wrap.querySelectorAll(".ac-cell").forEach(button => {
-      button.onclick = () => {
-        const employeeKey = button.dataset.employee;
-        const dateText = button.dataset.date;
-        state.selected = { employeeKey, date: dateText };
-        setCell(employeeKey, dateText, cycleStatus(button.dataset.status), false);
-      };
-      button.onfocus = () => {
-        state.selected = { employeeKey: button.dataset.employee, date: button.dataset.date };
-        wrap.querySelectorAll(".ac-cell.is-selected").forEach(cell => cell.classList.remove("is-selected"));
-        button.classList.add("is-selected");
-      };
+    wrap.innerHTML = '<table class="acw-grid"><thead><tr><th>Personnel</th>' + state.week.map(day => '<th><span class="acw-day">' + dayNames[day.getDay()] + '</span><span class="acw-date">' + (day.getMonth() + 1) + '/' + day.getDate() + '</span></th>').join("") + '</tr></thead><tbody>' + visible.map(person => '<tr><td><div class="acw-name">' + esc(person.fullName) + '</div><div class="acw-sub">' + esc(person.rank) + ' · Row ' + esc(person.sheetRow || "—") + '</div></td>' + state.week.map(day => { const dateText = iso(day); const status = state.cells.get(key(person.employeeKey, dateText)) || "UNRECORDED"; const selected = state.selected && state.selected.employeeKey === person.employeeKey && state.selected.date === dateText; return '<td><button class="acw-cell' + (selected ? ' is-selected' : '') + '" data-acw-cell="' + esc(person.employeeKey + '|' + dateText) + '" data-employee="' + esc(person.employeeKey) + '" data-date="' + dateText + '" data-status="' + status + '" title="' + status + '" type="button">' + LABELS[status] + '</button></td>'; }).join("") + '</tr>').join("") + '</tbody></table>';
+
+    wrap.querySelectorAll(".acw-cell").forEach(button => {
+      button.onclick = () => { state.selected = { employeeKey: button.dataset.employee, date: button.dataset.date }; setCell(button.dataset.employee, button.dataset.date, cycle(button.dataset.status), false); };
+      button.onfocus = () => { state.selected = { employeeKey: button.dataset.employee, date: button.dataset.date }; wrap.querySelectorAll(".acw-cell.is-selected").forEach(cell => cell.classList.remove("is-selected")); button.classList.add("is-selected"); };
     });
   }
 
@@ -335,101 +260,60 @@
 
   function renderSummary() {
     const count = counts();
-    document.getElementById("acSummary").innerHTML = [
-      ["Personnel", count.PERSONNEL], ["Present", count.PRESENT], ["Off", count.OFF],
-      ["Leave", count.LEAVE], ["OB", count.OB], ["Absent", count.ABSENT], ["Unrecorded", count.UNRECORDED],
-    ].map(item => `<div class="ac-stat"><span>${item[0]}</span><strong>${item[1]}</strong></div>`).join("");
+    document.getElementById("acwSummary").innerHTML = [["Personnel", count.PERSONNEL], ["Present", count.PRESENT], ["Off", count.OFF], ["Leave", count.LEAVE], ["OB", count.OB], ["Absent", count.ABSENT], ["Unrecorded", count.UNRECORDED]].map(item => '<div class="acw-stat"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>').join("");
   }
 
   function handleKeyboard(event) {
-    const backdrop = document.getElementById("attendanceCenterBackdrop");
+    const backdrop = document.getElementById("attendanceCenterWeeklyBackdrop");
     if (!backdrop || backdrop.hidden) return;
-    if (event.ctrlKey && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      save();
-      return;
-    }
-    if (event.key === "Escape") {
-      state.selected = null;
-      render();
-      return;
-    }
+    if (event.ctrlKey && event.key.toLowerCase() === "s") { event.preventDefault(); saveWeek(); return; }
+    if (event.key === "Escape") { state.selected = null; render(); return; }
     if (!state.selected) return;
-    const targetTag = String(event.target && event.target.tagName || "").toLowerCase();
-    if (["input", "select", "textarea"].includes(targetTag)) return;
+    if (["input", "select", "textarea"].includes(String(event.target && event.target.tagName || "").toLowerCase())) return;
+    const status = SHORTCUTS[event.key.toLowerCase()];
+    if (status) { event.preventDefault(); setCell(state.selected.employeeKey, state.selected.date, status, true); return; }
 
-    const shortcut = KEY_STATUS[event.key.toLowerCase()];
-    if (shortcut) {
-      event.preventDefault();
-      setCell(state.selected.employeeKey, state.selected.date, shortcut, true);
-      return;
-    }
-
-    const row = state.roster.findIndex(person => person.employeeKey === state.selected.employeeKey);
-    const col = state.week.findIndex(day => iso(day) === state.selected.date);
-    let nextRow = row;
-    let nextCol = col;
-    if (event.key === "ArrowRight") nextCol++;
-    else if (event.key === "ArrowLeft") nextCol--;
-    else if (event.key === "ArrowDown") nextRow++;
-    else if (event.key === "ArrowUp") nextRow--;
+    let row = state.roster.findIndex(person => person.employeeKey === state.selected.employeeKey);
+    let column = state.week.findIndex(day => iso(day) === state.selected.date);
+    if (event.key === "ArrowRight") column++;
+    else if (event.key === "ArrowLeft") column--;
+    else if (event.key === "ArrowDown") row++;
+    else if (event.key === "ArrowUp") row--;
     else return;
     event.preventDefault();
-    nextRow = Math.max(0, Math.min(state.roster.length - 1, nextRow));
-    nextCol = Math.max(0, Math.min(6, nextCol));
-    state.selected = { employeeKey: state.roster[nextRow].employeeKey, date: iso(state.week[nextCol]) };
+    row = Math.max(0, Math.min(state.roster.length - 1, row));
+    column = Math.max(0, Math.min(6, column));
+    state.selected = { employeeKey: state.roster[row].employeeKey, date: iso(state.week[column]) };
     render();
-    document.querySelector(`[data-ac-cell="${CSS.escape(state.selected.employeeKey)}|${state.selected.date}"]`)?.focus();
+    selectCell(state.selected.employeeKey, state.selected.date, 0);
   }
 
-  async function save() {
-    if (!state.roster.length) {
-      msg("Load personnel first.", true);
-      return;
-    }
-    const button = document.getElementById("acSave");
+  async function saveWeek() {
+    if (!state.roster.length) return message("Load personnel first.", true);
+    const button = document.getElementById("acwSave");
     button.disabled = true;
     button.textContent = "Saving Week...";
     try {
-      const payload = {
-        camp: document.getElementById("acCamp").value,
-        office: document.getElementById("acOffice").value,
-        dutyDetail: document.getElementById("acPreset").value,
-        days: state.week.map(day => {
-          const dateText = iso(day);
-          return {
-            date: dateText,
-            records: state.roster.map(person => ({
-              ...person,
-              status: state.cells.get(cellKey(person.employeeKey, dateText)) || "UNRECORDED",
-              remarks: "",
-            })),
-          };
-        }),
-      };
+      const payload = { camp: document.getElementById("acwCamp").value, office: document.getElementById("acwOffice").value, dutyDetail: document.getElementById("acwPreset").value, days: state.week.map(day => { const dateText = iso(day); return { date: dateText, records: state.roster.map(person => Object.assign({}, person, { status: state.cells.get(key(person.employeeKey, dateText)) || "UNRECORDED", remarks: "" })) }; }) };
       const response = await server("saveAttendanceCenterWeek", payload);
       if (!response || !response.success) throw new Error(response && response.message || "Save failed.");
-      msg(`${response.message} ${response.recordsSaved} record(s) updated.`);
+      message(response.message + " " + response.recordsSaved + " record(s) updated.");
     } catch (error) {
-      msg(error.message, true);
+      message(error.message, true);
     } finally {
       button.disabled = false;
       button.textContent = "Save Week";
     }
   }
 
-  function msg(text, error) {
-    const element = document.getElementById("acMessage");
-    if (element) {
-      element.textContent = text;
-      element.style.color = error ? "#a23f3f" : "#607566";
-    }
+  function message(text, isError) {
+    const element = document.getElementById("acwMessage");
+    if (!element) return;
+    element.textContent = text;
+    element.style.color = isError ? "#a23f3f" : "#607566";
   }
 
   document.addEventListener("DOMContentLoaded", build);
-  window.AttendanceCenterPrototype = {
-    open,
-    close,
-    getState: () => ({ roster: state.roster.slice(), counts: counts(), week: state.week.map(iso) }),
-  };
+  window.AttendanceCenterPrototype = { open, close, getState: () => ({ roster: state.roster.slice(), week: state.week.map(iso), counts: counts() }) };
 })();
+</script>
