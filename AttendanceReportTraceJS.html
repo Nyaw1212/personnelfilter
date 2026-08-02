@@ -27,7 +27,9 @@
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td{background:#e3f4e7!important}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-match td:first-child{box-shadow:inset 5px 0 0 #347f49}
       #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-dim{opacity:.22}
+      #attendanceReportBackdrop #arrDetail tbody tr.arr-trace-revealed td{animation:arrTraceReveal .75s ease}
       #attendanceReportBackdrop #arrDetailTitle.arr-trace-title::after{content:attr(data-trace-label);display:inline-flex;margin-left:8px;padding:3px 7px;border-radius:999px;background:#dff1e4;color:#245f36;font-size:9px;font-weight:900;vertical-align:middle}
+      @keyframes arrTraceReveal{0%{box-shadow:inset 0 0 0 3px #2f7d45,0 0 0 0 rgba(47,125,69,.35)}55%{box-shadow:inset 0 0 0 3px #2f7d45,0 0 0 7px rgba(47,125,69,.12)}100%{box-shadow:inset 0 0 0 0 transparent,0 0 0 0 transparent}}
     `;
     document.head.appendChild(style);
   }
@@ -41,7 +43,7 @@
     document.querySelectorAll("#attendanceReportBackdrop .arr-trace-cell, #attendanceReportBackdrop .arr-trace-locked")
       .forEach(cell => cell.classList.remove("arr-trace-cell", "arr-trace-locked"));
     document.querySelectorAll("#attendanceReportBackdrop #arrDetail tbody tr")
-      .forEach(row => row.classList.remove("arr-trace-match", "arr-trace-dim"));
+      .forEach(row => row.classList.remove("arr-trace-match", "arr-trace-dim", "arr-trace-revealed"));
     const title = document.getElementById("arrDetailTitle");
     if (title) {
       title.classList.remove("arr-trace-title");
@@ -52,6 +54,24 @@
   function rowStatus(row) {
     const badge = row.querySelector(".arr-status");
     return String(badge && badge.textContent || "").trim().toUpperCase();
+  }
+
+  function isOutsideScrollView(row, scrollWrap) {
+    if (!row || !scrollWrap) return false;
+    const rowBox = row.getBoundingClientRect();
+    const wrapBox = scrollWrap.getBoundingClientRect();
+    return rowBox.top < wrapBox.top || rowBox.bottom > wrapBox.bottom;
+  }
+
+  function revealFirstMatch(rows) {
+    const firstMatch = rows.find(row => row.classList.contains("arr-trace-match"));
+    const scrollWrap = document.getElementById("arrDetail");
+    if (!firstMatch || !scrollWrap || !isOutsideScrollView(firstMatch, scrollWrap)) return;
+
+    firstMatch.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    firstMatch.classList.remove("arr-trace-revealed");
+    void firstMatch.offsetWidth;
+    firstMatch.classList.add("arr-trace-revealed");
   }
 
   function applyTrace(cell, status, isLocked) {
@@ -72,11 +92,14 @@
       title.classList.add("arr-trace-title");
       title.setAttribute("data-trace-label", status === "TOTAL" ? matched + " personnel" : status + " · " + matched);
     }
+
+    if (matched && status !== "TOTAL") {
+      window.requestAnimationFrame(() => revealFirstMatch(detailRows));
+    }
   }
 
   function ensureOfficeSelected(summaryRow, callback) {
     if (!summaryRow) return;
-    const office = String(summaryRow.dataset.office || "");
     const isActive = summaryRow.classList.contains("is-active");
     if (isActive) {
       callback();
