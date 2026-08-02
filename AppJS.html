@@ -5,184 +5,80 @@ document.addEventListener(
 
 async function initializePersonnelApp() {
   bindPersonnelEvents();
-
   renderRankGroups();
   renderPreviewHeader();
   installTemporaryRefreshButton_();
-
-  setSyncStatus(
-    "Loading personnel...",
-    "working"
-  );
-
-  setLastSyncLabel(
-    "Reading personnel data from Google Sheets..."
-  );
+  setSyncStatus("Loading personnel...", "working");
+  setLastSyncLabel("Reading personnel data from Google Sheets...");
 
   try {
-    const response =
-      await PersonnelAPI.loadPersonnel();
-
-    PersonnelState.records =
-      Array.isArray(response?.records)
-        ? response.records
-        : [];
-
+    const response = await PersonnelAPI.loadPersonnel();
+    PersonnelState.records = Array.isArray(response?.records) ? response.records : [];
     populateFilterValuesFromRecords();
     renderGeneralFilterGroups();
-
     PersonnelState.initialized = true;
-
     filterAndRenderPersonnel();
-
-    setSyncStatus(
-      "Preview ready",
-      "ready"
-    );
-
-    setLastSyncLabel(
-      `${PersonnelState.records.length.toLocaleString()} personnel rows loaded from Google Sheets.`
-    );
+    setSyncStatus("Preview ready", "ready");
+    setLastSyncLabel(`${PersonnelState.records.length.toLocaleString()} personnel rows loaded from Google Sheets.`);
   } catch (error) {
-    console.error(
-      "Personnel load error:",
-      error
-    );
-
+    console.error("Personnel load error:", error);
     PersonnelState.records = [];
     PersonnelState.filteredRecords = [];
-
     renderGeneralFilterGroups();
     renderPreviewTable();
-
-    setSyncStatus(
-      "Load failed",
-      "error"
-    );
-
-    setLastSyncLabel(
-      error?.message ||
-      "Personnel data could not be loaded."
-    );
+    setSyncStatus("Load failed", "error");
+    setLastSyncLabel(error?.message || "Personnel data could not be loaded.");
   }
 }
 
 function installTemporaryRefreshButton_() {
-  if (document.getElementById("refreshPersonnelDataButton")) {
-    return;
-  }
-
-  const applyButton =
-    document.getElementById("applyNowButton");
-
-  if (!applyButton || !applyButton.parentElement) {
-    console.warn(
-      "Temporary refresh button could not be installed."
-    );
-    return;
-  }
-
+  if (document.getElementById("refreshPersonnelDataButton")) return;
+  const applyButton = document.getElementById("applyNowButton");
+  if (!applyButton || !applyButton.parentElement) return;
   const button = document.createElement("button");
   button.id = "refreshPersonnelDataButton";
   button.type = "button";
   button.className = applyButton.className;
   button.textContent = "Refresh Data";
   button.title = "Reload current personnel data from Google Sheets";
-
   button.addEventListener("click", refreshPersonnelDataNow_);
-
-  applyButton.parentElement.insertBefore(
-    button,
-    applyButton
-  );
+  applyButton.parentElement.insertBefore(button, applyButton);
 }
 
 async function refreshPersonnelDataNow_(event) {
-  const button =
-    event?.currentTarget ||
-    document.getElementById("refreshPersonnelDataButton");
-
+  const button = event?.currentTarget || document.getElementById("refreshPersonnelDataButton");
   if (button?.disabled) return;
-
   const originalText = button?.textContent || "Refresh Data";
-
   if (button) {
     button.disabled = true;
     button.textContent = "Refreshing...";
   }
-
-  setSyncStatus(
-    "Refreshing personnel...",
-    "working"
-  );
-
-  setLastSyncLabel(
-    "Reading current personnel data from Google Sheets..."
-  );
-
+  setSyncStatus("Refreshing personnel...", "working");
+  setLastSyncLabel("Reading current personnel data from Google Sheets...");
   try {
     const response = await PersonnelAPI.loadPersonnel();
-    const freshRecords = Array.isArray(response?.records)
-      ? response.records
-      : [];
-
+    const freshRecords = Array.isArray(response?.records) ? response.records : [];
     PersonnelState.records = freshRecords;
     PersonnelState.__performanceAnalytics = null;
-
     freshRecords.forEach(record => {
-      if (
-        record &&
-        Object.prototype.hasOwnProperty.call(
-          record,
-          "__personnelNormalized"
-        )
-      ) {
-        try {
-          delete record.__personnelNormalized;
-        } catch (_) {
-          record.__personnelNormalized = null;
-        }
+      if (record && Object.prototype.hasOwnProperty.call(record, "__personnelNormalized")) {
+        try { delete record.__personnelNormalized; } catch (_) { record.__personnelNormalized = null; }
       }
     });
-
     populateFilterValuesFromRecords();
     renderGeneralFilterGroups();
-
     PersonnelState.filteredRecords = filterPersonnelRecords();
     syncChipVisuals();
     updateFilterCounts();
     updateRankCounts();
     renderPreviewTable();
     renderActiveFilterSummary();
-
-    setSyncStatus(
-      "Preview ready",
-      "ready"
-    );
-
-    setLastSyncLabel(
-      `${freshRecords.length.toLocaleString()} personnel rows refreshed from Google Sheets.`
-    );
-
-    console.info(
-      "Personnel data refreshed from Google Sheets.",
-      freshRecords.length
-    );
+    setSyncStatus("Preview ready", "ready");
+    setLastSyncLabel(`${freshRecords.length.toLocaleString()} personnel rows refreshed from Google Sheets.`);
   } catch (error) {
-    console.error(
-      "Personnel refresh error:",
-      error
-    );
-
-    setSyncStatus(
-      "Refresh failed",
-      "error"
-    );
-
-    setLastSyncLabel(
-      error?.message ||
-      "Personnel data could not be refreshed."
-    );
+    console.error("Personnel refresh error:", error);
+    setSyncStatus("Refresh failed", "error");
+    setLastSyncLabel(error?.message || "Personnel data could not be refreshed.");
   } finally {
     if (button) {
       button.disabled = false;
@@ -194,182 +90,61 @@ async function refreshPersonnelDataNow_(event) {
 function populateFilterValuesFromRecords() {
   PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
     const uniqueValues = new Set();
-
     PersonnelState.records.forEach(record => {
-      const value = String(
-        record[group.recordKey] || ""
-      ).trim();
-
-      if (value) {
-        uniqueValues.add(value);
-      }
+      const value = String(record[group.recordKey] || "").trim();
+      if (value) uniqueValues.add(value);
     });
-
-    group.values = [...uniqueValues].sort(
-      (a, b) =>
-        a.localeCompare(
-          b,
-          undefined,
-          {
-            numeric: true,
-            sensitivity: "base",
-          }
-        )
-    );
+    group.values = [...uniqueValues].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   });
 }
 
 function bindPersonnelEvents() {
-  document
-    .getElementById("searchInput")
-    .addEventListener("input", event => {
-      PersonnelState.filters.search =
-        event.target.value;
-
-      handleFilterChange();
-    });
-
-  document
-    .getElementById("clearFiltersButton")
-    .addEventListener(
-      "click",
-      clearAllFilters
-    );
-
-  document
-    .getElementById("clearRanksButton")
-    .addEventListener(
-      "click",
-      clearRanks
-    );
-
-  document
-    .getElementById("applyNowButton")
-    .addEventListener(
-      "click",
-      applyCurrentResultToSheet
-    );
-
-  document
-    .getElementById("showDuplicatesButton")
-    .addEventListener(
-      "click",
-      openDuplicatePanel
-    );
-
-  document
-    .getElementById("closeDuplicatePanelButton")
-    .addEventListener(
-      "click",
-      closeDuplicatePanel
-    );
-
-  document
-    .getElementById("duplicatePanelBackdrop")
-    .addEventListener(
-      "click",
-      closeDuplicatePanel
-    );
-
-  document.addEventListener(
-    "keydown",
-    event => {
-      if (event.key === "Escape") {
-        closeDuplicatePanel();
-      }
+  document.getElementById("searchInput").addEventListener("input", event => {
+    PersonnelState.filters.search = event.target.value;
+    handleFilterChange();
+  });
+  document.getElementById("clearFiltersButton").addEventListener("click", clearAllFilters);
+  document.getElementById("clearRanksButton").addEventListener("click", clearRanks);
+  document.getElementById("applyNowButton").addEventListener("click", applyCurrentResultToSheet);
+  document.getElementById("showDuplicatesButton").addEventListener("click", openDuplicatePanel);
+  document.getElementById("closeDuplicatePanelButton").addEventListener("click", closeDuplicatePanel);
+  document.getElementById("duplicatePanelBackdrop").addEventListener("click", closeDuplicatePanel);
+  document.addEventListener("keydown", event => { if (event.key === "Escape") closeDuplicatePanel(); });
+  document.getElementById("autoApplyToggle").addEventListener("change", event => {
+    PersonnelState.autoApply = event.target.checked;
+    if (PersonnelState.autoApply) {
+      scheduleSheetSync();
+      return;
     }
-  );
-
-  document
-    .getElementById("autoApplyToggle")
-    .addEventListener("change", event => {
-      PersonnelState.autoApply =
-        event.target.checked;
-
-      if (PersonnelState.autoApply) {
-        scheduleSheetSync();
-        return;
-      }
-
-      clearTimeout(
-        PersonnelState.syncTimer
-      );
-
-      setSyncStatus(
-        "Preview only",
-        "ready"
-      );
-
-      setLastSyncLabel(
-        "Auto Apply is off. Click Apply Now to sync."
-      );
-    });
-
-  document
-    .getElementById("minimizeButton")
-    .addEventListener(
-      "click",
-      minimizeApp
-    );
-
-  document
-    .getElementById("restoreButton")
-    .addEventListener(
-      "click",
-      restoreApp
-    );
-
-  document
-    .getElementById("restoreFromBarButton")
-    .addEventListener(
-      "click",
-      restoreApp
-    );
+    clearTimeout(PersonnelState.syncTimer);
+    setSyncStatus("Preview only", "ready");
+    setLastSyncLabel("Auto Apply is off. Click Apply Now to sync.");
+  });
+  document.getElementById("minimizeButton").addEventListener("click", minimizeApp);
+  document.getElementById("restoreButton").addEventListener("click", restoreApp);
+  document.getElementById("restoreFromBarButton").addEventListener("click", restoreApp);
 }
 
 function handleChipClick(button) {
-  const groupKey =
-    button.dataset.groupKey;
-
-  const value =
-    button.dataset.value;
-
-  const targetSet =
-    PersonnelState.filters[groupKey];
-
-  if (!(targetSet instanceof Set)) {
-    console.warn(
-      `Filter group "${groupKey}" is not configured.`
-    );
-
-    return;
-  }
-
-  toggleSetValue_(
-    targetSet,
-    value
-  );
-
+  const groupKey = button.dataset.groupKey;
+  const value = button.dataset.value;
+  const targetSet = PersonnelState.filters[groupKey];
+  if (!(targetSet instanceof Set)) return;
+  toggleSetValue_(targetSet, value);
   handleFilterChange();
 }
 
 function handleFilterChange() {
-  if (!PersonnelState.initialized) {
-    return;
-  }
-
+  if (!PersonnelState.initialized) return;
   filterAndRenderPersonnel();
   scheduleSheetSync();
 }
 
 function filterAndRenderPersonnel() {
-  PersonnelState.filteredRecords =
-    filterPersonnelRecords();
-
+  PersonnelState.filteredRecords = filterPersonnelRecords();
   syncChipVisuals();
   updateFilterCounts();
   updateRankCounts();
-
   renderPreviewTable();
   renderActiveFilterSummary();
 }
@@ -382,356 +157,23 @@ function clearRanks() {
 function clearAllFilters() {
   PersonnelState.filters.search = "";
   PersonnelState.filters.ranks.clear();
-
   PERSONNEL_APP_CONFIG.filterGroups.forEach(group => {
-    const filterSet =
-      PersonnelState.filters[group.key];
-
-    if (filterSet instanceof Set) {
-      filterSet.clear();
-    }
+    const filterSet = PersonnelState.filters[group.key];
+    if (filterSet instanceof Set) filterSet.clear();
   });
-
-  document.getElementById(
-    "searchInput"
-  ).value = "";
-
+  document.getElementById("searchInput").value = "";
   closeDuplicatePanel();
   handleFilterChange();
 }
 
 function minimizeApp() {
   PersonnelState.minimized = true;
-
-  document
-    .getElementById("app")
-    .classList
-    .add("is-minimized");
-
-  document.getElementById(
-    "minimizedBar"
-  ).hidden = false;
+  document.getElementById("app").classList.add("is-minimized");
+  document.getElementById("minimizedBar").hidden = false;
 }
 
 function restoreApp() {
   PersonnelState.minimized = false;
-
-  document
-    .getElementById("app")
-    .classList
-    .remove("is-minimized");
-
-  document.getElementById(
-    "minimizedBar"
-  ).hidden = true;
+  document.getElementById("app").classList.remove("is-minimized");
+  document.getElementById("minimizedBar").hidden = true;
 }
-
-// ==========================================
-// Attendance Center Prototype v0.1
-// ==========================================
-
-(function installAttendanceCenterPrototype() {
-  "use strict";
-
-  const state = {
-    bootstrapped: false,
-    open: false,
-    roster: [],
-    statuses: new Map(),
-    remarks: new Map(),
-    presets: [],
-  };
-
-  const normalize = value => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
-  const escapeHtml = value => String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-
-  function server(method, argument) {
-    return new Promise((resolve, reject) => {
-      let runner = google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(error => reject(new Error(error?.message || String(error))));
-      argument === undefined ? runner[method]() : runner[method](argument);
-    });
-  }
-
-  function installAttendanceStyles() {
-    if (document.getElementById("attendanceCenterPrototypeStyles")) return;
-    const style = document.createElement("style");
-    style.id = "attendanceCenterPrototypeStyles";
-    style.textContent = `
-      .ac-launch{position:fixed;right:22px;bottom:78px;z-index:1400;border:0;border-radius:999px;padding:12px 18px;background:#2f7d4a;color:#fff;font-weight:800;box-shadow:0 10px 28px rgba(25,80,45,.24);cursor:pointer}
-      .ac-launch:hover{background:#25683c}
-      .ac-backdrop{position:fixed;inset:0;z-index:2200;background:rgba(15,35,24,.45);backdrop-filter:blur(4px);display:grid;place-items:center;padding:18px}
-      .ac-backdrop[hidden]{display:none}
-      .ac-shell{width:min(1180px,100%);height:min(850px,94vh);background:#f7fbf8;border:1px solid #cfe0d3;border-radius:20px;box-shadow:0 28px 80px rgba(16,50,29,.25);overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto}
-      .ac-header{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;background:#eef7f0;border-bottom:1px solid #c9dccd}
-      .ac-header h2{margin:0;color:#24452f;font-size:22px}.ac-header p{margin:4px 0 0;color:#66806d;font-size:13px}
-      .ac-close{width:34px;height:34px;border:1px solid #c9dccd;border-radius:9px;background:#fff;font-size:20px;cursor:pointer}
-      .ac-controls{display:grid;grid-template-columns:170px 1fr 1fr 1fr auto;gap:10px;padding:16px 20px;background:#fff;border-bottom:1px solid #dfebe1}
-      .ac-field{display:grid;gap:6px}.ac-field label{font-size:11px;font-weight:800;letter-spacing:.06em;color:#55705e;text-transform:uppercase}
-      .ac-field input,.ac-field select,.ac-search{height:40px;border:1px solid #cbdacf;border-radius:10px;background:#fff;padding:0 11px;color:#263b2c;min-width:0}
-      .ac-btn{height:40px;border:1px solid #bdd2c2;border-radius:10px;background:#fff;color:#2d5538;font-weight:800;padding:0 14px;cursor:pointer}.ac-btn:hover{background:#eef7f0}.ac-btn-primary{background:#3e9658;color:#fff;border-color:#3e9658}.ac-btn-primary:hover{background:#337f4a}.ac-btn-danger{color:#a03b3b;border-color:#e5bcbc}
-      .ac-summary{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:10px;padding:14px 20px;background:#f7fbf8;border-bottom:1px solid #dfe9e1}
-      .ac-stat{background:#fff;border:1px solid #dbe7dd;border-radius:12px;padding:10px 12px}.ac-stat span{display:block;font-size:10px;font-weight:800;letter-spacing:.05em;color:#74877a;text-transform:uppercase}.ac-stat strong{font-size:22px;color:#263f2d}
-      .ac-workspace{overflow:auto;padding:0 20px 20px}.ac-toolbar{position:sticky;top:0;z-index:3;background:#f7fbf8;padding:14px 0 10px;display:flex;gap:9px;align-items:center}.ac-search{flex:1}.ac-table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid #d6e4d9;border-radius:14px;overflow:hidden}.ac-table th{position:sticky;top:64px;z-index:2;text-align:left;background:#eef7f0;color:#365441;font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:11px;border-bottom:1px solid #c9dccd}.ac-table td{padding:9px 11px;border-bottom:1px solid #edf2ee;vertical-align:middle}.ac-table tr:last-child td{border-bottom:0}.ac-name{font-weight:800;color:#263f2d}.ac-sub{font-size:11px;color:#7a8b7e;margin-top:2px}.ac-status{height:34px;border:1px solid #ccdacf;border-radius:9px;padding:0 8px;font-weight:800;background:#fff}.ac-remarks{height:34px;width:100%;border:1px solid #d2ded5;border-radius:9px;padding:0 9px}.ac-footer{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#fff;border-top:1px solid #d6e4d9}.ac-message{font-size:13px;color:#607566}.ac-empty{text-align:center;padding:50px 20px;color:#718178}
-      @media(max-width:850px){.ac-controls{grid-template-columns:1fr 1fr}.ac-controls .ac-load{grid-column:1/-1}.ac-summary{grid-template-columns:repeat(3,1fr)}.ac-shell{height:96vh}.ac-table{min-width:760px}}
-    `;
-    document.head.appendChild(style);
-  }
-
-  function buildAttendanceUi() {
-    if (document.getElementById("attendanceCenterBackdrop")) return;
-    installAttendanceStyles();
-
-    const launch = document.createElement("button");
-    launch.id = "attendanceCenterLaunch";
-    launch.className = "ac-launch";
-    launch.type = "button";
-    launch.textContent = "Attendance Center";
-    launch.addEventListener("click", openAttendanceCenter);
-    document.body.appendChild(launch);
-
-    const backdrop = document.createElement("div");
-    backdrop.id = "attendanceCenterBackdrop";
-    backdrop.className = "ac-backdrop";
-    backdrop.hidden = true;
-    backdrop.innerHTML = `
-      <section class="ac-shell" role="dialog" aria-modal="true" aria-label="Attendance Center">
-        <header class="ac-header"><div><h2>Attendance Center</h2><p>Office-based attendance prototype</p></div><button id="acClose" class="ac-close" type="button">×</button></header>
-        <div class="ac-controls">
-          <div class="ac-field"><label for="acDate">Attendance Date</label><input id="acDate" type="date"></div>
-          <div class="ac-field"><label for="acCamp">Camp</label><select id="acCamp"><option value="">Select camp</option></select></div>
-          <div class="ac-field"><label for="acOffice">Office</label><select id="acOffice"><option value="">Select office</option></select></div>
-          <div class="ac-field"><label for="acPreset">Duty Detail</label><select id="acPreset"><option value="Normal Office Days">Normal Office Days</option></select></div>
-          <button id="acLoad" class="ac-btn ac-btn-primary ac-load" type="button">Load Personnel</button>
-        </div>
-        <div id="acSummary" class="ac-summary"></div>
-        <div class="ac-workspace">
-          <div class="ac-toolbar"><input id="acSearch" class="ac-search" type="search" placeholder="Search personnel in this office..."><button id="acMarkAll" class="ac-btn" type="button">Mark All Present</button><button id="acClear" class="ac-btn ac-btn-danger" type="button">Clear</button></div>
-          <div id="acTableWrap" class="ac-empty">Choose a date, camp, and office, then load personnel.</div>
-        </div>
-        <footer class="ac-footer"><div id="acMessage" class="ac-message">Prototype ready.</div><button id="acSave" class="ac-btn ac-btn-primary" type="button">Save Attendance</button></footer>
-      </section>`;
-    document.body.appendChild(backdrop);
-
-    document.getElementById("acClose").addEventListener("click", closeAttendanceCenter);
-    backdrop.addEventListener("click", event => { if (event.target === backdrop) closeAttendanceCenter(); });
-    document.getElementById("acCamp").addEventListener("change", populateAttendanceOffices);
-    document.getElementById("acLoad").addEventListener("click", loadAttendanceRoster);
-    document.getElementById("acMarkAll").addEventListener("click", () => setAllAttendanceStatuses("PRESENT"));
-    document.getElementById("acClear").addEventListener("click", () => setAllAttendanceStatuses("UNRECORDED"));
-    document.getElementById("acSearch").addEventListener("input", renderAttendanceRoster);
-    document.getElementById("acSave").addEventListener("click", saveAttendanceRoster);
-    document.addEventListener("keydown", event => { if (event.key === "Escape" && state.open) closeAttendanceCenter(); });
-
-    document.getElementById("acDate").value = new Date().toISOString().slice(0, 10);
-    renderAttendanceSummary();
-  }
-
-  async function bootstrapAttendance() {
-    if (state.bootstrapped) return;
-    const response = await server("getAttendanceCenterBootstrap");
-    state.presets = Array.isArray(response?.presets) ? response.presets : [];
-    const presetSelect = document.getElementById("acPreset");
-    if (presetSelect && state.presets.length) {
-      presetSelect.innerHTML = state.presets.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join("");
-    }
-    populateAttendanceCamps();
-    state.bootstrapped = true;
-  }
-
-  async function openAttendanceCenter() {
-    state.open = true;
-    document.getElementById("attendanceCenterBackdrop").hidden = false;
-    setAttendanceMessage("Loading Attendance Center...");
-    try {
-      await bootstrapAttendance();
-      setAttendanceMessage("Select an office and load its personnel.");
-    } catch (error) {
-      setAttendanceMessage(error.message, true);
-    }
-  }
-
-  function closeAttendanceCenter() {
-    state.open = false;
-    document.getElementById("attendanceCenterBackdrop").hidden = true;
-  }
-
-  function personnelRecords() {
-    return Array.isArray(window.PersonnelState?.records)
-      ? window.PersonnelState.records
-      : (typeof PersonnelState !== "undefined" && Array.isArray(PersonnelState.records) ? PersonnelState.records : []);
-  }
-
-  function populateAttendanceCamps() {
-    const camps = [...new Set(personnelRecords().map(record => String(record.Camp || "").trim()).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-    const select = document.getElementById("acCamp");
-    select.innerHTML = `<option value="">Select camp</option>${camps.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
-    populateAttendanceOffices();
-  }
-
-  function populateAttendanceOffices() {
-    const camp = normalize(document.getElementById("acCamp")?.value);
-    const offices = [...new Set(personnelRecords()
-      .filter(record => !camp || normalize(record.Camp) === camp)
-      .map(record => String(record.Office || "").trim())
-      .filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-    document.getElementById("acOffice").innerHTML = `<option value="">Select office</option>${offices.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
-  }
-
-  async function loadAttendanceRoster() {
-    const date = document.getElementById("acDate").value;
-    const camp = document.getElementById("acCamp").value;
-    const office = document.getElementById("acOffice").value;
-    if (!date || !camp || !office) {
-      setAttendanceMessage("Select a date, camp, and office first.", true);
-      return;
-    }
-
-    state.roster = personnelRecords()
-      .filter(record => normalize(record.Camp) === normalize(camp) && normalize(record.Office) === normalize(office))
-      .map(record => ({
-        employeeKey: String(record.__sheetRow || record["Employee ID"] || record["Full Name"] || ""),
-        sheetRow: record.__sheetRow || "",
-        fullName: String(record["Full Name"] || "").trim(),
-        rank: String(record.Rank || "").trim(),
-        office: String(record.Office || "").trim(),
-        camp: String(record.Camp || "").trim(),
-      }))
-      .filter(record => record.fullName)
-      .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: "base" }));
-
-    state.statuses = new Map(state.roster.map(record => [record.employeeKey, "UNRECORDED"]));
-    state.remarks = new Map();
-    setAttendanceMessage(`Loading saved attendance for ${office}...`);
-
-    try {
-      const response = await server("loadAttendanceCenterRecords", { date, camp, office });
-      (response?.records || []).forEach(record => {
-        if (state.statuses.has(String(record.employeeKey))) {
-          state.statuses.set(String(record.employeeKey), normalize(record.status) || "UNRECORDED");
-          state.remarks.set(String(record.employeeKey), String(record.remarks || ""));
-        }
-      });
-      renderAttendanceRoster();
-      renderAttendanceSummary();
-      setAttendanceMessage(`${state.roster.length} personnel loaded for ${office}.`);
-    } catch (error) {
-      renderAttendanceRoster();
-      renderAttendanceSummary();
-      setAttendanceMessage(error.message, true);
-    }
-  }
-
-  function setAllAttendanceStatuses(status) {
-    state.roster.forEach(record => state.statuses.set(record.employeeKey, status));
-    renderAttendanceRoster();
-    renderAttendanceSummary();
-  }
-
-  function renderAttendanceRoster() {
-    const wrap = document.getElementById("acTableWrap");
-    if (!state.roster.length) {
-      wrap.className = "ac-empty";
-      wrap.innerHTML = "No personnel loaded.";
-      return;
-    }
-
-    const term = normalize(document.getElementById("acSearch")?.value);
-    const visible = state.roster.filter(record => !term || normalize(`${record.fullName} ${record.rank}`).includes(term));
-    wrap.className = "";
-    wrap.innerHTML = `<table class="ac-table"><thead><tr><th>Personnel</th><th>Rank</th><th>Status</th><th>Remarks</th></tr></thead><tbody>${visible.map(record => `
-      <tr data-key="${escapeHtml(record.employeeKey)}">
-        <td><div class="ac-name">${escapeHtml(record.fullName)}</div><div class="ac-sub">Row ${escapeHtml(record.sheetRow || "—")}</div></td>
-        <td>${escapeHtml(record.rank)}</td>
-        <td><select class="ac-status" data-ac-status="${escapeHtml(record.employeeKey)}">
-          ${["PRESENT","ABSENT","LEAVE","OB","UNRECORDED"].map(value => `<option value="${value}"${state.statuses.get(record.employeeKey) === value ? " selected" : ""}>${value}</option>`).join("")}
-        </select></td>
-        <td><input class="ac-remarks" data-ac-remarks="${escapeHtml(record.employeeKey)}" value="${escapeHtml(state.remarks.get(record.employeeKey) || "")}" placeholder="Optional"></td>
-      </tr>`).join("")}</tbody></table>`;
-
-    wrap.querySelectorAll("[data-ac-status]").forEach(select => select.addEventListener("change", event => {
-      state.statuses.set(event.target.dataset.acStatus, event.target.value);
-      renderAttendanceSummary();
-    }));
-    wrap.querySelectorAll("[data-ac-remarks]").forEach(input => input.addEventListener("input", event => {
-      state.remarks.set(event.target.dataset.acRemarks, event.target.value);
-    }));
-  }
-
-  function attendanceCounts() {
-    const counts = { PRESENT: 0, ABSENT: 0, LEAVE: 0, OB: 0, UNRECORDED: 0 };
-    state.roster.forEach(record => {
-      const status = state.statuses.get(record.employeeKey) || "UNRECORDED";
-      counts[status] = (counts[status] || 0) + 1;
-    });
-    return counts;
-  }
-
-  function renderAttendanceSummary() {
-    const counts = attendanceCounts();
-    const values = [
-      ["Total Personnel", state.roster.length],
-      ["Present", counts.PRESENT],
-      ["Absent", counts.ABSENT],
-      ["Leave", counts.LEAVE],
-      ["OB", counts.OB],
-      ["Unrecorded", counts.UNRECORDED],
-    ];
-    document.getElementById("acSummary").innerHTML = values.map(([label, value]) => `<div class="ac-stat"><span>${label}</span><strong>${Number(value).toLocaleString()}</strong></div>`).join("");
-  }
-
-  async function saveAttendanceRoster() {
-    if (!state.roster.length) {
-      setAttendanceMessage("Load personnel before saving.", true);
-      return;
-    }
-    const button = document.getElementById("acSave");
-    button.disabled = true;
-    button.textContent = "Saving...";
-    try {
-      const payload = {
-        date: document.getElementById("acDate").value,
-        camp: document.getElementById("acCamp").value,
-        office: document.getElementById("acOffice").value,
-        dutyDetail: document.getElementById("acPreset").value,
-        records: state.roster.map(record => ({
-          ...record,
-          status: state.statuses.get(record.employeeKey) || "UNRECORDED",
-          remarks: state.remarks.get(record.employeeKey) || "",
-        })),
-      };
-      const response = await server("saveAttendanceCenterSubmission", payload);
-      if (!response?.success) throw new Error(response?.message || "Attendance could not be saved.");
-      setAttendanceMessage(`${response.message} Submission: ${response.submissionId}`);
-    } catch (error) {
-      setAttendanceMessage(error.message, true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Save Attendance";
-    }
-  }
-
-  function setAttendanceMessage(message, isError) {
-    const element = document.getElementById("acMessage");
-    if (!element) return;
-    element.textContent = message;
-    element.style.color = isError ? "#a23f3f" : "#607566";
-  }
-
-  document.addEventListener("DOMContentLoaded", () => window.setTimeout(buildAttendanceUi, 0));
-
-  window.AttendanceCenterPrototype = {
-    version: "0.1.0",
-    open: openAttendanceCenter,
-    close: closeAttendanceCenter,
-    getState: () => ({ roster: state.roster.slice(), counts: attendanceCounts() }),
-  };
-})();
