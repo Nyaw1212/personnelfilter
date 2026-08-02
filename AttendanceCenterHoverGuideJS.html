@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const STYLE_ID = "attendanceHoverGuideStyles";
+  const STYLE_ID = "attendanceHoverGuideStylesV2";
 
   function installStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -9,78 +9,102 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr:hover td {
-        background: #f1f9f3 !important;
+      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr > td {
+        transition: background-color .12s ease, box-shadow .12s ease;
       }
 
-      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr:hover td:first-child {
-        background: #e8f5eb !important;
-        box-shadow: inset 4px 0 0 #347f49;
+      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr.acw-row-hover > td {
+        background: #edf8f0 !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid tbody tr.acw-row-hover > td:first-child {
+        background: #dff1e4 !important;
+        box-shadow: inset 5px 0 0 #2f7d45 !important;
       }
 
       #attendanceCenterWeeklyBackdrop .acw-grid th.acw-column-hover,
       #attendanceCenterWeeklyBackdrop .acw-grid td.acw-column-hover {
-        background: #e5f4e9 !important;
+        background: #e2f2e7 !important;
       }
 
       #attendanceCenterWeeklyBackdrop .acw-grid th.acw-column-hover {
-        color: #173d23;
-        box-shadow: inset 0 -3px 0 #347f49;
+        color: #123c20 !important;
+        box-shadow: inset 0 -4px 0 #2f7d45 !important;
       }
 
-      #attendanceCenterWeeklyBackdrop .acw-grid td.acw-column-hover .acw-cell {
-        box-shadow: 0 0 0 3px rgba(52,127,73,.18);
+      #attendanceCenterWeeklyBackdrop .acw-grid td.acw-active-cell {
+        background: #cce8d4 !important;
+        box-shadow: inset 0 0 0 2px #2f7d45 !important;
       }
 
-      #attendanceCenterWeeklyBackdrop .acw-grid td:hover {
-        background: #dcefe1 !important;
-      }
-
-      #attendanceCenterWeeklyBackdrop .acw-grid td:hover .acw-cell {
-        transform: scale(1.06);
-        box-shadow: 0 0 0 3px rgba(52,127,73,.28), 0 4px 10px rgba(23,61,35,.12);
+      #attendanceCenterWeeklyBackdrop .acw-grid td.acw-active-cell .acw-cell {
+        transform: scale(1.12);
+        box-shadow: 0 0 0 4px rgba(47,125,69,.24), 0 5px 12px rgba(23,61,35,.16) !important;
       }
 
       #attendanceCenterWeeklyBackdrop .acw-cell {
-        transition: transform .12s ease, box-shadow .12s ease;
+        transition: transform .12s ease, box-shadow .12s ease !important;
       }
     `;
 
     document.head.appendChild(style);
   }
 
-  function clearColumn(table) {
+  function clearGuide(table) {
+    table.querySelectorAll(".acw-row-hover").forEach(function (row) {
+      row.classList.remove("acw-row-hover");
+    });
     table.querySelectorAll(".acw-column-hover").forEach(function (cell) {
       cell.classList.remove("acw-column-hover");
+    });
+    table.querySelectorAll(".acw-active-cell").forEach(function (cell) {
+      cell.classList.remove("acw-active-cell");
+    });
+  }
+
+  function applyGuide(button) {
+    const table = button.closest(".acw-grid");
+    const td = button.closest("td");
+    const row = button.closest("tr");
+    if (!table || !td || !row) return;
+
+    clearGuide(table);
+    row.classList.add("acw-row-hover");
+    td.classList.add("acw-active-cell");
+
+    const columnNumber = td.cellIndex + 1;
+    table.querySelectorAll(
+      "th:nth-child(" + columnNumber + "), td:nth-child(" + columnNumber + ")"
+    ).forEach(function (cell) {
+      cell.classList.add("acw-column-hover");
     });
   }
 
   function bindHoverGuide() {
     const wrap = document.getElementById("acwTable");
-    if (!wrap || wrap.dataset.hoverGuideBound === "true") return;
+    if (!wrap || wrap.dataset.hoverGuideV2Bound === "true") return;
 
-    wrap.dataset.hoverGuideBound = "true";
+    wrap.dataset.hoverGuideV2Bound = "true";
 
-    wrap.addEventListener("mouseover", function (event) {
-      const button = event.target.closest(".acw-cell");
-      const table = event.target.closest(".acw-grid");
-      if (!button || !table) return;
-
-      const td = button.closest("td");
-      if (!td) return;
-
-      clearColumn(table);
-      const columnNumber = td.cellIndex + 1;
-      table.querySelectorAll(
-        "th:nth-child(" + columnNumber + "), td:nth-child(" + columnNumber + ")"
-      ).forEach(function (cell) {
-        cell.classList.add("acw-column-hover");
-      });
+    wrap.addEventListener("pointerover", function (event) {
+      const button = event.target.closest && event.target.closest(".acw-cell");
+      if (button) applyGuide(button);
     });
 
-    wrap.addEventListener("mouseleave", function () {
+    wrap.addEventListener("focusin", function (event) {
+      const button = event.target.closest && event.target.closest(".acw-cell");
+      if (button) applyGuide(button);
+    });
+
+    wrap.addEventListener("pointerleave", function () {
       const table = wrap.querySelector(".acw-grid");
-      if (table) clearColumn(table);
+      if (table) clearGuide(table);
+    });
+
+    wrap.addEventListener("focusout", function (event) {
+      if (wrap.contains(event.relatedTarget)) return;
+      const table = wrap.querySelector(".acw-grid");
+      if (table) clearGuide(table);
     });
   }
 
