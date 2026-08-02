@@ -6279,6 +6279,151 @@ function restoreApp() {
   console.info("PersonnelPlatform core active. Run $PF.status().");
 })();
 
+// Personnel Platform — Performance Engine V1
+// Lightweight production timing, long-task monitoring, and debug controls.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const samples = new Map();
+  const active = new Map();
+  const longTasks = [];
+  let debugEnabled = Boolean(document.querySelector('meta[name="dev-mode"]'));
+
+  function now() {
+    return window.performance?.now?.() ?? Date.now();
+  }
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function record(name, duration, metadata) {
+    const key = text(name) || "unnamed";
+    const list = samples.get(key) || [];
+    list.push({
+      duration: Math.max(0, Number(duration) || 0),
+      at: new Date().toISOString(),
+      metadata: metadata || null,
+    });
+    if (list.length > 50) list.splice(0, list.length - 50);
+    samples.set(key, list);
+    return list[list.length - 1];
+  }
+
+  function summarize(name, list) {
+    const values = list.map(item => item.duration);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+      name,
+      count: values.length,
+      lastMs: Number((values.at(-1) || 0).toFixed(2)),
+      averageMs: Number((values.length ? total / values.length : 0).toFixed(2)),
+      maxMs: Number((values.length ? Math.max(...values) : 0).toFixed(2)),
+    };
+  }
+
+  const PerformanceEngine = {
+    version: "1.0.0",
+
+    start(name, metadata) {
+      const key = text(name);
+      if (!key) return null;
+      active.set(key, { startedAt: now(), metadata: metadata || null });
+      return key;
+    },
+
+    stop(name, metadata) {
+      const key = text(name);
+      const timer = active.get(key);
+      if (!timer) return null;
+      active.delete(key);
+      return record(key, now() - timer.startedAt, metadata || timer.metadata);
+    },
+
+    measure(name, fn, metadata) {
+      const startedAt = now();
+      try {
+        const result = fn();
+        if (result && typeof result.then === "function") {
+          return result.finally(() => record(name, now() - startedAt, metadata));
+        }
+        record(name, now() - startedAt, metadata);
+        return result;
+      } catch (error) {
+        record(name, now() - startedAt, { ...(metadata || {}), failed: true });
+        throw error;
+      }
+    },
+
+    mark(name, duration, metadata) {
+      return record(name, duration, metadata);
+    },
+
+    status() {
+      const navigation = window.performance?.getEntriesByType?.("navigation")?.[0];
+      const state = {
+        version: this.version,
+        debug: debugEnabled,
+        metrics: samples.size,
+        activeTimers: active.size,
+        longTasks: longTasks.length,
+        domInteractiveMs: navigation ? Number(navigation.domInteractive.toFixed(2)) : 0,
+        loadCompleteMs: navigation ? Number(navigation.loadEventEnd.toFixed(2)) : 0,
+      };
+      console.table(state);
+      return state;
+    },
+
+    report() {
+      const rows = [...samples.entries()]
+        .map(([name, list]) => summarize(name, list))
+        .sort((a, b) => b.averageMs - a.averageMs);
+      console.table(rows);
+      return rows;
+    },
+
+    clear() {
+      samples.clear();
+      active.clear();
+      longTasks.splice(0);
+      return true;
+    },
+
+    debug: {
+      enable() { debugEnabled = true; return true; },
+      disable() { debugEnabled = false; return true; },
+      get enabled() { return debugEnabled; },
+      log(...args) { if (debugEnabled) console.info(...args); },
+    },
+  };
+
+  if (window.PerformanceObserver) {
+    try {
+      const observer = new PerformanceObserver(list => {
+        list.getEntries().forEach(entry => {
+          longTasks.push({
+            duration: Number(entry.duration.toFixed(2)),
+            startTime: Number(entry.startTime.toFixed(2)),
+          });
+          if (longTasks.length > 30) longTasks.splice(0, longTasks.length - 30);
+          record("browser.longTask", entry.duration);
+        });
+      });
+      observer.observe({ type: "longtask", buffered: true });
+    } catch (_) {
+      // Long Task API is not available in every Apps Script browser context.
+    }
+  }
+
+  window.$PF.performance = PerformanceEngine;
+  window.$PF.debug = PerformanceEngine.debug;
+  console.info("PerformanceEngine v1.0.0 active. Run $PF.performance.report().");
+})();
+
 //----------------------------------
 // Personnel Platform — Legacy engine adapters
 //----------------------------------
@@ -8871,6 +9016,133 @@ function restoreApp() {
   console.info("Report Designer V1 active: two-column live details and personnel preview.");
 })();
 
+// Personnel Platform — Apps Script report generation bridge
+// Connects Report Designer generation requests to Stage1WorkflowServer.js.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  const report = platform?.engines?.get?.("report");
+  if (!platform || !report) return;
+
+  const inFlight = new Set();
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function fromValue(person) {
+    return text(person?.from) ||
+      (text(person?.transferMode) === "CAMP_TO_CAMP"
+        ? text(person?.fromCamp)
+        : text(person?.fromOffice));
+  }
+
+  function toValue(person) {
+    return text(person?.to) ||
+      (text(person?.transferMode) === "CAMP_TO_CAMP"
+        ? text(person?.toCamp)
+        : text(person?.toOffice));
+  }
+
+  function serverPayload(draft) {
+    const metadata = draft?.metadata || {};
+    const source = draft?.payload || {};
+    const personnel = Array.isArray(source.personnel) ? source.personnel : [];
+
+    return {
+      orderNumber: text(metadata.orderNumber || source?.order?.number),
+      orderDate: text(metadata.orderDate || source?.order?.date),
+      signingOfficer: text(metadata.signingOfficer || source?.order?.signingOfficer),
+      signingPosition: text(metadata.signingPosition || source?.order?.signingPosition),
+      fileReference: text(metadata.fileReference || source?.order?.fileReference),
+      personnel: personnel.map((person, index) => ({
+        sequence: Number(person?.sequence || index + 1),
+        rank: text(person?.rank),
+        fullName: text(person?.fullName),
+        from: fromValue(person),
+        to: toValue(person),
+        notes: text(person?.notes),
+      })),
+    };
+  }
+
+  function fail(draftId, message) {
+    const failureMessage = text(message) || "The report could not be generated.";
+    const result = report.saveResult(draftId, {
+      status: "FAILED",
+      success: false,
+      message: failureMessage,
+      generatedAt: new Date().toISOString(),
+    });
+
+    platform.events.emit("report:generation-failed", result);
+    window.$PF.reportPreview?.open?.(draftId);
+    window.alert(failureMessage);
+    return result;
+  }
+
+  platform.events.on("report:generation-requested", request => {
+    if (document.querySelector('meta[name="dev-mode"]')) return;
+
+    const draftId = text(request?.draftId || request?.draft?.id);
+    const draft = request?.draft || report.get(draftId);
+    if (!draftId || !draft || inFlight.has(draftId)) return;
+
+    if (!window.google?.script?.run) {
+      fail(draftId, "Apps Script runtime is unavailable.");
+      return;
+    }
+
+    inFlight.add(draftId);
+
+    google.script.run
+      .withSuccessHandler(response => {
+        inFlight.delete(draftId);
+
+        if (!response || response.success !== true) {
+          fail(draftId, response?.message || "The report generator returned an unsuccessful response.");
+          return;
+        }
+
+        const result = report.saveResult(draftId, {
+          ...response,
+          status: "GENERATED",
+          success: true,
+          documentUrl: text(response.url),
+          generatedAt: new Date().toISOString(),
+        });
+
+        window.$PF.reportPreview?.close?.();
+        console.info("Apps Script report generation completed.", result);
+      })
+      .withFailureHandler(error => {
+        inFlight.delete(draftId);
+        fail(draftId, error?.message || String(error || "Report generation failed."));
+      })
+      .sendStage1ReassignmentToAogen(serverPayload(draft));
+  });
+
+  window.$PF.reportGenerationBridge = {
+    version: "1.0.0",
+    payload: draftOrId => serverPayload(
+      typeof draftOrId === "string" ? report.get(draftOrId) : draftOrId
+    ),
+    status() {
+      const state = {
+        version: this.version,
+        mode: document.querySelector('meta[name="dev-mode"]') ? "DEVELOPER" : "APPS_SCRIPT",
+        inFlight: inFlight.size,
+      };
+      console.table(state);
+      return state;
+    },
+  };
+
+  console.info("ReportGenerationBridge v1.0.0 active.");
+})();
+
 // Personnel Platform — Report-to-TransferQueue bridge
 // A preview is only a draft. Transfer movements are queued only after
 // ReportEngine records a successful GENERATED result.
@@ -9716,8 +9988,161 @@ function restoreApp() {
   console.info("Reassignment V1.2 active: SortEngine, advisory validation, and payload bridge.");
 })();
 
-// Personnel Platform — reusable NameFormatEngine
-// Formats personnel names for plugin previews and generated report payloads.
+// Personnel Platform — canonical Name Handler Engine
+// Uses LIST column A / Full Name for display and structured fields only as fallback/sort metadata.
+
+(function () {
+  "use strict";
+
+  const platform = window.PersonnelPlatform;
+  if (!platform) return;
+
+  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
+
+  function text(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  function upper(value) {
+    return text(value).toUpperCase();
+  }
+
+  function field(person, names) {
+    const record = person?.record || person || {};
+    for (const name of names) {
+      const value = person?.[name] ?? record?.[name];
+      if (text(value)) return text(value);
+    }
+    return "";
+  }
+
+  function canonicalFullName(person) {
+    return upper(field(person, [
+      "displayName",
+      "Display Name",
+      "fullName",
+      "Full Name",
+      "FULL NAME",
+    ]));
+  }
+
+  function parseFallback(value) {
+    const tokens = text(value).split(" ").filter(Boolean);
+    let suffix = "";
+    if (tokens.length > 1 && SUFFIXES.has(upper(tokens.at(-1)))) suffix = tokens.pop();
+    if (tokens.length < 2) return { firstName: tokens[0] || "", middleName: "", lastName: "", suffix };
+    return {
+      firstName: tokens[0] || "",
+      middleName: tokens.slice(1, -1).join(" "),
+      lastName: tokens.at(-1) || "",
+      suffix,
+    };
+  }
+
+  function normalize(person) {
+    const rank = field(person, ["rank", "Rank"]);
+    let firstName = field(person, ["firstName", "First Name", "FIRST NAME"]);
+    let middleName = field(person, ["middleName", "Middle Name", "MIDDLE NAME"]);
+    let lastName = field(person, ["lastName", "Last Name", "LAST NAME"]);
+    let suffix = field(person, ["suffix", "Suffix", "SUFFIX"]);
+
+    if (!firstName && !lastName) {
+      const parsed = parseFallback(canonicalFullName(person));
+      firstName = parsed.firstName;
+      middleName = parsed.middleName;
+      lastName = parsed.lastName;
+      suffix = suffix || parsed.suffix;
+    }
+
+    return {
+      rank: upper(rank),
+      firstName: upper(firstName),
+      middleName: upper(middleName),
+      lastName: upper(lastName),
+      suffix: upper(suffix).replace(/\.$/, ""),
+      fullName: canonicalFullName(person),
+    };
+  }
+
+  function middleInitial(value) {
+    return text(value)
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(part => part.replace(/\./g, "").charAt(0))
+      .filter(Boolean)
+      .join(" ")
+      .toUpperCase();
+  }
+
+  function formatStructured(person, options = {}) {
+    const parts = normalize(person);
+    const includeRank = options.includeRank !== false;
+    const order = options.order === "LAST_FIRST" ? "LAST_FIRST" : "FIRST_LAST";
+    const middle = options.middleInitial === false ? parts.middleName : middleInitial(parts.middleName);
+
+    let name;
+    if (order === "LAST_FIRST") {
+      const left = [parts.lastName, parts.suffix].filter(Boolean).join(" ");
+      const right = [parts.firstName, middle].filter(Boolean).join(" ");
+      name = left && right ? `${left}, ${right}` : left || right;
+    } else {
+      name = [parts.firstName, middle, parts.lastName, parts.suffix].filter(Boolean).join(" ");
+    }
+
+    return [includeRank ? parts.rank : "", name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  function format(person, options = {}) {
+    const fullName = canonicalFullName(person);
+
+    // Column A / Full Name is the canonical display return. Structured fields
+    // remain available to SortEngine and as a fallback when column A is blank.
+    if (fullName && options.forceStructured !== true) return fullName;
+
+    return formatStructured(person, options);
+  }
+
+  const engine = {
+    version: "1.1.0",
+    normalize,
+    format,
+    formatStructured,
+    canonicalFullName,
+    formatWithoutRank(person, options = {}) {
+      const fullName = canonicalFullName(person);
+      if (fullName && options.forceStructured !== true) {
+        const rank = upper(field(person, ["rank", "Rank"]));
+        return rank && fullName.startsWith(`${rank} `)
+          ? fullName.slice(rank.length + 1)
+          : fullName;
+      }
+      return formatStructured(person, { ...options, includeRank: false });
+    },
+    formatForReport(person, options = {}) {
+      return format(person, { ...options, includeRank: true });
+    },
+    status() {
+      const report = {
+        version: this.version,
+        canonicalDisplay: "FULL_NAME_COLUMN_A",
+        structuredSortFields: true,
+        fallbackParsing: true,
+      };
+      console.table(report);
+      return report;
+    },
+  };
+
+  if (platform.engines.has("nameHandler")) platform.engines.replace("nameHandler", engine);
+  else platform.engines.register("nameHandler", engine);
+
+  window.$PF = window.$PF || {};
+  window.$PF.name = engine;
+  console.info("NameHandlerEngine v1.1.0 active: Full Name is canonical display.");
+})();
+
+// Personnel Platform — Name Format controls
+// Delegates structured formatting to NameHandlerEngine and keeps a safe fallback.
 
 (function () {
   "use strict";
@@ -9729,74 +10154,34 @@ function restoreApp() {
   const ROOT_ID = "reassignmentPluginV1Root";
   const SCOPE = "reassignment-v1";
   const MODES = ["FIRST_INITIAL_LAST", "LAST_FIRST_INITIAL"];
-  const SUFFIXES = new Set(["JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"]);
   let currentMode = sessionStorage.getItem(STORAGE_KEY) || "FIRST_INITIAL_LAST";
   let scheduled = false;
 
   function text(value) {
-    return String(value == null ? "" : value).trim();
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   }
 
   function normalizeMode(value) {
     return MODES.includes(value) ? value : "FIRST_INITIAL_LAST";
   }
 
-  function parseName(value) {
-    const raw = text(value).replace(/\s+/g, " ");
-    if (!raw) return { first: "", middles: [], last: "", suffix: "" };
-
-    let tokens;
-    if (raw.includes(",")) {
-      const [lastPart, givenPart] = raw.split(/,(.+)/).map(text);
-      tokens = [...givenPart.split(" ").filter(Boolean), ...lastPart.split(" ").filter(Boolean)];
-    } else {
-      tokens = raw.split(" ").filter(Boolean);
-    }
-
-    let suffix = "";
-    if (tokens.length > 1 && SUFFIXES.has(tokens.at(-1).toUpperCase())) {
-      suffix = tokens.pop();
-    }
-
-    if (tokens.length === 1) {
-      return { first: tokens[0], middles: [], last: "", suffix };
-    }
-
-    return {
-      first: tokens[0] || "",
-      middles: tokens.slice(1, -1),
-      last: tokens.at(-1) || "",
-      suffix,
-    };
+  function nameHandler() {
+    return platform.engines.get("nameHandler") || window.$PF?.name;
   }
 
-  function initials(values) {
-    return (values || [])
-      .map(value => text(value).replace(/\./g, ""))
-      .filter(Boolean)
-      .map(value => value.charAt(0))
-      .join(" ");
-  }
-
-  function formatName(value, mode = currentMode) {
-    const raw = text(value);
-    if (!raw) return "";
-
-    const parts = parseName(raw);
-    if (!parts.last) return [parts.first, parts.suffix].filter(Boolean).join(" ");
-
-    const middle = initials(parts.middles);
-    const suffix = parts.suffix ? ` ${parts.suffix}` : "";
-
-    if (normalizeMode(mode) === "LAST_FIRST_INITIAL") {
-      return `${parts.last}${suffix}, ${[parts.first, middle].filter(Boolean).join(" ")}`.trim();
+  function formatPerson(person, mode = currentMode, includeRank = false) {
+    const handler = nameHandler();
+    if (handler?.format) {
+      return handler.format(person, {
+        includeRank,
+        middleInitial: true,
+        order: normalizeMode(mode) === "LAST_FIRST_INITIAL" ? "LAST_FIRST" : "FIRST_LAST",
+      });
     }
 
-    return `${[parts.first, middle, parts.last].filter(Boolean).join(" ")}${suffix}`.trim();
-  }
-
-  function personnelName(item) {
-    return text(item?.fullName || item?.record?.["Full Name"] || item?.record?.FullName);
+    const rank = text(person?.rank || person?.record?.Rank || person?.Rank);
+    const fullName = text(person?.fullName || person?.record?.["Full Name"] || person?.["Full Name"]);
+    return [includeRank ? rank : "", fullName].filter(Boolean).join(" ").toUpperCase();
   }
 
   function updateVisibleNames() {
@@ -9807,15 +10192,16 @@ function restoreApp() {
     const state = assignmentCore.get(SCOPE);
     const people = new Map(state?.participants || []);
 
+    root.querySelectorAll(".rp1-person").forEach(row => {
+      const key = row.querySelector("[data-rp1-check]")?.dataset.rp1Check;
+      const label = row.querySelector(".rp1-person-name");
+      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
+    });
+
     root.querySelectorAll(".rp1-assigned").forEach(row => {
       const key = row.querySelector("[data-rp1-remove]")?.dataset.rp1Remove;
       const label = row.querySelector("span");
-      const person = people.get(key) || {};
-      if (!label || !key) return;
-
-      const rank = text(person?.rank || person?.record?.Rank);
-      const name = formatName(personnelName(person));
-      label.textContent = [rank, name].filter(Boolean).join(" ");
+      if (label && key) label.textContent = formatPerson(people.get(key) || {}, currentMode, true);
     });
   }
 
@@ -9840,32 +10226,33 @@ function restoreApp() {
     addStyles();
     const sort = root.querySelector("#rp1Step3Sort");
     const tools = sort?.closest(".rp1-phase3-tools");
-    if (!sort || !tools) return;
 
-    const existingSortLabel = [...tools.querySelectorAll(":scope > label")][0];
-    if (existingSortLabel) existingSortLabel.textContent = "Sort";
+    if (sort && tools) {
+      const existingSortLabel = [...tools.querySelectorAll(":scope > label")][0];
+      if (existingSortLabel) existingSortLabel.textContent = "Sort";
 
-    if (!sort.closest(".rp1-display-tool")) {
-      const sortGroup = document.createElement("div");
-      sortGroup.className = "rp1-display-tool";
-      const label = existingSortLabel || document.createElement("label");
-      label.textContent = "Sort";
-      tools.insertBefore(sortGroup, label);
-      sortGroup.append(label, sort);
-    }
+      if (!sort.closest(".rp1-display-tool")) {
+        const sortGroup = document.createElement("div");
+        sortGroup.className = "rp1-display-tool";
+        const label = existingSortLabel || document.createElement("label");
+        label.textContent = "Sort";
+        tools.insertBefore(sortGroup, label);
+        sortGroup.append(label, sort);
+      }
 
-    if (!tools.querySelector("#rp1NameFormat")) {
-      const group = document.createElement("div");
-      group.className = "rp1-display-tool";
-      group.innerHTML = `
-        <label for="rp1NameFormat">Name format</label>
-        <select id="rp1NameFormat" class="rp1-search">
-          <option value="FIRST_INITIAL_LAST">First name M Last name</option>
-          <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
-        </select>
-      `;
-      tools.appendChild(group);
-      group.querySelector("select").value = currentMode;
+      if (!tools.querySelector("#rp1NameFormat")) {
+        const group = document.createElement("div");
+        group.className = "rp1-display-tool";
+        group.innerHTML = `
+          <label for="rp1NameFormat">Name format</label>
+          <select id="rp1NameFormat" class="rp1-search">
+            <option value="FIRST_INITIAL_LAST">First name M Last name</option>
+            <option value="LAST_FIRST_INITIAL">Last name, First name M</option>
+          </select>
+        `;
+        tools.appendChild(group);
+        group.querySelector("select").value = currentMode;
+      }
     }
 
     updateVisibleNames();
@@ -9874,7 +10261,7 @@ function restoreApp() {
   function scheduleDecorate() {
     if (scheduled) return;
     scheduled = true;
-    queueMicrotask(decorate);
+    requestAnimationFrame(decorate);
   }
 
   function formatPayload(payload) {
@@ -9884,7 +10271,8 @@ function restoreApp() {
     next.personnel = (Array.isArray(next.personnel) ? next.personnel : []).map(person => ({
       ...person,
       originalFullName: text(person.originalFullName || person.fullName),
-      fullName: formatName(person.originalFullName || person.fullName),
+      fullName: formatPerson(person, currentMode, false),
+      displayName: formatPerson(person, currentMode, true),
     }));
     return next;
   }
@@ -9907,12 +10295,12 @@ function restoreApp() {
   });
 
   platform.events.on(`assignment-core:changed:${SCOPE}`, scheduleDecorate);
+  platform.events.on("selection:changed", scheduleDecorate);
 
-  const NameFormatEngine = {
-    version: "1.0.1",
+  const engine = {
+    version: "2.0.0",
     modes: [...MODES],
-    parse: parseName,
-    format: formatName,
+    format: formatPerson,
     formatPayload,
     get mode() { return currentMode; },
     setMode(value) {
@@ -9926,7 +10314,7 @@ function restoreApp() {
       const report = {
         version: this.version,
         mode: currentMode,
-        modes: MODES.length,
+        nameHandler: Boolean(nameHandler()),
         generatorWrapped: Boolean(generator?.__nameFormatWrapped),
       };
       console.table(report);
@@ -9934,12 +10322,13 @@ function restoreApp() {
     },
   };
 
-  if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", NameFormatEngine);
-  else platform.engines.register("nameFormat", NameFormatEngine);
+  if (platform.engines.has("nameFormat")) platform.engines.replace("nameFormat", engine);
+  else platform.engines.register("nameFormat", engine);
 
-  window.$PF.nameFormat = NameFormatEngine;
+  window.$PF = window.$PF || {};
+  window.$PF.nameFormat = engine;
   scheduleDecorate();
-  console.info("NameFormatEngine v1.0.1 active without periods in initials.");
+  console.info("NameFormatEngine v2.0.0 active with NameHandlerEngine fallback.");
 })();
 
 // Reassignment Plugin V1 — UI polish
@@ -10132,6 +10521,113 @@ function restoreApp() {
 
   scheduleDecorate();
   console.info("Reassignment V1 polish active: glass-green actions and Step 1 card controls.");
+})();
+
+// Reassignment V1 display fix — remove duplicated rank prefixes reliably.
+
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  let rootObserver = null;
+  let bodyObserver = null;
+  let scheduled = false;
+
+  function cleanLabel(value) {
+    const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+    if (words.length < 2) return words.join(" ");
+
+    // Remove every immediately repeated leading rank token, for example:
+    // CSO2 CSO2 NAME -> CSO2 NAME
+    // CCINSP CCINSP NAME -> CCINSP NAME
+    while (words.length > 1 && words[0].localeCompare(words[1], undefined, {
+      sensitivity: "base",
+    }) === 0) {
+      words.splice(1, 1);
+    }
+
+    return words.join(" ");
+  }
+
+  function normalizeRankLabels(root) {
+    if (!root) return;
+
+    root.querySelectorAll(".rp1-person-name, .rp1-assigned > span").forEach(node => {
+      const original = String(node.textContent || "").trim();
+      const cleaned = cleanLabel(original);
+      if (cleaned && cleaned !== original) node.textContent = cleaned;
+    });
+  }
+
+  function schedule(root) {
+    if (scheduled) return;
+    scheduled = true;
+
+    requestAnimationFrame(() => {
+      scheduled = false;
+      normalizeRankLabels(root || document.getElementById(ROOT_ID));
+    });
+  }
+
+  function attachRoot(root) {
+    if (!root) return false;
+
+    if (root.dataset.rankDisplayFix !== "true") {
+      root.dataset.rankDisplayFix = "true";
+
+      if (rootObserver) rootObserver.disconnect();
+      rootObserver = new MutationObserver(() => schedule(root));
+      rootObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+
+    schedule(root);
+    return true;
+  }
+
+  function attach() {
+    return attachRoot(document.getElementById(ROOT_ID));
+  }
+
+  function watchForWorkspace() {
+    if (attach() || bodyObserver || !document.body) return;
+
+    bodyObserver = new MutationObserver(() => {
+      const root = document.getElementById(ROOT_ID);
+      if (!root) return;
+      attachRoot(root);
+      bodyObserver.disconnect();
+      bodyObserver = null;
+    });
+
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  document.addEventListener("click", event => {
+    if (event.target.closest?.("[data-rp1-launch], [data-pf-report-type='REASSIGNMENT'], #reassignmentPluginV1Root")) {
+      setTimeout(watchForWorkspace, 0);
+    }
+  }, true);
+
+  document.addEventListener("change", event => {
+    if (event.target.closest?.("#reassignmentPluginV1Root")) setTimeout(attach, 0);
+  }, true);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", watchForWorkspace, { once: true });
+  } else {
+    watchForWorkspace();
+  }
+
+  window.$PF = window.$PF || {};
+  window.$PF.reassignmentRankDisplayFix = {
+    version: "1.1.0",
+    refresh: attach,
+    cleanLabel,
+  };
 })();
 
 // Personnel Platform — Report Generator launcher
@@ -10506,90 +11002,186 @@ function restoreApp() {
 })();
 
 // Personnel Platform — shared glass-green action theme
-// Keeps yellow for counters/status badges while making clickable actions glass green.
+// Keeps the green appearance while using a lightweight performance mode.
 
 (function () {
   "use strict";
 
-  if (document.getElementById("platformGlassGreenThemeStyles")) return;
+  const STYLE_ID = "platformGlassGreenThemeStyles";
+  const MODE_CLASS = "pf-performance-mode";
 
-  const style = document.createElement("style");
-  style.id = "platformGlassGreenThemeStyles";
-  style.textContent = `
-    :root {
-      --pf-glass-green-bg: linear-gradient(180deg, rgba(46,125,80,.20), rgba(46,125,80,.11));
-      --pf-glass-green-hover: linear-gradient(180deg, rgba(46,125,80,.30), rgba(46,125,80,.18));
-      --pf-glass-green-border: rgba(46,125,80,.38);
-      --pf-glass-green-border-hover: rgba(46,125,80,.58);
-      --pf-glass-green-text: #174b2d;
-      --pf-glass-green-shadow: 0 7px 18px rgba(31,101,60,.12);
-    }
+  function enablePerformanceMode() {
+    document.documentElement.classList.add(MODE_CLASS);
+    try { localStorage.setItem("pfPerformanceMode", "on"); } catch (_) {}
+    return true;
+  }
 
-    /* Main Personnel Filter actions */
-    .button-primary,
-    .button-ghost,
-    #clearRanksButton,
-    #applyNowButton,
-    #restoreFromBarButton,
-    .pf-report-launcher,
-    [data-rp1-launch],
-    .ao-row-add-button.is-added,
-    .ao-row-add-button[data-selected="true"] {
-      background: var(--pf-glass-green-bg) !important;
-      border-color: var(--pf-glass-green-border) !important;
-      color: var(--pf-glass-green-text) !important;
-      box-shadow: var(--pf-glass-green-shadow) !important;
-      backdrop-filter: blur(10px) saturate(125%);
-      -webkit-backdrop-filter: blur(10px) saturate(125%);
-      transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
-    }
+  function disablePerformanceMode() {
+    document.documentElement.classList.remove(MODE_CLASS);
+    try { localStorage.setItem("pfPerformanceMode", "off"); } catch (_) {}
+    return false;
+  }
 
-    .button-primary:hover:not(:disabled),
-    .button-ghost:hover:not(:disabled),
-    #clearRanksButton:hover:not(:disabled),
-    #applyNowButton:hover:not(:disabled),
-    #restoreFromBarButton:hover:not(:disabled),
-    .pf-report-launcher:hover:not(:disabled),
-    [data-rp1-launch]:hover:not(:disabled),
-    .ao-row-add-button.is-added:hover:not(:disabled),
-    .ao-row-add-button[data-selected="true"]:hover:not(:disabled) {
-      background: var(--pf-glass-green-hover) !important;
-      border-color: var(--pf-glass-green-border-hover) !important;
-      box-shadow: 0 9px 22px rgba(31,101,60,.18) !important;
-      transform: translateY(-1px);
-    }
+  // Daily-use mode stays lightweight by default.
+  let storedMode = "on";
+  try { storedMode = localStorage.getItem("pfPerformanceMode") || "on"; } catch (_) {}
+  if (storedMode !== "off") enablePerformanceMode();
 
-    .button-primary:disabled,
-    .button-ghost:disabled,
-    #clearRanksButton:disabled,
-    #applyNowButton:disabled,
-    #restoreFromBarButton:disabled,
-    .pf-report-launcher:disabled,
-    [data-rp1-launch]:disabled {
-      background: rgba(46,125,80,.08) !important;
-      border-color: rgba(46,125,80,.18) !important;
-      color: rgba(23,75,45,.48) !important;
-      box-shadow: none !important;
-    }
+  if (!document.getElementById(STYLE_ID)) {
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      :root {
+        --pf-glass-green-bg: linear-gradient(180deg, rgba(46,125,80,.20), rgba(46,125,80,.11));
+        --pf-glass-green-hover: linear-gradient(180deg, rgba(46,125,80,.30), rgba(46,125,80,.18));
+        --pf-glass-green-border: rgba(46,125,80,.38);
+        --pf-glass-green-border-hover: rgba(46,125,80,.58);
+        --pf-glass-green-text: #174b2d;
+        --pf-glass-green-shadow: 0 7px 18px rgba(31,101,60,.12);
+      }
 
-    /* Report chooser primary option */
-    .pf-report-type-choice.primary {
-      background: var(--pf-glass-green-bg) !important;
-      border-color: var(--pf-glass-green-border) !important;
-      color: var(--pf-glass-green-text) !important;
-      box-shadow: var(--pf-glass-green-shadow) !important;
-      backdrop-filter: blur(10px) saturate(125%);
-      -webkit-backdrop-filter: blur(10px) saturate(125%);
-    }
+      .button-primary,
+      .button-ghost,
+      #clearRanksButton,
+      #applyNowButton,
+      #restoreFromBarButton,
+      .pf-report-launcher,
+      [data-rp1-launch],
+      .ao-row-add-button.is-added,
+      .ao-row-add-button[data-selected="true"] {
+        background: var(--pf-glass-green-bg) !important;
+        border-color: var(--pf-glass-green-border) !important;
+        color: var(--pf-glass-green-text) !important;
+        box-shadow: var(--pf-glass-green-shadow) !important;
+        backdrop-filter: blur(10px) saturate(125%);
+        -webkit-backdrop-filter: blur(10px) saturate(125%);
+        transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+      }
 
-    .pf-report-type-choice.primary:hover:not(:disabled) {
-      background: var(--pf-glass-green-hover) !important;
-      border-color: var(--pf-glass-green-border-hover) !important;
-    }
-  `;
+      .button-primary:hover:not(:disabled),
+      .button-ghost:hover:not(:disabled),
+      #clearRanksButton:hover:not(:disabled),
+      #applyNowButton:hover:not(:disabled),
+      #restoreFromBarButton:hover:not(:disabled),
+      .pf-report-launcher:hover:not(:disabled),
+      [data-rp1-launch]:hover:not(:disabled),
+      .ao-row-add-button.is-added:hover:not(:disabled),
+      .ao-row-add-button[data-selected="true"]:hover:not(:disabled) {
+        background: var(--pf-glass-green-hover) !important;
+        border-color: var(--pf-glass-green-border-hover) !important;
+        box-shadow: 0 9px 22px rgba(31,101,60,.18) !important;
+        transform: translateY(-1px);
+      }
 
-  document.head.appendChild(style);
-  console.info("Platform glass-green action theme active.");
+      .button-primary:disabled,
+      .button-ghost:disabled,
+      #clearRanksButton:disabled,
+      #applyNowButton:disabled,
+      #restoreFromBarButton:disabled,
+      .pf-report-launcher:disabled,
+      [data-rp1-launch]:disabled {
+        background: rgba(46,125,80,.08) !important;
+        border-color: rgba(46,125,80,.18) !important;
+        color: rgba(23,75,45,.48) !important;
+        box-shadow: none !important;
+      }
+
+      .pf-report-type-choice.primary {
+        background: var(--pf-glass-green-bg) !important;
+        border-color: var(--pf-glass-green-border) !important;
+        color: var(--pf-glass-green-text) !important;
+        box-shadow: var(--pf-glass-green-shadow) !important;
+        backdrop-filter: blur(10px) saturate(125%);
+        -webkit-backdrop-filter: blur(10px) saturate(125%);
+      }
+
+      .pf-report-type-choice.primary:hover:not(:disabled) {
+        background: var(--pf-glass-green-hover) !important;
+        border-color: var(--pf-glass-green-border-hover) !important;
+      }
+
+      /* Daily-use performance mode: remove compositing and motion costs globally. */
+      .${MODE_CLASS},
+      .${MODE_CLASS} body {
+        scroll-behavior: auto !important;
+      }
+
+      .${MODE_CLASS} *,
+      .${MODE_CLASS} *::before,
+      .${MODE_CLASS} *::after {
+        animation: none !important;
+        transition: none !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        filter: none !important;
+        text-shadow: none !important;
+        will-change: auto !important;
+      }
+
+      /* Disable decorative transforms only. Fixed dialogs rely on translate()
+         for centering, so a blanket :hover transform reset makes them jump. */
+      .${MODE_CLASS} button:hover,
+      .${MODE_CLASS} button:focus,
+      .${MODE_CLASS} button:active,
+      .${MODE_CLASS} a:hover,
+      .${MODE_CLASS} [role="button"]:hover,
+      .${MODE_CLASS} .rp1-person:hover,
+      .${MODE_CLASS} .rp1-chip:hover {
+        transform: none !important;
+      }
+
+      /* Remove large layered shadows while preserving borders and layout. */
+      .${MODE_CLASS} button,
+      .${MODE_CLASS} input,
+      .${MODE_CLASS} select,
+      .${MODE_CLASS} textarea,
+      .${MODE_CLASS} article,
+      .${MODE_CLASS} section,
+      .${MODE_CLASS} dialog,
+      .${MODE_CLASS} [class*="card"],
+      .${MODE_CLASS} [class*="panel"],
+      .${MODE_CLASS} [class*="modal"],
+      .${MODE_CLASS} [class*="dialog"] {
+        box-shadow: none !important;
+      }
+
+      .${MODE_CLASS} .button-primary:hover:not(:disabled),
+      .${MODE_CLASS} .button-ghost:hover:not(:disabled),
+      .${MODE_CLASS} #clearRanksButton:hover:not(:disabled),
+      .${MODE_CLASS} #applyNowButton:hover:not(:disabled),
+      .${MODE_CLASS} #restoreFromBarButton:hover:not(:disabled),
+      .${MODE_CLASS} .pf-report-launcher:hover:not(:disabled),
+      .${MODE_CLASS} [data-rp1-launch]:hover:not(:disabled),
+      .${MODE_CLASS} .ao-row-add-button:hover:not(:disabled),
+      .${MODE_CLASS} .pf-report-type-choice.primary:hover:not(:disabled) {
+        background: var(--pf-glass-green-bg) !important;
+        border-color: var(--pf-glass-green-border) !important;
+        box-shadow: none !important;
+        transform: none !important;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  window.PFPerformanceMode = {
+    enable: enablePerformanceMode,
+    disable: disablePerformanceMode,
+    status() {
+      const enabled = document.documentElement.classList.contains(MODE_CLASS);
+      console.table({
+        enabled,
+        hoverEffects: enabled ? "DISABLED" : "ENABLED",
+        blur: enabled ? "DISABLED" : "ENABLED",
+        filters: enabled ? "DISABLED" : "ENABLED",
+        animations: enabled ? "DISABLED" : "ENABLED",
+        heavyShadows: enabled ? "DISABLED" : "ENABLED",
+      });
+      return enabled;
+    },
+  };
+
+  console.info("Platform lightweight theme mode active.");
 })();
 
 </script>
