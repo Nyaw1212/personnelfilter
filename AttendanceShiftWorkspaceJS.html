@@ -1,0 +1,190 @@
+(function () {
+  "use strict";
+
+  const STYLE_ID = "attendanceShiftWorkspaceStyles";
+  const PRESETS = [
+    { id: "MON_TUE_OFF", label: "MON–TUE OFF", off: [1, 2] },
+    { id: "TUE_WED_OFF", label: "TUE–WED OFF", off: [2, 3] },
+    { id: "WED_THU_OFF", label: "WED–THU OFF", off: [3, 4] },
+    { id: "THU_FRI_OFF", label: "THU–FRI OFF", off: [4, 5] },
+    { id: "FRI_SAT_OFF", label: "FRI–SAT OFF", off: [5, 6] },
+    { id: "SAT_SUN_OFF", label: "SAT–SUN OFF", off: [6, 0] },
+    { id: "SUN_MON_OFF", label: "SUN–MON OFF", off: [0, 1] },
+    { id: "OFFICE_HOURS", label: "OFFICE HOURS", off: [0, 6] }
+  ];
+
+  const assignments = new Map();
+  let activePreset = "OFFICE_HOURS";
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      #attendanceCenterWeeklyBackdrop .acw-workspace{display:grid;grid-template-columns:230px 190px minmax(620px,1fr);gap:10px;min-height:0}
+      #attendanceCenterWeeklyBackdrop .acw-shift-panel{border:1px solid #d3e3d6;border-radius:12px;background:#fff;overflow:hidden;min-height:0}
+      #attendanceCenterWeeklyBackdrop .acw-shift-head{padding:10px 12px;background:#eaf5ed;border-bottom:1px solid #d3e3d6;font-size:11px;font-weight:900;color:#214b2d;letter-spacing:.04em}
+      #attendanceCenterWeeklyBackdrop .acw-pool-tools{padding:9px;border-bottom:1px solid #edf2ee;display:grid;gap:7px}
+      #attendanceCenterWeeklyBackdrop .acw-pool-search{height:34px;border:1px solid #c9d9cd;border-radius:8px;padding:0 9px}
+      #attendanceCenterWeeklyBackdrop .acw-pool-list{max-height:470px;overflow:auto;padding:6px}
+      #attendanceCenterWeeklyBackdrop .acw-pool-person{display:grid;grid-template-columns:20px 1fr;gap:7px;align-items:start;padding:7px 6px;border-radius:8px;cursor:pointer}
+      #attendanceCenterWeeklyBackdrop .acw-pool-person:hover{background:#edf8f0}
+      #attendanceCenterWeeklyBackdrop .acw-pool-name{font-size:11px;font-weight:800;color:#173d23;line-height:1.2}
+      #attendanceCenterWeeklyBackdrop .acw-pool-sub{font-size:9px;color:#718178;margin-top:2px}
+      #attendanceCenterWeeklyBackdrop .acw-preset-list{display:grid;gap:6px;padding:8px}
+      #attendanceCenterWeeklyBackdrop .acw-preset-chip{min-height:36px;border:1px solid #bfd3c4;border-radius:9px;background:#fff;color:#214b2d;font-weight:800;text-align:left;padding:0 10px;cursor:pointer}
+      #attendanceCenterWeeklyBackdrop .acw-preset-chip.is-active{background:#347f49;color:#fff;border-color:#347f49}
+      #attendanceCenterWeeklyBackdrop .acw-assign-btn{margin:2px 8px 8px;width:calc(100% - 16px);min-height:38px;border:0;border-radius:9px;background:#347f49;color:#fff;font-weight:900;cursor:pointer}
+      #attendanceCenterWeeklyBackdrop .acw-assigned-summary{padding:8px 10px;border-bottom:1px solid #edf2ee;background:#f8fcf9;font-size:11px;color:#31543d}
+      #attendanceCenterWeeklyBackdrop .acw-assigned-summary strong{display:block;font-size:13px;color:#173d23;margin-bottom:2px}
+      #attendanceCenterWeeklyBackdrop .acw-weekly-column{min-width:0;overflow:auto}
+      #attendanceCenterWeeklyBackdrop .acw-weekly-column #acwTable{margin:0!important}
+      @media(max-width:1100px){#attendanceCenterWeeklyBackdrop .acw-workspace{grid-template-columns:210px 170px minmax(620px,1fr)}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function employeeKeyFromRow(row) {
+    const button = row && row.querySelector(".acw-cell");
+    return button ? String(button.dataset.employee || "") : "";
+  }
+
+  function rowInfo(row) {
+    const key = employeeKeyFromRow(row);
+    const name = row.querySelector(".acw-name")?.textContent.trim() || "";
+    const sub = row.querySelector(".acw-sub")?.textContent.trim() || "";
+    return { key, name, sub, row };
+  }
+
+  function currentRows() {
+    return Array.from(document.querySelectorAll("#acwTable .acw-grid tbody tr")).map(rowInfo).filter(item => item.key);
+  }
+
+  function presetById(id) {
+    return PRESETS.find(item => item.id === id) || PRESETS[7];
+  }
+
+  function setButtonStatus(button, target) {
+    let guard = 0;
+    while (String(button.dataset.status || "") !== target && guard < 8) {
+      button.click();
+      guard++;
+      button = document.querySelector('[data-acw-cell="' + CSS.escape(button.dataset.acwCell) + '"]') || button;
+    }
+  }
+
+  function applyPresetToEmployee(employeeKey, presetId) {
+    const preset = presetById(presetId);
+    const buttons = Array.from(document.querySelectorAll('#acwTable .acw-cell[data-employee="' + CSS.escape(employeeKey) + '"]'));
+    buttons.forEach((button, dayIndex) => setButtonStatus(button, preset.off.includes(dayIndex) ? "OFF" : "PRESENT"));
+  }
+
+  function renderPool() {
+    const list = document.getElementById("acwPoolList");
+    if (!list) return;
+    const query = String(document.getElementById("acwPoolSearch")?.value || "").trim().toUpperCase();
+    const rows = currentRows().filter(item => !query || (item.name + " " + item.sub).toUpperCase().includes(query));
+    list.innerHTML = rows.map(item => `
+      <label class="acw-pool-person">
+        <input type="checkbox" value="${escapeHtml(item.key)}">
+        <span><span class="acw-pool-name">${escapeHtml(item.name)}</span><span class="acw-pool-sub">${escapeHtml(item.sub)}</span></span>
+      </label>`).join("") || '<div class="acw-empty">No personnel found.</div>';
+  }
+
+  function escapeHtml(value) {
+    return String(value || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function renderPresets() {
+    const list = document.getElementById("acwPresetList");
+    if (!list) return;
+    list.innerHTML = PRESETS.map(item => '<button class="acw-preset-chip' + (item.id === activePreset ? ' is-active' : '') + '" data-preset="' + item.id + '" type="button">' + item.label + '</button>').join("");
+    list.querySelectorAll(".acw-preset-chip").forEach(button => {
+      button.onclick = function () {
+        activePreset = button.dataset.preset;
+        renderPresets();
+        filterWeeklyGrid();
+      };
+    });
+  }
+
+  function filterWeeklyGrid() {
+    const rows = currentRows();
+    let count = 0;
+    rows.forEach(item => {
+      const assigned = assignments.get(item.key);
+      const visible = assigned === activePreset;
+      item.row.hidden = !visible;
+      if (visible) count++;
+    });
+    const preset = presetById(activePreset);
+    const summary = document.getElementById("acwAssignedSummary");
+    if (summary) summary.innerHTML = '<strong>' + preset.label + '</strong>' + count + ' assigned personnel · weekly cells remain editable';
+  }
+
+  function assignSelected() {
+    const checked = Array.from(document.querySelectorAll("#acwPoolList input:checked"));
+    if (!checked.length) return;
+    checked.forEach(input => {
+      assignments.set(input.value, activePreset);
+      applyPresetToEmployee(input.value, activePreset);
+    });
+    renderPool();
+    filterWeeklyGrid();
+    const msg = document.getElementById("acwMessage");
+    if (msg) msg.textContent = checked.length + " personnel assigned to " + presetById(activePreset).label + ".";
+  }
+
+  function buildWorkspace() {
+    const work = document.querySelector("#attendanceCenterWeeklyBackdrop .acw-work");
+    const tools = work && work.querySelector(".acw-tools");
+    const table = document.getElementById("acwTable");
+    if (!work || !tools || !table || document.getElementById("acwShiftWorkspace")) return;
+
+    const workspace = document.createElement("div");
+    workspace.id = "acwShiftWorkspace";
+    workspace.className = "acw-workspace";
+    workspace.innerHTML = `
+      <section class="acw-shift-panel">
+        <div class="acw-shift-head">1 · PERSONNEL POOL</div>
+        <div class="acw-pool-tools"><input id="acwPoolSearch" class="acw-pool-search" placeholder="Search personnel..."></div>
+        <div id="acwPoolList" class="acw-pool-list"></div>
+      </section>
+      <section class="acw-shift-panel">
+        <div class="acw-shift-head">2 · REST-DAY PRESET</div>
+        <div id="acwPresetList" class="acw-preset-list"></div>
+        <button id="acwAssignSelected" class="acw-assign-btn" type="button">Assign Selected →</button>
+      </section>
+      <section class="acw-shift-panel acw-weekly-column">
+        <div class="acw-shift-head">3 · ASSIGNED PERSONNEL + WEEKLY ATTENDANCE</div>
+        <div id="acwAssignedSummary" class="acw-assigned-summary"></div>
+      </section>`;
+
+    work.insertBefore(workspace, table);
+    workspace.querySelector(".acw-weekly-column").appendChild(table);
+    document.getElementById("acwPoolSearch").oninput = renderPool;
+    document.getElementById("acwAssignSelected").onclick = assignSelected;
+    renderPresets();
+    renderPool();
+
+    // Existing records start under Office Hours so the weekly grid is immediately usable.
+    currentRows().forEach(item => { if (!assignments.has(item.key)) assignments.set(item.key, "OFFICE_HOURS"); });
+    filterWeeklyGrid();
+  }
+
+  function refreshWorkspace() {
+    installStyles();
+    buildWorkspace();
+    if (document.getElementById("acwShiftWorkspace")) {
+      currentRows().forEach(item => { if (!assignments.has(item.key)) assignments.set(item.key, "OFFICE_HOURS"); });
+      renderPool();
+      filterWeeklyGrid();
+    }
+  }
+
+  const observer = new MutationObserver(refreshWorkspace);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", refreshWorkspace);
+  else refreshWorkspace();
+})();
