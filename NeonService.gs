@@ -1,9 +1,8 @@
 // ==================================
 // Neon database service
 // ==================================
-// JDBC is now the preferred server-side connection for attendance storage.
-// The existing Data API methods remain temporarily available until the
-// attendance workflow has fully migrated to JDBC.
+// JDBC is the primary server-side connection for attendance storage.
+// Data API helpers remain available temporarily during migration.
 
 const NeonService = Object.freeze({
   getConfig_() {
@@ -26,21 +25,14 @@ const NeonService = Object.freeze({
 
   getJdbcConfig_() {
     const properties = PropertiesService.getScriptProperties();
-    const host = ServerUtils.normalizeText(
-      properties.getProperty("NEON_HOST")
-    );
+    const host = ServerUtils.normalizeText(properties.getProperty("NEON_HOST"));
     const database = ServerUtils.normalizeText(
       properties.getProperty("NEON_DATABASE")
     );
-    const user = ServerUtils.normalizeText(
-      properties.getProperty("NEON_USER")
-    );
-    const password = String(
-      properties.getProperty("NEON_PASSWORD") || ""
-    );
-    const port = ServerUtils.normalizeText(
-      properties.getProperty("NEON_PORT")
-    ) || "5432";
+    const user = ServerUtils.normalizeText(properties.getProperty("NEON_USER"));
+    const password = String(properties.getProperty("NEON_PASSWORD") || "");
+    const port = ServerUtils.normalizeText(properties.getProperty("NEON_PORT")) ||
+      "5432";
 
     const missing = [];
     if (!host) missing.push("NEON_HOST");
@@ -74,6 +66,18 @@ const NeonService = Object.freeze({
     );
   },
 
+  closeQuietly_(resource) {
+    if (!resource) return;
+    try {
+      resource.close();
+    } catch (error) {
+      console.warn(
+        "Neon JDBC resource close warning: " +
+        (error && error.message ? error.message : String(error))
+      );
+    }
+  },
+
   testJdbcConnection() {
     const config = this.getJdbcConfig_();
     let connection;
@@ -98,25 +102,11 @@ const NeonService = Object.freeze({
       console.log(JSON.stringify(result, null, 2));
       return result;
     } catch (error) {
-      const message = error && error.message
-        ? error.message
-        : String(error);
-
+      const message = error && error.message ? error.message : String(error);
       console.error("Neon JDBC connection failed: " + message);
       throw new Error("Neon JDBC connection failed: " + message);
     } finally {
-      if (connection) {
-        try {
-          connection.close();
-        } catch (closeError) {
-          console.warn(
-            "Neon JDBC connection close warning: " +
-            (closeError && closeError.message
-              ? closeError.message
-              : String(closeError))
-          );
-        }
-      }
+      this.closeQuietly_(connection);
     }
   },
 
@@ -195,10 +185,86 @@ const NeonService = Object.freeze({
         created_at: String(resultSet.getTimestamp("created_at"))
       };
     } finally {
-      if (resultSet) resultSet.close();
-      if (statement) statement.close();
-      if (connection) connection.close();
+      this.closeQuietly_(resultSet);
+      this.closeQuietly_(statement);
+      this.closeQuietly_(connection);
     }
+  },
+
+  // Phase 2.2 public write method. Multiple rows are currently inserted one at
+  // a time; Phase 2.3 will replace this with one transaction/batch operation.
+  insertAttendance(rows) {
+    const payload = Array.isArray(rows) ? rows : [rows];
+    if (!payload.length) return [];
+    return payload.map(row => this.insertAttendanceJdbc(row));
+  },
+
+  getAttendanceJdbc(filters) {
+    const params = filters || {};
+    const clauses = [];
+    const values = [];
+
+    if (params.attendanceDate) {
+      clauses.push("attendance_date = CAST(? AS DATE)");
+      values.push(String(params.attendanceDate));
+    }
+    if (params.camp) {
+      clauses.push("camp = ?");
+      values.push(String(params.camp));
+    }
+    if (params.office) {
+      clauses.push("office = ?");
+      values.push(String(params.office));
+    }
+
+    const sql = [
+      "SELECT id, personnel_uid, attendance_date, full_name, rank, camp,",
+      "office, status, remarks, created_by, created_at, updated_by, updated_at",
+      "FROM public.attendance",
+      clauses.length ? "WHERE " + clauses.join(" AND ") : "",
+      "ORDER BY attendance_date DESC, full_name ASC"
+    ].filter(Boolean).join(" ");
+
+    let connection;
+    let statement;
+    let resultSet;
+    const rows = [];
+
+    try {
+      connection = this.openJdbcConnection_();
+      statement = connection.prepareStatement(sql);
+      values.forEach((value, index) => statement.setString(index + 1, value));
+      resultSet = statement.executeQuery();
+
+      while (resultSet.next()) {
+        const updatedAt = resultSet.getTimestamp("updated_at");
+        rows.push({
+          id: resultSet.getLong("id"),
+          personnel_uid: resultSet.getString("personnel_uid"),
+          attendance_date: String(resultSet.getDate("attendance_date")),
+          full_name: resultSet.getString("full_name"),
+          rank: resultSet.getString("rank"),
+          camp: resultSet.getString("camp"),
+          office: resultSet.getString("office"),
+          status: resultSet.getString("status"),
+          remarks: resultSet.getString("remarks"),
+          created_by: resultSet.getString("created_by"),
+          created_at: String(resultSet.getTimestamp("created_at")),
+          updated_by: resultSet.getString("updated_by"),
+          updated_at: updatedAt ? String(updatedAt) : null
+        });
+      }
+
+      return rows;
+    } finally {
+      this.closeQuietly_(resultSet);
+      this.closeQuietly_(statement);
+      this.closeQuietly_(connection);
+    }
+  },
+
+  getAttendance(filters) {
+    return this.getAttendanceJdbc(filters || {});
   },
 
   getAttendanceAuditByAttendanceIdJdbc(attendanceId) {
@@ -237,12 +303,13 @@ const NeonService = Object.freeze({
         changed_at: String(resultSet.getTimestamp("changed_at"))
       };
     } finally {
-      if (resultSet) resultSet.close();
-      if (statement) statement.close();
-      if (connection) connection.close();
+      this.closeQuietly_(resultSet);
+      this.closeQuietly_(statement);
+      this.closeQuietly_(connection);
     }
   },
 
+  // Temporary Data API helper retained for rollback/testing only.
   request_(path, options) {
     const config = this.getConfig_();
     const cleanPath = String(path || "").replace(/^\/+/, "");
@@ -251,9 +318,7 @@ const NeonService = Object.freeze({
       options && options.headers ? options.headers : {}
     );
 
-    if (config.token) {
-      headers.Authorization = "Bearer " + config.token;
-    }
+    if (config.token) headers.Authorization = "Bearer " + config.token;
 
     const requestOptions = Object.assign(
       {
@@ -282,49 +347,13 @@ const NeonService = Object.freeze({
     }
 
     return body;
-  },
-
-  insertAttendance(rows) {
-    const payload = Array.isArray(rows) ? rows : [rows];
-    if (!payload.length) return [];
-
-    return this.request_(APP_CONFIG.NEON.ATTENDANCE_TABLE, {
-      method: "post",
-      headers: { Prefer: "return=representation" },
-      payload: JSON.stringify(payload)
-    });
-  },
-
-  getAttendance(filters) {
-    const params = filters || {};
-    const query = ["select=*"];
-
-    if (params.attendanceDate) {
-      query.push(
-        "attendance_date=eq." + encodeURIComponent(params.attendanceDate)
-      );
-    }
-    if (params.camp) {
-      query.push("camp=eq." + encodeURIComponent(params.camp));
-    }
-    if (params.office) {
-      query.push("office=eq." + encodeURIComponent(params.office));
-    }
-
-    query.push("order=attendance_date.desc,full_name.asc");
-
-    return this.request_(
-      APP_CONFIG.NEON.ATTENDANCE_TABLE + "?" + query.join("&")
-    );
   }
 });
 
-// Run manually from the Apps Script editor.
 function testNeonConnection() {
   return NeonService.testJdbcConnection();
 }
 
-// Phase 2.1: insert one isolated attendance record and verify its audit footprint.
 function testInsertAttendanceViaJdbc() {
   const now = new Date();
   const suffix = Utilities.formatDate(
@@ -356,7 +385,7 @@ function testInsertAttendanceViaJdbc() {
     success: true,
     message: "Attendance row inserted through JDBC.",
     attendance: inserted,
-    audit: audit,
+    audit,
     auditVerified: Boolean(audit && audit.action === "INSERT")
   };
 
