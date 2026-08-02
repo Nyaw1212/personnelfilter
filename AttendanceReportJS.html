@@ -1,0 +1,192 @@
+<script>
+(function () {
+  "use strict";
+
+  const state = { report: null, selectedOffice: "" };
+
+  const esc = value => String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  const server = (method, argument) => new Promise((resolve, reject) => {
+    const runner = google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(error => reject(new Error(error && error.message ? error.message : String(error))));
+    runner[method](argument);
+  });
+
+  function todayIso() {
+    const date = new Date();
+    return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+  }
+
+  function installStyles() {
+    if (document.getElementById("attendanceReportStyles")) return;
+    const style = document.createElement("style");
+    style.id = "attendanceReportStyles";
+    style.textContent = `
+      .arr-backdrop{position:fixed;inset:0;z-index:7200;background:rgba(18,38,25,.48);display:grid;place-items:center;padding:14px}.arr-backdrop[hidden]{display:none}
+      .arr-shell{width:min(1450px,100%);height:min(900px,96vh);background:#f7fbf8;border:1px solid #c7dccd;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto 1fr auto;box-shadow:0 30px 80px rgba(0,0,0,.25)}
+      .arr-head,.arr-foot{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:#eef7f0;border-bottom:1px solid #d3e3d6}.arr-foot{border-top:1px solid #d3e3d6;border-bottom:0;background:#fff}.arr-head h2{margin:0;color:#173d23}.arr-head p{margin:3px 0 0;color:#607566;font-size:12px}
+      .arr-close,.arr-btn{border:1px solid #bfd3c4;background:#fff;color:#214b2d;border-radius:10px;font-weight:800;cursor:pointer}.arr-close{width:34px;height:34px;font-size:20px}.arr-btn{height:38px;padding:0 14px}.arr-primary{background:#347f49;color:#fff;border-color:#347f49}
+      .arr-controls{display:grid;grid-template-columns:180px minmax(230px,360px) auto 1fr;gap:10px;align-items:end;padding:12px 16px;background:#fff;border-bottom:1px solid #dce9df}.arr-field{display:grid;gap:4px}.arr-field label{font-size:10px;font-weight:900;letter-spacing:.05em;color:#55705e}.arr-field input,.arr-field select{height:38px;border:1px solid #c9d9cd;border-radius:9px;background:#fff;padding:0 10px}.arr-message{font-size:12px;color:#607566;text-align:right}
+      .arr-body{display:grid;grid-template-columns:minmax(390px,.85fr) minmax(650px,1.4fr);gap:12px;padding:12px 16px 16px;min-height:0;overflow:hidden}.arr-panel{background:#fff;border:1px solid #d8e5db;border-radius:13px;overflow:hidden;display:grid;grid-template-rows:auto 1fr auto;min-height:0}.arr-panel-head{padding:11px 13px;background:#eaf5ed;border-bottom:1px solid #d3e3d6}.arr-panel-head strong{display:block;color:#173d23;font-size:13px}.arr-panel-head span{font-size:10px;color:#6b7d70}
+      .arr-scroll{overflow:auto;min-height:0}.arr-table{width:100%;border-collapse:collapse;font-size:11px}.arr-table th{position:sticky;top:0;z-index:2;background:#f1f8f3;color:#31543d;font-size:9px;letter-spacing:.04em;text-align:right;padding:9px 7px;border-bottom:1px solid #d8e5db}.arr-table th:first-child{text-align:left}.arr-table td{padding:8px 7px;border-bottom:1px solid #edf2ee;text-align:right;color:#33483a}.arr-table td:first-child{text-align:left}.arr-detail-name{font-weight:800;color:#173d23}.arr-status{display:inline-flex;min-width:82px;justify-content:center;padding:4px 7px;border-radius:999px;font-size:9px;font-weight:900}.arr-status-PRESENT{background:#dff3e3;color:#17612c}.arr-status-ABSENT{background:#ffe0df;color:#9a2924}.arr-status-LEAVE{background:#fff1ad;color:#695400}.arr-status-OB{background:#dceeff;color:#15598b}.arr-status-OFF{background:#e7e9e8;color:#59615d}.arr-status-UNRECORDED{background:#fff;border:1px dashed #bfc8c2;color:#7b8780}
+      .arr-summary-row{cursor:pointer}.arr-summary-row:hover td,.arr-summary-row.is-active td{background:#e8f5eb}.arr-summary-row.is-active td:first-child{box-shadow:inset 4px 0 0 #347f49;font-weight:900;color:#173d23}.arr-total td{position:sticky;bottom:0;background:#eef7f0;font-weight:900;border-top:2px solid #bfd3c4}
+      .arr-detail-totals{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:9px;border-top:1px solid #d8e5db;background:#fbfdfb}.arr-mini{border:1px solid #e1ebe3;border-radius:8px;padding:6px}.arr-mini span{display:block;font-size:8px;font-weight:900;color:#6c7e71}.arr-mini strong{font-size:15px;color:#203d29}.arr-empty{padding:48px 18px;text-align:center;color:#718178}
+      @media(max-width:1000px){.arr-body{grid-template-columns:1fr;overflow:auto}.arr-panel{min-height:420px}.arr-controls{grid-template-columns:1fr 1fr}.arr-message{text-align:left}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function build() {
+    if (document.getElementById("attendanceReportBackdrop")) return;
+    installStyles();
+    const backdrop = document.createElement("div");
+    backdrop.id = "attendanceReportBackdrop";
+    backdrop.className = "arr-backdrop";
+    backdrop.hidden = true;
+    backdrop.innerHTML = `
+      <section class="arr-shell" role="dialog" aria-modal="true" aria-label="Attendance Reports">
+        <header class="arr-head"><div><h2>Attendance Reports</h2><p>Stage 1 · Read-only daily office validation view</p></div><button id="arrClose" class="arr-close" type="button">×</button></header>
+        <div class="arr-controls">
+          <div class="arr-field"><label>REPORT DATE</label><input id="arrDate" type="date"></div>
+          <div class="arr-field"><label>CAMP</label><select id="arrCamp"><option value="">All available camps</option></select></div>
+          <button id="arrLoad" class="arr-btn arr-primary" type="button">Load Daily Report</button>
+          <div id="arrMessage" class="arr-message">Ready.</div>
+        </div>
+        <main class="arr-body">
+          <section class="arr-panel"><div class="arr-panel-head"><strong id="arrDetailTitle">Office Detail</strong><span>PERSONNEL · STATUS</span></div><div id="arrDetail" class="arr-scroll arr-empty">Load a date to view office attendance.</div><div id="arrDetailTotals" class="arr-detail-totals"></div></section>
+          <section class="arr-panel"><div class="arr-panel-head"><strong>Daily Attendance Report</strong><span id="arrSummaryDate">Select a report date</span></div><div id="arrSummary" class="arr-scroll arr-empty">No report loaded.</div><div></div></section>
+        </main>
+        <footer class="arr-foot"><span>Read-only report view. Attendance editing remains in Attendance Center.</span><button id="arrCloseFooter" class="arr-btn" type="button">Close</button></footer>
+      </section>`;
+    document.body.appendChild(backdrop);
+    document.getElementById("arrDate").value = todayIso();
+    document.getElementById("arrClose").onclick = close;
+    document.getElementById("arrCloseFooter").onclick = close;
+    document.getElementById("arrLoad").onclick = load;
+    document.getElementById("arrCamp").onchange = load;
+    backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
+  }
+
+  function open() {
+    build();
+    document.getElementById("attendanceReportBackdrop").hidden = false;
+    load();
+  }
+
+  function close() {
+    const backdrop = document.getElementById("attendanceReportBackdrop");
+    if (backdrop) backdrop.hidden = true;
+  }
+
+  async function load() {
+    const date = document.getElementById("arrDate").value;
+    const camp = document.getElementById("arrCamp").value;
+    message("Loading daily attendance report...");
+    try {
+      const report = await server("getAttendanceDailyReport", { date, camp, office: state.selectedOffice });
+      state.report = report;
+      state.selectedOffice = report.selectedOffice || "";
+      populateCamps(report.camps || [], report.selectedCamp || camp);
+      render();
+      message((report.offices || []).length + " office(s) loaded.");
+    } catch (error) {
+      message(error.message, true);
+    }
+  }
+
+  function populateCamps(camps, selected) {
+    const select = document.getElementById("arrCamp");
+    const current = String(selected || select.value || "");
+    select.innerHTML = '<option value="">All available camps</option>' + camps.map(value => '<option value="' + esc(value) + '">' + esc(value) + '</option>').join("");
+    const match = Array.from(select.options).find(option => option.value.toUpperCase() === current.toUpperCase());
+    if (match) select.value = match.value;
+  }
+
+  function render() {
+    renderSummary();
+    renderDetail();
+    const date = new Date((state.report.date || todayIso()) + "T12:00:00");
+    document.getElementById("arrSummaryDate").textContent = date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  }
+
+  function renderSummary() {
+    const wrap = document.getElementById("arrSummary");
+    const offices = state.report && Array.isArray(state.report.offices) ? state.report.offices : [];
+    if (!offices.length) {
+      wrap.className = "arr-scroll arr-empty";
+      wrap.textContent = "No attendance records found for this date and camp.";
+      return;
+    }
+    wrap.className = "arr-scroll";
+    const total = state.report.grandTotal || {};
+    wrap.innerHTML = '<table class="arr-table"><thead><tr><th>OFFICE</th><th>P</th><th>A</th><th>L</th><th>OB</th><th>OFF</th><th>U</th><th>TOTAL</th></tr></thead><tbody>' + offices.map(row => '<tr class="arr-summary-row' + (row.office === state.selectedOffice ? ' is-active' : '') + '" data-office="' + esc(row.office) + '"><td>' + esc(row.office) + '</td><td>' + row.PRESENT + '</td><td>' + row.ABSENT + '</td><td>' + row.LEAVE + '</td><td>' + row.OB + '</td><td>' + row.OFF + '</td><td>' + row.UNRECORDED + '</td><td>' + row.TOTAL + '</td></tr>').join("") + '<tr class="arr-total"><td>TOTAL</td><td>' + (total.PRESENT || 0) + '</td><td>' + (total.ABSENT || 0) + '</td><td>' + (total.LEAVE || 0) + '</td><td>' + (total.OB || 0) + '</td><td>' + (total.OFF || 0) + '</td><td>' + (total.UNRECORDED || 0) + '</td><td>' + (total.TOTAL || 0) + '</td></tr></tbody></table>';
+    wrap.querySelectorAll(".arr-summary-row").forEach(row => {
+      row.onclick = () => {
+        state.selectedOffice = row.dataset.office;
+        renderSummary();
+        renderDetail();
+      };
+    });
+  }
+
+  function renderDetail() {
+    const title = document.getElementById("arrDetailTitle");
+    const wrap = document.getElementById("arrDetail");
+    const totalsWrap = document.getElementById("arrDetailTotals");
+    const office = state.selectedOffice;
+    const personnel = state.report && state.report.detailsByOffice ? (state.report.detailsByOffice[office] || []) : [];
+    const summary = state.report && Array.isArray(state.report.offices) ? state.report.offices.find(item => item.office === office) : null;
+    title.textContent = office ? office + " — Daily Office Attendance" : "Office Detail";
+    if (!personnel.length) {
+      wrap.className = "arr-scroll arr-empty";
+      wrap.textContent = "Select an office from the summary table.";
+      totalsWrap.innerHTML = "";
+      return;
+    }
+    wrap.className = "arr-scroll";
+    wrap.innerHTML = '<table class="arr-table"><thead><tr><th>PERSONNEL</th><th>STATUS</th></tr></thead><tbody>' + personnel.map(row => '<tr><td class="arr-detail-name">' + esc(row.personnel) + '</td><td><span class="arr-status arr-status-' + esc(row.status) + '">' + esc(row.status) + '</span></td></tr>').join("") + '</tbody></table>';
+    const entries = [["Present", summary.PRESENT], ["Absent", summary.ABSENT], ["Leave", summary.LEAVE], ["OB", summary.OB], ["Off", summary.OFF], ["Unrecorded", summary.UNRECORDED], ["Total", summary.TOTAL]];
+    totalsWrap.innerHTML = entries.map(item => '<div class="arr-mini"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>').join("");
+  }
+
+  function message(text, isError) {
+    const element = document.getElementById("arrMessage");
+    if (!element) return;
+    element.textContent = text;
+    element.style.color = isError ? "#a23f3f" : "#607566";
+  }
+
+  function installLaunchButton() {
+    if (document.getElementById("attendanceReportsButton")) return true;
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const attendanceButton = buttons.find(button => /attendance center/i.test(String(button.textContent || "")));
+    if (!attendanceButton || !attendanceButton.parentElement) return false;
+    const button = document.createElement("button");
+    button.id = "attendanceReportsButton";
+    button.type = "button";
+    button.className = attendanceButton.className;
+    button.textContent = "Attendance Reports";
+    button.title = "Open the read-only daily attendance report";
+    button.onclick = open;
+    attendanceButton.insertAdjacentElement("afterend", button);
+    return true;
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    build();
+    let attempts = 0;
+    const timer = window.setInterval(function () {
+      attempts++;
+      if (installLaunchButton() || attempts >= 30) window.clearInterval(timer);
+    }, 500);
+  });
+
+  window.AttendanceReports = { open, close, reload: load };
+})();
+</script>
