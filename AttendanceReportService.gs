@@ -59,13 +59,16 @@ function getAttendanceDailyReport(request) {
 
     const group = officeMap.get(officeKey);
     const status = normalizeAttendanceReportStatus_(row[8]);
+    const fullName = String(row[3] || "").trim();
+    const rank = String(row[4] || "").trim();
+
     group.counts[status]++;
     group.counts.TOTAL++;
     group.personnel.push({
       employeeKey: String(row[2] || ""),
-      personnel: [String(row[4] || "").trim(), String(row[3] || "").trim()].filter(Boolean).join(" "),
-      fullName: String(row[3] || "").trim(),
-      rank: String(row[4] || "").trim(),
+      personnel: attendanceReportDisplayName_(rank, fullName),
+      fullName,
+      rank,
       status,
     });
   });
@@ -98,6 +101,20 @@ function getAttendanceDailyReport(request) {
     detailsByOffice,
     grandTotal,
   };
+}
+
+function attendanceReportDisplayName_(rank, fullName) {
+  const cleanRank = String(rank || "").trim().replace(/\s+/g, " ");
+  const cleanName = String(fullName || "").trim().replace(/\s+/g, " ");
+
+  if (!cleanRank) return cleanName;
+  if (!cleanName) return cleanRank;
+
+  const rankPattern = cleanRank.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const repeatedRank = new RegExp("^(?:" + rankPattern + "\\s+)+", "i");
+  const nameWithoutLeadingRank = cleanName.replace(repeatedRank, "").trim();
+
+  return [cleanRank, nameWithoutLeadingRank].filter(Boolean).join(" ");
 }
 
 function attendanceReportEmptyCounts_() {
