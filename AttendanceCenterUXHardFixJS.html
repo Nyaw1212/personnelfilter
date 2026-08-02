@@ -1,0 +1,212 @@
+(function () {
+  "use strict";
+
+  const STYLE_ID = "attendanceCenterUXHardFixStyles";
+  const TOAST_ID = "attendanceCenterSaveSuccess";
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      #attendanceCenterBackdrop #acTableWrap {
+        width: 100% !important;
+        overflow: auto !important;
+      }
+
+      #attendanceCenterBackdrop .ac-grid {
+        width: 638px !important;
+        min-width: 638px !important;
+        max-width: 638px !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+      }
+
+      #attendanceCenterBackdrop .ac-grid th:first-child,
+      #attendanceCenterBackdrop .ac-grid td:first-child {
+        width: 260px !important;
+        min-width: 260px !important;
+        max-width: 260px !important;
+      }
+
+      #attendanceCenterBackdrop .ac-grid th:not(:first-child),
+      #attendanceCenterBackdrop .ac-grid td:not(:first-child) {
+        width: 54px !important;
+        min-width: 54px !important;
+        max-width: 54px !important;
+        padding: 4px !important;
+      }
+
+      #attendanceCenterBackdrop .ac-cell {
+        width: 38px !important;
+        min-width: 38px !important;
+        max-width: 38px !important;
+        height: 32px !important;
+        padding: 0 !important;
+      }
+
+      #attendanceCenterBackdrop .ac-head {
+        position: relative !important;
+      }
+
+      #attendanceCenterBackdrop .ac-save-success {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        z-index: 100;
+        width: min(470px, calc(100% - 160px));
+        transform: translateX(-50%) translateY(-8px);
+        display: grid;
+        grid-template-columns: 32px 1fr 26px;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid #acd8b8;
+        border-radius: 12px;
+        background: #edf9f0;
+        color: #174f27;
+        box-shadow: 0 12px 28px rgba(22, 78, 38, .20);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity .18s ease, transform .18s ease;
+      }
+
+      #attendanceCenterBackdrop .ac-save-success.is-visible {
+        opacity: 1;
+        visibility: visible;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      #attendanceCenterBackdrop .ac-save-success-icon {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #2f8a48;
+        color: white;
+        font-size: 19px;
+        font-weight: 900;
+      }
+
+      #attendanceCenterBackdrop .ac-save-success strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 2px;
+      }
+
+      #attendanceCenterBackdrop .ac-save-success span {
+        display: block;
+        font-size: 11px;
+        color: #426d4c;
+      }
+
+      #attendanceCenterBackdrop .ac-save-success-close {
+        width: 26px;
+        height: 26px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: #245d32;
+        font-size: 19px;
+        cursor: pointer;
+      }
+
+      #attendanceCenterBackdrop #acMessage.ac-save-confirmed {
+        color: #1f6f35 !important;
+        font-weight: 800 !important;
+      }
+
+      #attendanceCenterBackdrop #acSave.ac-save-confirmed {
+        box-shadow: 0 0 0 3px rgba(47, 138, 72, .20) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureToast() {
+    const header = document.querySelector("#attendanceCenterBackdrop .ac-head");
+    if (!header) return null;
+
+    let toast = document.getElementById(TOAST_ID);
+    if (toast) return toast;
+
+    toast = document.createElement("div");
+    toast.id = TOAST_ID;
+    toast.className = "ac-save-success";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.innerHTML = `
+      <div class="ac-save-success-icon">✓</div>
+      <div>
+        <strong>Week saved successfully!</strong>
+        <span class="ac-save-success-text">Attendance records were updated.</span>
+      </div>
+      <button class="ac-save-success-close" type="button" aria-label="Dismiss">×</button>
+    `;
+    toast.querySelector(".ac-save-success-close").onclick = function () {
+      toast.classList.remove("is-visible");
+    };
+    header.appendChild(toast);
+    return toast;
+  }
+
+  let hideTimer = 0;
+
+  function showSuccess(message) {
+    const toast = ensureToast();
+    if (!toast) return;
+
+    const text = toast.querySelector(".ac-save-success-text");
+    if (text) text.textContent = message;
+
+    const footer = document.getElementById("acMessage");
+    const saveButton = document.getElementById("acSave");
+    if (footer) footer.classList.add("ac-save-confirmed");
+    if (saveButton) saveButton.classList.add("ac-save-confirmed");
+
+    clearTimeout(hideTimer);
+    toast.classList.add("is-visible");
+    hideTimer = setTimeout(function () {
+      toast.classList.remove("is-visible");
+      if (saveButton) saveButton.classList.remove("ac-save-confirmed");
+    }, 5000);
+  }
+
+  function bindMessageObserver() {
+    const message = document.getElementById("acMessage");
+    if (!message || message.dataset.hardSuccessObserver === "1") return;
+    message.dataset.hardSuccessObserver = "1";
+
+    const check = function () {
+      const value = String(message.textContent || "").trim();
+      if (/saved/i.test(value) && /updated/i.test(value) && !/saving/i.test(value)) {
+        showSuccess(value);
+      }
+    };
+
+    new MutationObserver(check).observe(message, {
+      childList: true,
+      characterData: true,
+      subtree: true
+    });
+  }
+
+  function initialize() {
+    installStyles();
+    ensureToast();
+    bindMessageObserver();
+  }
+
+  new MutationObserver(initialize).observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+})();
