@@ -1,3 +1,4 @@
+<script>
 (function () {
   "use strict";
 
@@ -167,7 +168,6 @@
     renderPresets();
     renderPool();
 
-    // Existing records start under Office Hours so the weekly grid is immediately usable.
     currentRows().forEach(item => { if (!assignments.has(item.key)) assignments.set(item.key, "OFFICE_HOURS"); });
     filterWeeklyGrid();
   }
@@ -188,3 +188,4 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", refreshWorkspace);
   else refreshWorkspace();
 })();
+</script>
