@@ -56,16 +56,14 @@ const NeonService = Object.freeze({
     }
 
     return {
-      host,
-      database,
-      user,
-      password,
-      port,
-      jdbcUrl:
-        "jdbc:postgresql://" + host + ":" + port + "/" + database +
-        "?sslmode=require"
-    };
-  },
+  host,
+  database,
+  user,
+  password,
+  port,
+  jdbcUrl:
+    "jdbc:postgresql://" + host + ":" + port + "/" + database
+};
 
   openJdbcConnection_() {
     const config = this.getJdbcConfig_();
