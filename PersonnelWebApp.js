@@ -20,8 +20,13 @@ function include(filename) {
     .createHtmlOutputFromFile(filename)
     .getContent();
 
+  // AttendanceCenterJS is a valid standalone HTML partial wrapped in
+  // <script> tags. Index currently includes it inside the main script
+  // bundle, so return only its JavaScript body there.
   if (filename === "AttendanceCenterJS") {
-    return stripOuterScriptTags_(content);
+    return content
+      .replace(/^\s*<script(?:\s[^>]*)?>\s*/i, "")
+      .replace(/\s*<\/script>\s*$/i, "");
   }
 
   if (filename !== "AppJS") return content;
@@ -45,26 +50,14 @@ function include(filename) {
   ];
 
   sharedClientModules.forEach(function(moduleName) {
-    const moduleContent = HtmlService
+    content += "\n" + HtmlService
       .createHtmlOutputFromFile(moduleName)
       .getContent();
-
-    content += "\n" + stripOuterScriptTags_(moduleContent);
   });
 
   content += "\n</script>\n" + includePlatformBundle() + "\n<script>\n";
 
   return content;
-}
-
-//----------------------------------
-// Remove an optional outer script wrapper
-//----------------------------------
-
-function stripOuterScriptTags_(content) {
-  return String(content || "")
-    .replace(/^\s*<script(?:\s[^>]*)?>\s*/i, "")
-    .replace(/\s*<\/script>\s*$/i, "");
 }
 
 //----------------------------------
