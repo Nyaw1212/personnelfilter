@@ -2,6 +2,7 @@
 // Attendance business service
 // ==================================
 // Validates and prepares attendance snapshots before storage.
+// NeonService now handles writes and reads through JDBC.
 
 const AttendanceService = Object.freeze({
   normalizeRecord_(record) {
@@ -45,6 +46,7 @@ const AttendanceService = Object.freeze({
 
     return {
       success: true,
+      storage: "NEON_JDBC",
       saved: Array.isArray(saved) ? saved.length : normalized.length,
       records: saved
     };
@@ -56,33 +58,45 @@ const AttendanceService = Object.freeze({
 });
 
 // ==================================
-// Phase 2 proof-of-connection
+// Phase 2.2 service-layer verification
 // ==================================
-// Run this manually from the Apps Script editor after adding
-// NEON_DATA_API_URL to Script Properties.
-function testInsertOneAttendanceRowToNeon() {
-  const result = AttendanceService.saveAttendance({
-    personnelUid: "PHASE2-TEST-001",
-    attendanceDate: new Date(),
+// This confirms that the real AttendanceService path now writes to and reads
+// from Neon through JDBC. It is still isolated from the live Save Week button.
+function testAttendanceServiceViaJdbc() {
+  const now = new Date();
+  const suffix = Utilities.formatDate(
+    now,
+    Session.getScriptTimeZone(),
+    "yyyyMMdd-HHmmss"
+  );
+  const attendanceDate = ServerUtils.formatIsoDate(now);
+  const personnelUid = "PHASE22-SERVICE-" + suffix;
+
+  const saved = AttendanceService.saveAttendance({
+    personnelUid,
+    attendanceDate,
     fullName: "Alvin Chiao",
     rank: "CO1",
     camp: "NBP",
     office: "CASO",
     status: "PRESENT",
-    remarks: "Phase 2 Apps Script to Neon connection test"
+    remarks: "Phase 2.2 AttendanceService JDBC verification"
   });
 
-  console.log(JSON.stringify(result, null, 2));
-  return result;
-}
-
-function testReadAttendanceFromNeon() {
   const rows = AttendanceService.loadAttendance({
-    attendanceDate: ServerUtils.formatIsoDate(new Date()),
+    attendanceDate,
     camp: "NBP",
     office: "CASO"
   });
 
-  console.log(JSON.stringify(rows, null, 2));
-  return rows;
+  const matched = rows.find(row => row.personnel_uid === personnelUid) || null;
+  const result = {
+    success: Boolean(matched),
+    storage: saved.storage,
+    saved: saved.saved,
+    matched
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  return result;
 }
