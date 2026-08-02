@@ -43,7 +43,8 @@ function include(filename) {
     "TransferQueueThemeSyncJS",
     "MultiTextSearchJS",
     "MultiTextSearchPerformanceFixJS",
-    "AttendanceCenterUXPatchJS"
+    "AttendanceCenterUXPatchJS",
+    "AttendanceCenterUXHardFixJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
