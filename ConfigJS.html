@@ -112,3 +112,121 @@
     },
   },
 };
+
+// ==========================================
+// Attendance Center integrated launcher
+// ==========================================
+
+(function installAttendanceCenterNavigationLauncher() {
+  "use strict";
+
+  const BUTTON_ID = "attendanceCenterNavigationButton";
+  const FLOATING_ID = "attendanceCenterLaunch";
+
+  function normalizeText(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function openAttendanceCenterFromNavigation() {
+    const attendance = window.AttendanceCenterPrototype;
+
+    if (attendance && typeof attendance.open === "function") {
+      attendance.open();
+      return;
+    }
+
+    console.warn("Attendance Center is still loading.");
+
+    window.setTimeout(() => {
+      const retry = window.AttendanceCenterPrototype;
+
+      if (retry && typeof retry.open === "function") {
+        retry.open();
+        return;
+      }
+
+      window.alert(
+        "Attendance Center could not be opened. Refresh the app and try again."
+      );
+    }, 250);
+  }
+
+  function removeFloatingAttendanceLauncher() {
+    const floatingButton = document.getElementById(FLOATING_ID);
+
+    if (floatingButton) {
+      floatingButton.remove();
+    }
+  }
+
+  function findNavigationReferenceButton() {
+    const buttons = [...document.querySelectorAll("button")];
+
+    return buttons.find(button => {
+      const text = normalizeText(button.textContent);
+      return text === "generated reports";
+    }) || buttons.find(button => {
+      const text = normalizeText(button.textContent);
+      return text === "transfer queue";
+    }) || buttons.find(button => {
+      const text = normalizeText(button.textContent);
+      return text === "table v2";
+    }) || null;
+  }
+
+  function ensureAttendanceNavigationButton() {
+    removeFloatingAttendanceLauncher();
+
+    if (document.getElementById(BUTTON_ID)) {
+      return true;
+    }
+
+    const referenceButton = findNavigationReferenceButton();
+
+    if (!referenceButton || !referenceButton.parentElement) {
+      return false;
+    }
+
+    const button = document.createElement("button");
+    button.id = BUTTON_ID;
+    button.type = "button";
+    button.className = referenceButton.className;
+    button.textContent = "Attendance Center";
+    button.title = "Open Attendance Center";
+    button.setAttribute("aria-label", "Open Attendance Center");
+    button.addEventListener("click", openAttendanceCenterFromNavigation);
+
+    referenceButton.insertAdjacentElement("afterend", button);
+    return true;
+  }
+
+  function startAttendanceNavigationInstaller() {
+    ensureAttendanceNavigationButton();
+
+    const observer = new MutationObserver(() => {
+      ensureAttendanceNavigationButton();
+    });
+
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+
+    window.setTimeout(ensureAttendanceNavigationButton, 0);
+    window.setTimeout(ensureAttendanceNavigationButton, 500);
+    window.setTimeout(ensureAttendanceNavigationButton, 1500);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      startAttendanceNavigationInstaller,
+      { once: true }
+    );
+  } else {
+    startAttendanceNavigationInstaller();
+  }
+})();
