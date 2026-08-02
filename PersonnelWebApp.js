@@ -20,6 +20,15 @@ function include(filename) {
     .createHtmlOutputFromFile(filename)
     .getContent();
 
+  // AttendanceCenterJS is a valid standalone HTML partial wrapped in
+  // <script> tags. Index currently includes it inside the main script
+  // bundle, so return only its JavaScript body there.
+  if (filename === "AttendanceCenterJS") {
+    return content
+      .replace(/^\s*<script(?:\s[^>]*)?>\s*/i, "")
+      .replace(/\s*<\/script>\s*$/i, "");
+  }
+
   if (filename !== "AppJS") return content;
 
   const sharedClientModules = [
