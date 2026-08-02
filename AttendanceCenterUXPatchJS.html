@@ -1,0 +1,223 @@
+(function () {
+  "use strict";
+
+  const STYLE_ID = "attendanceCenterUXPatchStyles";
+  const TOAST_ID = "acSuccessToast";
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      /* Keep the personnel column readable while making each day column
+         only slightly wider than its attendance chip. */
+      #attendanceCenterBackdrop .ac-grid {
+        width: max-content !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+      }
+
+      #attendanceCenterBackdrop .ac-grid th:first-child,
+      #attendanceCenterBackdrop .ac-grid td:first-child {
+        width: 260px !important;
+        min-width: 260px !important;
+        max-width: 260px !important;
+      }
+
+      #attendanceCenterBackdrop .ac-grid th:not(:first-child),
+      #attendanceCenterBackdrop .ac-grid td:not(:first-child) {
+        width: 54px !important;
+        min-width: 54px !important;
+        max-width: 54px !important;
+        padding-left: 4px !important;
+        padding-right: 4px !important;
+      }
+
+      #attendanceCenterBackdrop .ac-cell {
+        width: 38px !important;
+        min-width: 38px !important;
+        max-width: 38px !important;
+        height: 32px !important;
+        padding: 0 !important;
+      }
+
+      #attendanceCenterBackdrop .ac-table-wrap,
+      #attendanceCenterBackdrop #acTableWrap {
+        min-width: max-content;
+      }
+
+      #attendanceCenterBackdrop .ac-head {
+        position: relative;
+      }
+
+      #attendanceCenterBackdrop .ac-success-toast {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        z-index: 20;
+        width: min(470px, calc(100% - 150px));
+        transform: translateX(-50%) translateY(-10px);
+        display: grid;
+        grid-template-columns: 34px 1fr 28px;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 12px;
+        border: 1px solid #b9dfc3;
+        border-radius: 13px;
+        background: #eefaf1;
+        color: #174f27;
+        box-shadow: 0 12px 30px rgba(26, 78, 39, .18);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .18s ease, transform .18s ease;
+      }
+
+      #attendanceCenterBackdrop .ac-success-toast.is-visible {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+        pointer-events: auto;
+      }
+
+      #attendanceCenterBackdrop .ac-success-icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #2f8a48;
+        color: #fff;
+        font-size: 20px;
+        font-weight: 900;
+      }
+
+      #attendanceCenterBackdrop .ac-success-copy strong {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 14px;
+      }
+
+      #attendanceCenterBackdrop .ac-success-copy span {
+        display: block;
+        color: #3d6748;
+        font-size: 11px;
+      }
+
+      #attendanceCenterBackdrop .ac-success-close {
+        width: 28px;
+        height: 28px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #245d32;
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      #attendanceCenterBackdrop .ac-foot .ac-msg.is-success {
+        color: #1f6f35 !important;
+        font-weight: 700;
+      }
+
+      #attendanceCenterBackdrop #acSave.is-saved {
+        box-shadow: 0 0 0 3px rgba(47, 138, 72, .18);
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  function ensureToast() {
+    const backdrop = document.getElementById("attendanceCenterBackdrop");
+    const header = backdrop && backdrop.querySelector(".ac-head");
+    if (!header) return null;
+
+    let toast = document.getElementById(TOAST_ID);
+    if (toast) return toast;
+
+    toast = document.createElement("div");
+    toast.id = TOAST_ID;
+    toast.className = "ac-success-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.innerHTML = `
+      <div class="ac-success-icon">✓</div>
+      <div class="ac-success-copy">
+        <strong>Week saved successfully!</strong>
+        <span id="acSuccessToastText">Attendance records were updated.</span>
+      </div>
+      <button class="ac-success-close" type="button" aria-label="Dismiss success message">×</button>
+    `;
+
+    toast.querySelector(".ac-success-close").addEventListener("click", function () {
+      toast.classList.remove("is-visible");
+    });
+
+    header.appendChild(toast);
+    return toast;
+  }
+
+  let hideTimer = 0;
+
+  function showSuccess(message) {
+    const toast = ensureToast();
+    if (!toast) return;
+
+    const text = toast.querySelector("#acSuccessToastText");
+    if (text) text.textContent = message;
+
+    window.clearTimeout(hideTimer);
+    toast.classList.add("is-visible");
+
+    const footerMessage = document.getElementById("acMessage");
+    const saveButton = document.getElementById("acSave");
+    if (footerMessage) footerMessage.classList.add("is-success");
+    if (saveButton) saveButton.classList.add("is-saved");
+
+    hideTimer = window.setTimeout(function () {
+      toast.classList.remove("is-visible");
+      if (saveButton) saveButton.classList.remove("is-saved");
+    }, 5000);
+  }
+
+  function watchMessage() {
+    const message = document.getElementById("acMessage");
+    if (!message || message.dataset.successWatch === "true") return;
+
+    message.dataset.successWatch = "true";
+
+    const observer = new MutationObserver(function () {
+      const value = String(message.textContent || "").trim();
+      if (/saved|updated/i.test(value) && !/saving/i.test(value)) {
+        showSuccess(value);
+      } else {
+        message.classList.remove("is-success");
+      }
+    });
+
+    observer.observe(message, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+
+  function initialize() {
+    installStyles();
+    watchMessage();
+    ensureToast();
+  }
+
+  const pageObserver = new MutationObserver(initialize);
+  pageObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+})();
