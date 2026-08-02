@@ -10,12 +10,11 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      /* Keep the personnel column readable while making each day column
-         only slightly wider than its attendance chip. */
+      /* Legacy attendance grid. */
       #attendanceCenterBackdrop .ac-grid {
         width: max-content !important;
         min-width: 0 !important;
-        table-layout: auto !important;
+        table-layout: fixed !important;
       }
 
       #attendanceCenterBackdrop .ac-grid th:first-child,
@@ -27,19 +26,69 @@
 
       #attendanceCenterBackdrop .ac-grid th:not(:first-child),
       #attendanceCenterBackdrop .ac-grid td:not(:first-child) {
-        width: 54px !important;
-        min-width: 54px !important;
-        max-width: 54px !important;
-        padding-left: 4px !important;
-        padding-right: 4px !important;
+        width: 70px !important;
+        min-width: 70px !important;
+        max-width: 70px !important;
+        height: 70px !important;
+        padding: 0 !important;
+        text-align: center !important;
+        vertical-align: middle !important;
       }
 
       #attendanceCenterBackdrop .ac-cell {
-        width: 38px !important;
-        min-width: 38px !important;
-        max-width: 38px !important;
-        height: 32px !important;
+        width: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
         padding: 0 !important;
+        margin: auto !important;
+      }
+
+      /* Weekly attendance grid currently used by AttendanceCenterJS. */
+      #attendanceCenterWeeklyBackdrop #acwTable {
+        width: max-content !important;
+        min-width: 0 !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid {
+        width: max-content !important;
+        min-width: 0 !important;
+        table-layout: fixed !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid th:first-child,
+      #attendanceCenterWeeklyBackdrop .acw-grid td:first-child {
+        width: 260px !important;
+        min-width: 260px !important;
+        max-width: 260px !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-grid th:not(:first-child),
+      #attendanceCenterWeeklyBackdrop .acw-grid td:not(:first-child) {
+        box-sizing: border-box !important;
+        width: 70px !important;
+        min-width: 70px !important;
+        max-width: 70px !important;
+        height: 70px !important;
+        padding: 0 !important;
+        text-align: center !important;
+        vertical-align: middle !important;
+      }
+
+      #attendanceCenterWeeklyBackdrop .acw-cell {
+        box-sizing: border-box !important;
+        width: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        padding: 0 !important;
+        margin: auto !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
       }
 
       #attendanceCenterBackdrop .ac-table-wrap,
