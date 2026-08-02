@@ -42,7 +42,8 @@ function include(filename) {
     "CanonicalTransferQueueClientJS",
     "TransferQueueThemeSyncJS",
     "MultiTextSearchJS",
-    "MultiTextSearchPerformanceFixJS"
+    "MultiTextSearchPerformanceFixJS",
+    "AttendanceCenterUXPatchJS"
   ];
 
   sharedClientModules.forEach(function(moduleName) {
