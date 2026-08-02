@@ -1,232 +1,34 @@
-  const PERSONNEL_APP_CONFIG = {
-  syncDelayMs: 2000,
-  previewRowLimit: 300,
+const PERSONNEL_APP_CONFIG={syncDelayMs:2000,previewRowLimit:300,previewColumns:["Full Name","Rank","Gender","Category","Type","Office","Camp","Status"],searchableColumns:["Full Name","Rank","Gender","Category","Type","Office","Camp","Status"],filterGroups:[{key:"camps",recordKey:"Camp",label:"Camp",values:["NBP","CIW","SPPF","Sablayan","Leyte"]},{key:"genders",recordKey:"Gender",label:"Gender",values:["Male","Female"]},{key:"categories",recordKey:"Category",label:"Category",values:["Custodial","Non-Custodial","Non-Uniformed Personnel"]},{key:"types",recordKey:"Type",label:"Type",values:["Uniformed","Non-Uniformed"]},{key:"offices",recordKey:"Office",label:"Office",values:[]},{key:"statuses",recordKey:"Status",label:"Status",values:["Active","OB","VL","SL","SPL","FL","AWOL","Under Investigation","On Suspension","Retired"]}],rankGroups:{commissioned:{label:"Commissioned Officers",values:["CCSUPT","CTCSUPT","CSSUPT","CTSSUPT","CSUPT","CTSUPT","CCINSP","CTCINSP","CSINSP","CTSINSP","CINSP","CTINSP"]},nonCommissioned:{label:"Non-Commissioned",values:["CSO4","CSO3","CSO2","CSO1","CO3","CO2","CO1"]},technical:{label:"Technical (Non-Commissioned)",values:["CTSO4","CTSO3","CTSO2","CTSO1","CTO3","CTO2","CTO1"]}}};
 
-  previewColumns: [
-    "Full Name",
-    "Rank",
-    "Gender",
-    "Category",
-    "Type",
-    "Office",
-    "Camp",
-    "Status",
-  ],
-
-  searchableColumns: [
-    "Full Name",
-    "Rank",
-    "Gender",
-    "Category",
-    "Type",
-    "Office",
-    "Camp",
-    "Status",
-  ],
-
-  filterGroups: [
-    {
-      key: "camps",
-      recordKey: "Camp",
-      label: "Camp",
-      values: ["NBP", "CIW", "SPPF", "Sablayan", "Leyte"],
-    },
-
-    {
-      key: "genders",
-      recordKey: "Gender",
-      label: "Gender",
-      values: ["Male", "Female"],
-    },
-
-    {
-      key: "categories",
-      recordKey: "Category",
-      label: "Category",
-      values: ["Custodial", "Non-Custodial", "Non-Uniformed Personnel"],
-    },
-
-    {
-      key: "types",
-      recordKey: "Type",
-      label: "Type",
-      values: ["Uniformed", "Non-Uniformed"],
-    },
-
-    {
-      key: "offices",
-      recordKey: "Office",
-      label: "Office",
-      values: [],
-    },
-
-    {
-      key: "statuses",
-      recordKey: "Status",
-      label: "Status",
-      values: [
-        "Active",
-        "OB",
-        "VL",
-        "SL",
-        "SPL",
-        "FL",
-        "AWOL",
-        "Under Investigation",
-        "On Suspension",
-        "Retired",
-      ],
-    },
-  ],
-
-  rankGroups: {
-    commissioned: {
-      label: "Commissioned Officers",
-
-      values: [
-        "CCSUPT",
-        "CTCSUPT",
-        "CSSUPT",
-        "CTSSUPT",
-        "CSUPT",
-        "CTSUPT",
-        "CCINSP",
-        "CTCINSP",
-        "CSINSP",
-        "CTSINSP",
-        "CINSP",
-        "CTINSP",
-      ],
-    },
-
-    nonCommissioned: {
-      label: "Non-Commissioned",
-
-      values: ["CSO4", "CSO3", "CSO2", "CSO1", "CO3", "CO2", "CO1"],
-    },
-
-    technical: {
-      label: "Technical (Non-Commissioned)",
-
-      values: ["CTSO4", "CTSO3", "CTSO2", "CTSO1", "CTO3", "CTO2", "CTO1"],
-    },
-  },
-};
-
-// ==========================================
-// Attendance Center integrated launcher
-// ==========================================
-
-(function installAttendanceCenterNavigationLauncher() {
+(function(){
   "use strict";
+  const S={roster:[],status:new Map(),remarks:new Map()};
+  const N=v=>String(v||"").trim().replace(/\s+/g," ").toUpperCase();
+  const call=(m,a)=>new Promise((ok,no)=>{let r=google.script.run.withSuccessHandler(ok).withFailureHandler(e=>no(new Error(e&&e.message?e.message:String(e))));a===undefined?r[m]():r[m](a);});
+  const recs=()=>typeof PersonnelState!=="undefined"&&Array.isArray(PersonnelState.records)?PersonnelState.records:[];
+  function el(tag,cls,text){const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x;}
+  function css(){if(document.getElementById("acInlineStyles"))return;const s=el("style");s.id="acInlineStyles";s.textContent=".acB{position:fixed;inset:0;z-index:6000;background:rgba(15,35,24,.48);display:grid;place-items:center;padding:16px}.acB[hidden]{display:none}.acS{width:min(1120px,100%);height:min(840px,95vh);background:#f7fbf8;border:1px solid #cbded0;border-radius:18px;overflow:hidden;display:grid;grid-template-rows:auto auto auto 1fr auto}.acH,.acF{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#eef7f0;border-bottom:1px solid #d4e4d7}.acF{border-top:1px solid #d4e4d7;border-bottom:0;background:#fff}.acH h2{margin:0;color:#173d23}.acC{display:grid;grid-template-columns:160px 1fr 1fr 1fr auto;gap:9px;padding:13px 18px;background:#fff}.acFld{display:grid;gap:4px}.acFld label{font-size:10px;font-weight:800;color:#55705e}.acFld input,.acFld select,.acSearch,.acSel,.acRem{height:38px;border:1px solid #c8d9cc;border-radius:9px;background:#fff;padding:0 9px}.acBtn{height:38px;border:1px solid #bfd3c4;border-radius:9px;background:#fff;color:#214b2d;font-weight:700;cursor:pointer;padding:0 12px}.acPri{background:#347f49;color:#fff;border-color:#347f49}.acSum{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:11px 18px}.acStat{background:#fff;border:1px solid #d8e5db;border-radius:10px;padding:8px 10px}.acStat span{display:block;font-size:9px;font-weight:800;color:#6b7d70}.acStat strong{font-size:20px;color:#203d29}.acW{overflow:auto;padding:0 18px 18px}.acT{position:sticky;top:0;display:flex;gap:8px;padding:10px 0;background:#f7fbf8}.acSearch{flex:1}.acTable{width:100%;border-collapse:collapse;background:#fff}.acTable th{position:sticky;top:58px;background:#eaf5ed;text-align:left;padding:9px;font-size:10px}.acTable td{padding:8px 9px;border-top:1px solid #edf2ee}.acName{font-weight:800}.acSub{font-size:10px;color:#718178}.acEmpty{text-align:center;padding:50px;color:#718178}.acMsg{font-size:12px;color:#607566}@media(max-width:850px){.acC{grid-template-columns:1fr 1fr}.acSum{grid-template-columns:repeat(3,1fr)}.acTable{min-width:700px}}";document.head.appendChild(s);}
+  function field(label,input){const w=el("div","acFld");w.append(el("label",null,label),input);return w;}
+  function build(){if(document.getElementById("attendanceCenterBackdrop"))return;css();const b=el("div","acB");b.id="attendanceCenterBackdrop";b.hidden=true;const sh=el("section","acS"),h=el("header","acH"),ttl=el("div"),h2=el("h2",null,"Attendance Center"),p=el("div",null,"Office-based attendance recorder"),x=el("button","acBtn","×");ttl.append(h2,p);h.append(ttl,x);const c=el("div","acC"),date=el("input"),camp=el("select"),office=el("select"),preset=el("select"),load=el("button","acBtn acPri","Load Personnel");date.id="acDate";date.type="date";date.value=new Date().toISOString().slice(0,10);camp.id="acCamp";office.id="acOffice";preset.id="acPreset";c.append(field("ATTENDANCE DATE",date),field("CAMP",camp),field("OFFICE",office),field("DUTY DETAIL",preset),load);const sum=el("div","acSum");sum.id="acSummary";const work=el("div","acW"),tools=el("div","acT"),search=el("input","acSearch"),all=el("button","acBtn","Mark All Present"),clear=el("button","acBtn","Clear"),wrap=el("div","acEmpty","Select a date, camp, and office.");search.type="search";search.placeholder="Search personnel...";wrap.id="acTableWrap";tools.append(search,all,clear);work.append(tools,wrap);const f=el("footer","acF"),msg=el("div","acMsg","Ready."),save=el("button","acBtn acPri","Save Attendance");msg.id="acMessage";f.append(msg,save);sh.append(h,c,sum,work,f);b.appendChild(sh);document.body.appendChild(b);x.onclick=close;b.onclick=e=>{if(e.target===b)close();};camp.onchange=offices;load.onclick=loadRoster;all.onclick=()=>setAll("PRESENT");clear.onclick=()=>setAll("UNRECORDED");search.oninput=render;save.onclick=saveRoster;renderSum();}
+  function options(select,values,placeholder){select.innerHTML="";const o=el("option",null,placeholder);o.value="";select.appendChild(o);values.forEach(v=>{const z=el("option",null,v);z.value=v;select.appendChild(z);});}
+  function camps(){options(document.getElementById("acCamp"),[...new Set(recs().map(r=>String(r.Camp||"").trim()).filter(Boolean))].sort(),"Select camp");offices();}
+  function offices(){const c=N(document.getElementById("acCamp").value);options(document.getElementById("acOffice"),[...new Set(recs().filter(r=>!c||N(r.Camp)===c).map(r=>String(r.Office||"").trim()).filter(Boolean))].sort(),"Select office");}
+  async function open(){build();document.getElementById("attendanceCenterBackdrop").hidden=false;try{const b=await call("getAttendanceCenterBootstrap");const ps=Array.isArray(b&&b.presets)?b.presets:[];const sel=document.getElementById("acPreset");sel.innerHTML="";(ps.length?ps:[{name:"Normal Office Days"}]).forEach(q=>{const o=el("option",null,q.name);o.value=q.name;sel.appendChild(o);});camps();message("Select an office and load personnel.");}catch(e){message(e.message,true);}}
+  function close(){const b=document.getElementById("attendanceCenterBackdrop");if(b)b.hidden=true;}
+  async function loadRoster(){const d=document.getElementById("acDate").value,c=document.getElementById("acCamp").value,o=document.getElementById("acOffice").value;if(!d||!c||!o){message("Select a date, camp, and office first.",true);return;}S.roster=recs().filter(r=>N(r.Camp)===N(c)&&N(r.Office)===N(o)).map(r=>({employeeKey:String(r.__sheetRow||r["Employee ID"]||r["Full Name"]||""),sheetRow:r.__sheetRow||"",fullName:String(r["Full Name"]||"").trim(),rank:String(r.Rank||"").trim(),office:String(r.Office||"").trim(),camp:String(r.Camp||"").trim()})).filter(r=>r.fullName).sort((a,b)=>a.fullName.localeCompare(b.fullName));S.status=new Map(S.roster.map(r=>[r.employeeKey,"UNRECORDED"]));S.remarks=new Map();try{const q=await call("loadAttendanceCenterRecords",{date:d,camp:c,office:o});(q&&q.records||[]).forEach(r=>{const k=String(r.employeeKey);if(S.status.has(k)){S.status.set(k,N(r.status)||"UNRECORDED");S.remarks.set(k,String(r.remarks||""));}});render();renderSum();message(S.roster.length+" personnel loaded for "+o+".");}catch(e){render();renderSum();message(e.message,true);}}
+  function setAll(v){S.roster.forEach(r=>S.status.set(r.employeeKey,v));render();renderSum();}
+  function render(){const w=document.getElementById("acTableWrap");w.innerHTML="";if(!S.roster.length){w.className="acEmpty";w.textContent="No personnel loaded.";return;}w.className="";const q=N(document.querySelector(".acSearch").value),rows=S.roster.filter(r=>!q||N(r.fullName+" "+r.rank).includes(q)),t=el("table","acTable"),thead=el("thead"),hr=el("tr");["Personnel","Rank","Status","Remarks"].forEach(v=>hr.appendChild(el("th",null,v)));thead.appendChild(hr);const tb=el("tbody");rows.forEach(r=>{const tr=el("tr"),td1=el("td"),nm=el("div","acName",r.fullName),sub=el("div","acSub","Row "+(r.sheetRow||"—")),td2=el("td",null,r.rank),td3=el("td"),td4=el("td"),sel=el("select","acSel"),rem=el("input","acRem");td1.append(nm,sub);["PRESENT","ABSENT","LEAVE","OB","UNRECORDED"].forEach(v=>{const o=el("option",null,v);o.value=v;if(S.status.get(r.employeeKey)===v)o.selected=true;sel.appendChild(o);});sel.onchange=()=>{S.status.set(r.employeeKey,sel.value);renderSum();};rem.value=S.remarks.get(r.employeeKey)||"";rem.oninput=()=>S.remarks.set(r.employeeKey,rem.value);td3.appendChild(sel);td4.appendChild(rem);tr.append(td1,td2,td3,td4);tb.appendChild(tr);});t.append(thead,tb);w.appendChild(t);}
+  function counts(){const c={TOTAL:S.roster.length,PRESENT:0,ABSENT:0,LEAVE:0,OB:0,UNRECORDED:0};S.roster.forEach(r=>c[S.status.get(r.employeeKey)||"UNRECORDED"]++);return c;}
+  function renderSum(){const c=counts(),w=document.getElementById("acSummary");if(!w)return;w.innerHTML="";[["Total",c.TOTAL],["Present",c.PRESENT],["Absent",c.ABSENT],["Leave",c.LEAVE],["OB",c.OB],["Unrecorded",c.UNRECORDED]].forEach(a=>{const d=el("div","acStat"),s=el("span",null,a[0]),n=el("strong",null,String(a[1]));d.append(s,n);w.appendChild(d);});}
+  async function saveRoster(){if(!S.roster.length){message("Load personnel first.",true);return;}const p={date:document.getElementById("acDate").value,camp:document.getElementById("acCamp").value,office:document.getElementById("acOffice").value,dutyDetail:document.getElementById("acPreset").value,records:S.roster.map(r=>Object.assign({},r,{status:S.status.get(r.employeeKey)||"UNRECORDED",remarks:S.remarks.get(r.employeeKey)||""}))};try{message("Saving attendance...");const q=await call("saveAttendanceCenterSubmission",p);if(!q||!q.success)throw new Error(q&&q.message||"Save failed.");message(q.message+" Submission: "+q.submissionId);}catch(e){message(e.message,true);}}
+  function message(v,err){const m=document.getElementById("acMessage");if(m){m.textContent=v;m.style.color=err?"#a23f3f":"#607566";}}
+  window.AttendanceCenterPrototype={open:open,close:close,getState:()=>({roster:S.roster.slice(),counts:counts()})};
+})();
 
-  const BUTTON_ID = "attendanceCenterNavigationButton";
-  const FLOATING_ID = "attendanceCenterLaunch";
-
-  function normalizeText(value) {
-    return String(value || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-  }
-
-  function openAttendanceCenterFromNavigation() {
-    const attendance = window.AttendanceCenterPrototype;
-
-    if (attendance && typeof attendance.open === "function") {
-      attendance.open();
-      return;
-    }
-
-    console.warn("Attendance Center is still loading.");
-
-    window.setTimeout(() => {
-      const retry = window.AttendanceCenterPrototype;
-
-      if (retry && typeof retry.open === "function") {
-        retry.open();
-        return;
-      }
-
-      window.alert(
-        "Attendance Center could not be opened. Refresh the app and try again."
-      );
-    }, 250);
-  }
-
-  function removeFloatingAttendanceLauncher() {
-    const floatingButton = document.getElementById(FLOATING_ID);
-
-    if (floatingButton) {
-      floatingButton.remove();
-    }
-  }
-
-  function findNavigationReferenceButton() {
-    const buttons = [...document.querySelectorAll("button")];
-
-    return buttons.find(button => {
-      const text = normalizeText(button.textContent);
-      return text === "generated reports";
-    }) || buttons.find(button => {
-      const text = normalizeText(button.textContent);
-      return text === "transfer queue";
-    }) || buttons.find(button => {
-      const text = normalizeText(button.textContent);
-      return text === "table v2";
-    }) || null;
-  }
-
-  function ensureAttendanceNavigationButton() {
-    removeFloatingAttendanceLauncher();
-
-    if (document.getElementById(BUTTON_ID)) {
-      return true;
-    }
-
-    const referenceButton = findNavigationReferenceButton();
-
-    if (!referenceButton || !referenceButton.parentElement) {
-      return false;
-    }
-
-    const button = document.createElement("button");
-    button.id = BUTTON_ID;
-    button.type = "button";
-    button.className = referenceButton.className;
-    button.textContent = "Attendance Center";
-    button.title = "Open Attendance Center";
-    button.setAttribute("aria-label", "Open Attendance Center");
-    button.addEventListener("click", openAttendanceCenterFromNavigation);
-
-    referenceButton.insertAdjacentElement("afterend", button);
-    return true;
-  }
-
-  function startAttendanceNavigationInstaller() {
-    ensureAttendanceNavigationButton();
-
-    const observer = new MutationObserver(() => {
-      ensureAttendanceNavigationButton();
-    });
-
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-
-    window.setTimeout(ensureAttendanceNavigationButton, 0);
-    window.setTimeout(ensureAttendanceNavigationButton, 500);
-    window.setTimeout(ensureAttendanceNavigationButton, 1500);
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener(
-      "DOMContentLoaded",
-      startAttendanceNavigationInstaller,
-      { once: true }
-    );
-  } else {
-    startAttendanceNavigationInstaller();
-  }
+(function(){
+  "use strict";
+  const ID="attendanceCenterNavigationButton";
+  function find(){const bs=[...document.querySelectorAll("button")];return bs.find(b=>String(b.textContent||"").trim().toLowerCase()==="generated reports")||bs.find(b=>String(b.textContent||"").trim().toLowerCase()==="transfer queue")||bs.find(b=>String(b.textContent||"").trim().toLowerCase()==="table v2");}
+  function install(){if(document.getElementById(ID))return;const r=find();if(!r||!r.parentElement)return;const b=document.createElement("button");b.id=ID;b.type="button";b.className=r.className;b.textContent="Attendance Center";b.onclick=()=>window.AttendanceCenterPrototype.open();r.insertAdjacentElement("afterend",b);}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install,{once:true});else install();new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
 })();
