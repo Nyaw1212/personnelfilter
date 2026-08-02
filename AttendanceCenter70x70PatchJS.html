@@ -1,0 +1,63 @@
+(function () {
+  "use strict";
+
+  const STYLE_ID = "attendanceCenter70x70PatchStyles";
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      #attendanceCenterBackdrop .acw-grid {
+        width: max-content !important;
+        min-width: max-content !important;
+        table-layout: fixed !important;
+      }
+
+      #attendanceCenterBackdrop .acw-grid th:first-child,
+      #attendanceCenterBackdrop .acw-grid td:first-child {
+        width: 260px !important;
+        min-width: 260px !important;
+        max-width: 260px !important;
+      }
+
+      #attendanceCenterBackdrop .acw-grid th:not(:first-child),
+      #attendanceCenterBackdrop .acw-grid td:not(:first-child) {
+        box-sizing: border-box !important;
+        width: 70px !important;
+        min-width: 70px !important;
+        max-width: 70px !important;
+        height: 70px !important;
+        min-height: 70px !important;
+        max-height: 70px !important;
+        padding: 0 !important;
+        text-align: center !important;
+        vertical-align: middle !important;
+      }
+
+      #attendanceCenterBackdrop .acw-cell {
+        box-sizing: border-box !important;
+        width: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installStyles);
+  } else {
+    installStyles();
+  }
+})();
