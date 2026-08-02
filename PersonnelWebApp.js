@@ -24,9 +24,7 @@ function include(filename) {
   // <script> tags. Index currently includes it inside the main script
   // bundle, so return only its JavaScript body there.
   if (filename === "AttendanceCenterJS") {
-    return content
-      .replace(/^\s*<script(?:\s[^>]*)?>\s*/i, "")
-      .replace(/\s*<\/script>\s*$/i, "");
+    return stripOuterScriptTags_(content);
   }
 
   if (filename !== "AppJS") return content;
@@ -51,14 +49,26 @@ function include(filename) {
   ];
 
   sharedClientModules.forEach(function(moduleName) {
-    content += "\n" + HtmlService
+    const moduleContent = HtmlService
       .createHtmlOutputFromFile(moduleName)
       .getContent();
+
+    content += "\n" + stripOuterScriptTags_(moduleContent);
   });
 
   content += "\n</script>\n" + includePlatformBundle() + "\n<script>\n";
 
   return content;
+}
+
+//----------------------------------
+// Remove an optional outer script wrapper
+//----------------------------------
+
+function stripOuterScriptTags_(content) {
+  return String(content || "")
+    .replace(/^\s*<script(?:\s[^>]*)?>\s*/i, "")
+    .replace(/\s*<\/script>\s*$/i, "");
 }
 
 //----------------------------------
