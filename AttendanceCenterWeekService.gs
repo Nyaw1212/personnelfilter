@@ -6,6 +6,19 @@
 
 function loadAttendanceCenterWeek(request) {
   const startedAt = Date.now();
+  const timing = {
+    validateMs: 0,
+    sqlBuildMs: 0,
+    connectMs: 0,
+    prepareMs: 0,
+    bindMs: 0,
+    executeMs: 0,
+    readRowsMs: 0,
+    cleanupMs: 0,
+    totalMs: 0
+  };
+
+  const validateStartedAt = Date.now();
   const source = request && typeof request === "object" ? request : {};
   const weekStart = String(source.weekStart || "").trim();
   const weekEnd = String(source.weekEnd || "").trim();
@@ -20,7 +33,9 @@ function loadAttendanceCenterWeek(request) {
   }
   if (!camp) throw new Error("Select a camp.");
   if (!office) throw new Error("Select an office.");
+  timing.validateMs = Date.now() - validateStartedAt;
 
+  const sqlStartedAt = Date.now();
   const sql = [
     "SELECT id, personnel_uid, attendance_date::text AS attendance_date_text,",
     "full_name, rank, camp, office, status, remarks, created_by,",
@@ -31,28 +46,34 @@ function loadAttendanceCenterWeek(request) {
     "AND camp = ? AND office = ?",
     "ORDER BY attendance_date ASC, full_name ASC"
   ].join(" ");
+  timing.sqlBuildMs = Date.now() - sqlStartedAt;
 
   let connection;
   let statement;
   let resultSet;
   const records = [];
-  const connectStartedAt = Date.now();
-  let connectMs = 0;
-  let queryMs = 0;
 
   try {
+    const connectStartedAt = Date.now();
     connection = NeonService.openJdbcConnection_();
-    connectMs = Date.now() - connectStartedAt;
+    timing.connectMs = Date.now() - connectStartedAt;
 
+    const prepareStartedAt = Date.now();
     statement = connection.prepareStatement(sql);
+    timing.prepareMs = Date.now() - prepareStartedAt;
+
+    const bindStartedAt = Date.now();
     statement.setString(1, weekStart);
     statement.setString(2, weekEnd);
     statement.setString(3, camp);
     statement.setString(4, office);
+    timing.bindMs = Date.now() - bindStartedAt;
 
-    const queryStartedAt = Date.now();
+    const executeStartedAt = Date.now();
     resultSet = statement.executeQuery();
+    timing.executeMs = Date.now() - executeStartedAt;
 
+    const readStartedAt = Date.now();
     while (resultSet.next()) {
       records.push({
         attendanceId: resultSet.getLong("id"),
@@ -70,20 +91,28 @@ function loadAttendanceCenterWeek(request) {
         updatedAt: resultSet.getString("updated_at_text") || null
       });
     }
-    queryMs = Date.now() - queryStartedAt;
+    timing.readRowsMs = Date.now() - readStartedAt;
   } finally {
+    const cleanupStartedAt = Date.now();
     NeonService.closeQuietly_(resultSet);
     NeonService.closeQuietly_(statement);
     NeonService.closeQuietly_(connection);
+    timing.cleanupMs = Date.now() - cleanupStartedAt;
   }
 
-  const totalMs = Date.now() - startedAt;
+  timing.totalMs = Date.now() - startedAt;
   console.log(
-    "[PERF][Apps Script] loadAttendanceCenterWeek END total=%sms connect=%sms query=%sms rows=%s week=%s..%s camp=%s office=%s",
-    totalMs,
-    connectMs,
-    queryMs,
+    "[PERF][Neon Load] total=%sms rows=%s validate=%sms sqlBuild=%sms connect=%sms prepare=%sms bind=%sms execute=%sms readRows=%sms cleanup=%sms week=%s..%s camp=%s office=%s",
+    timing.totalMs,
     records.length,
+    timing.validateMs,
+    timing.sqlBuildMs,
+    timing.connectMs,
+    timing.prepareMs,
+    timing.bindMs,
+    timing.executeMs,
+    timing.readRowsMs,
+    timing.cleanupMs,
     weekStart,
     weekEnd,
     camp,
@@ -96,10 +125,6 @@ function loadAttendanceCenterWeek(request) {
     weekStart,
     weekEnd,
     records,
-    timing: {
-      totalMs,
-      connectMs,
-      queryMs
-    }
+    timing
   };
 }
