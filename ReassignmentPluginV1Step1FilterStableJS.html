@@ -1,0 +1,286 @@
+<script>
+// Reassignment V1 Step 1 filters — stable DOM extension.
+// Does not wrap or replace the native Reassignment renderer.
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const CONTROL_CLASS = "rp1-stable-filters";
+
+  const filterState = {
+    searchText: "",
+    ranks: new Set(),
+    locations: new Set(),
+    selectionMode: "ALL"
+  };
+
+  let refreshQueued = false;
+
+  const text = value => String(value == null ? "" : value).trim();
+  const norm = value => text(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function installStyles() {
+    if (document.getElementById("rp1StableFilterStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "rp1StableFilterStyles";
+    style.textContent = `
+      .${CONTROL_CLASS}{margin:0 0 10px;padding:10px;border:1px solid #d5e6d9;border-radius:12px;background:#f2f9f3}
+      .rp1-stable-filter-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+      .rp1-stable-filter-title{font-size:11px;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+      .rp1-stable-search{width:100%;min-height:74px;resize:vertical;box-sizing:border-box;border:1px solid #bfd5c5;border-radius:9px;padding:9px 10px;font:inherit;background:#fff}
+      .rp1-stable-section{margin-top:9px}
+      .rp1-stable-label{display:block;margin-bottom:5px;font-size:10px;font-weight:900;opacity:.72;text-transform:uppercase;letter-spacing:.05em}
+      .rp1-stable-chips{display:flex;flex-wrap:wrap;gap:5px;max-height:82px;overflow:auto}
+      .rp1-stable-chip{border:1px solid #bfd5c5;border-radius:999px;background:#fff;color:#173d23;padding:5px 9px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}
+      .rp1-stable-chip.active{background:#236b39;color:#fff;border-color:#236b39}
+      .rp1-stable-result{margin-top:7px;font-size:11px;color:#526c59}
+      .rp1-person.rp1-stable-hidden{display:none!important}
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  function getRoot() {
+    const root = document.getElementById(ROOT_ID);
+    return root && !root.hidden ? root : null;
+  }
+
+  function getStep1Panel() {
+    return getRoot()?.querySelector(".rp1-grid > .rp1-panel:first-child") || null;
+  }
+
+  function personnelRows(panel) {
+    return panel ? [...panel.querySelectorAll(".rp1-list .rp1-person")] : [];
+  }
+
+  function rowInfo(row) {
+    const name = text(row.querySelector(".rp1-person-name")?.textContent);
+    const location = text(row.querySelector(".rp1-person-sub")?.textContent) || "UNASSIGNED";
+    const checkbox = row.querySelector("[data-rp1-check]");
+
+    return {
+      row,
+      checkbox,
+      rank: name.split(/\s+/)[0] || "UNRANKED",
+      location,
+      haystack: norm(name + " " + location)
+    };
+  }
+
+  function unique(values) {
+    return [...new Set(values.map(text).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base"
+      }));
+  }
+
+  function searchTerms() {
+    return filterState.searchText
+      .split(/\r?\n/)
+      .map(norm)
+      .filter(Boolean);
+  }
+
+  function matches(info) {
+    const terms = searchTerms();
+    const checked = Boolean(info.checkbox?.checked);
+
+    return (!terms.length || terms.some(term => info.haystack.includes(term))) &&
+      (!filterState.ranks.size || filterState.ranks.has(norm(info.rank))) &&
+      (!filterState.locations.size || filterState.locations.has(norm(info.location))) &&
+      (filterState.selectionMode === "ALL" ||
+        (filterState.selectionMode === "SELECTED" && checked) ||
+        (filterState.selectionMode === "UNSELECTED" && !checked));
+  }
+
+  function chip(label, type, value, active) {
+    return `<button type="button" class="rp1-stable-chip${active ? " active" : ""}" data-rp1-stable-filter="${type}" data-rp1-stable-value="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+  }
+
+  function controlsMarkup(rows) {
+    const info = rows.map(rowInfo);
+    const ranks = unique(info.map(item => item.rank));
+    const locations = unique(info.map(item => item.location));
+
+    return `
+      <div class="rp1-stable-filter-head">
+        <span class="rp1-stable-filter-title">Personnel Filters</span>
+        <button type="button" class="rp1-btn" data-rp1-stable-clear>Clear Filters</button>
+      </div>
+      <textarea class="rp1-stable-search" data-rp1-stable-search placeholder="Paste one personnel name per line..."></textarea>
+      <div class="rp1-stable-section">
+        <span class="rp1-stable-label">Rank</span>
+        <div class="rp1-stable-chips">
+          ${chip("All", "rank-all", "ALL", !filterState.ranks.size)}
+          ${ranks.map(value => chip(value, "rank", norm(value), filterState.ranks.has(norm(value)))).join("")}
+        </div>
+      </div>
+      <div class="rp1-stable-section">
+        <span class="rp1-stable-label">Current Location</span>
+        <div class="rp1-stable-chips">
+          ${chip("All", "location-all", "ALL", !filterState.locations.size)}
+          ${locations.map(value => chip(value, "location", norm(value), filterState.locations.has(norm(value)))).join("")}
+        </div>
+      </div>
+      <div class="rp1-stable-section">
+        <span class="rp1-stable-label">Selection</span>
+        <div class="rp1-stable-chips">
+          ${chip("All", "selection", "ALL", filterState.selectionMode === "ALL")}
+          ${chip("Selected", "selection", "SELECTED", filterState.selectionMode === "SELECTED")}
+          ${chip("Unselected", "selection", "UNSELECTED", filterState.selectionMode === "UNSELECTED")}
+        </div>
+      </div>
+      <div class="rp1-stable-result" data-rp1-stable-result></div>`;
+  }
+
+  function ensureControls() {
+    const panel = getStep1Panel();
+    if (!panel) return;
+
+    const rows = personnelRows(panel);
+    let controls = panel.querySelector("." + CONTROL_CLASS);
+
+    if (!controls) {
+      controls = document.createElement("div");
+      controls.className = CONTROL_CLASS;
+      controls.innerHTML = controlsMarkup(rows);
+
+      const toolbar = panel.querySelector(".rp1-toolbar");
+      panel.insertBefore(controls, toolbar || panel.querySelector(".rp1-list"));
+    }
+
+    const search = controls.querySelector("[data-rp1-stable-search]");
+    if (search && search.value !== filterState.searchText) {
+      search.value = filterState.searchText;
+    }
+
+    applyFilters(panel);
+  }
+
+  function rebuildControls() {
+    const panel = getStep1Panel();
+    if (!panel) return;
+
+    const old = panel.querySelector("." + CONTROL_CLASS);
+    if (old) old.remove();
+    ensureControls();
+  }
+
+  function applyFilters(panel = getStep1Panel()) {
+    if (!panel) return;
+
+    const rows = personnelRows(panel);
+    let visible = 0;
+
+    rows.forEach(row => {
+      const show = matches(rowInfo(row));
+      row.classList.toggle("rp1-stable-hidden", !show);
+      if (show) visible++;
+    });
+
+    const result = panel.querySelector("[data-rp1-stable-result]");
+    if (result) result.textContent = visible + " visible of " + rows.length + " unassigned";
+
+    const count = panel.querySelector("h2 small");
+    if (count) count.textContent = visible + " / " + rows.length;
+  }
+
+  function toggleSet(set, value) {
+    set.has(value) ? set.delete(value) : set.add(value);
+  }
+
+  function queueRefresh() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+
+    requestAnimationFrame(() => {
+      refreshQueued = false;
+      ensureControls();
+    });
+  }
+
+  document.addEventListener("input", event => {
+    const search = event.target.closest?.("[data-rp1-stable-search]");
+    if (!search) return;
+
+    filterState.searchText = search.value;
+    applyFilters();
+  });
+
+  document.addEventListener("click", event => {
+    if (!event.target.closest?.("#" + ROOT_ID)) return;
+
+    const clear = event.target.closest("[data-rp1-stable-clear]");
+    if (clear) {
+      event.preventDefault();
+      filterState.searchText = "";
+      filterState.ranks.clear();
+      filterState.locations.clear();
+      filterState.selectionMode = "ALL";
+      rebuildControls();
+      return;
+    }
+
+    const button = event.target.closest("[data-rp1-stable-filter]");
+    if (!button) return;
+
+    event.preventDefault();
+    const type = button.dataset.rp1StableFilter;
+    const value = button.dataset.rp1StableValue;
+
+    if (type === "rank-all") filterState.ranks.clear();
+    else if (type === "location-all") filterState.locations.clear();
+    else if (type === "rank") toggleSet(filterState.ranks, value);
+    else if (type === "location") toggleSet(filterState.locations, value);
+    else if (type === "selection") filterState.selectionMode = value;
+
+    rebuildControls();
+  });
+
+  const observer = new MutationObserver(mutations => {
+    const root = getRoot();
+    if (!root) return;
+
+    const workspaceChanged = mutations.some(mutation => {
+      const target = mutation.target instanceof Element
+        ? mutation.target
+        : mutation.target.parentElement;
+
+      return target && target.closest?.("#" + ROOT_ID) &&
+        !target.closest?.("." + CONTROL_CLASS);
+    });
+
+    if (workspaceChanged) queueRefresh();
+  });
+
+  function start() {
+    installStyles();
+    observer.observe(document.body, { childList: true, subtree: true });
+    queueRefresh();
+    console.info("Reassignment V1 stable Step 1 filters active.");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
