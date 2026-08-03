@@ -102,7 +102,8 @@ function includePlatformBundle() {
     "PlatformUIControlBridgeFixJS",
     "PlatformKeyboardEngineJS",
     "PlatformGlassGreenThemeJS",
-    "ReassignmentPluginV1Step1FilterStableJS"
+    "ReassignmentPluginV1Step1FilterStableJS",
+    "ReassignmentVisibleSelectionJS"
   ];
 
   return platformModules.map(function(moduleName) {
