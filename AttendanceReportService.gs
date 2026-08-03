@@ -1,5 +1,5 @@
 // ----------------------------------
-// Attendance Reports — Neon PostgreSQL
+// Attendance Reports — Neon JSON Engine
 // Read-only daily office detail + all-office summary
 // ----------------------------------
 
@@ -15,7 +15,7 @@ function getAttendanceDailyReport(request) {
 
   const empty = {
     success: true,
-    dataSource: "NEON_POSTGRESQL",
+    dataSource: "NEON_JSON_ENGINE",
     date: dateText,
     camps: [],
     selectedCamp: requestedCamp,
@@ -25,8 +25,12 @@ function getAttendanceDailyReport(request) {
     grandTotal: attendanceReportEmptyCounts_()
   };
 
-  const rows = getAttendanceReportRowsFromNeon_(dateText, requestedCamp);
-  if (!rows.length) return empty;
+  const reportQuery = getAttendanceReportRowsFromNeon_(dateText, requestedCamp);
+  const rows = reportQuery.rows;
+  if (!rows.length) {
+    empty.timing = reportQuery.timing;
+    return empty;
+  }
 
   const camps = Array.from(
     new Set(rows.map(row => row.camp).filter(Boolean))
@@ -99,7 +103,7 @@ function getAttendanceDailyReport(request) {
 
   return {
     success: true,
-    dataSource: "NEON_POSTGRESQL",
+    dataSource: "NEON_JSON_ENGINE",
     date: dateText,
     camps,
     selectedCamp: filteredRows.length
@@ -108,57 +112,47 @@ function getAttendanceDailyReport(request) {
     selectedOffice,
     offices,
     detailsByOffice,
-    grandTotal
+    grandTotal,
+    timing: reportQuery.timing
   };
 }
 
 function getAttendanceReportRowsFromNeon_(dateText, requestedCamp) {
   const clauses = ["attendance_date = CAST(? AS DATE)"];
-  const values = [dateText];
+  const params = [dateText];
 
   if (requestedCamp) {
     clauses.push("UPPER(TRIM(camp)) = ?");
-    values.push(requestedCamp);
+    params.push(requestedCamp);
   }
 
   const sql = [
-    "SELECT personnel_uid, full_name, COALESCE(rank, '') AS rank,",
-    "camp, office, status",
+    "SELECT COALESCE(json_agg(row_to_json(q)), '[]'::json)::text AS payload",
+    "FROM (",
+    "SELECT",
+    "personnel_uid AS \"employeeKey\",",
+    "COALESCE(full_name, '') AS \"fullName\",",
+    "COALESCE(rank, '') AS rank,",
+    "COALESCE(camp, '') AS camp,",
+    "COALESCE(office, '') AS office,",
+    "COALESCE(status, 'UNRECORDED') AS status",
     "FROM public.attendance",
     "WHERE " + clauses.join(" AND "),
-    "ORDER BY office ASC, rank ASC, full_name ASC"
+    "ORDER BY office ASC, rank ASC, full_name ASC",
+    ") q"
   ].join(" ");
 
-  let connection;
-  let statement;
-  let resultSet;
-  const rows = [];
+  const result = NeonJsonEngine.queryJson({
+    name: "AttendanceDailyReport",
+    sql,
+    params,
+    defaultValue: []
+  });
 
-  try {
-    connection = NeonService.openJdbcConnection_();
-    statement = connection.prepareStatement(sql);
-    values.forEach((value, index) => {
-      statement.setString(index + 1, String(value));
-    });
-    resultSet = statement.executeQuery();
-
-    while (resultSet.next()) {
-      rows.push({
-        employeeKey: resultSet.getString("personnel_uid"),
-        fullName: resultSet.getString("full_name") || "",
-        rank: resultSet.getString("rank") || "",
-        camp: resultSet.getString("camp") || "",
-        office: resultSet.getString("office") || "",
-        status: resultSet.getString("status") || "UNRECORDED"
-      });
-    }
-
-    return rows;
-  } finally {
-    NeonService.closeQuietly_(resultSet);
-    NeonService.closeQuietly_(statement);
-    NeonService.closeQuietly_(connection);
-  }
+  return {
+    rows: Array.isArray(result.data) ? result.data : [],
+    timing: result.timing
+  };
 }
 
 function attendanceReportDisplayName_(rank, fullName) {
