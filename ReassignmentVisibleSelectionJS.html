@@ -1,0 +1,63 @@
+<script>
+// Reassignment V1 — make Step 1 Select All / Clear act on visible rows only.
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
+  const platform = window.PersonnelPlatform;
+  const assignment = platform?.engines?.get?.("assignmentCore");
+
+  if (!platform || !assignment) return;
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function visibleRows(root) {
+    const panel = root.querySelector(".rp1-grid > .rp1-panel:first-child");
+    if (!panel) return [];
+
+    return [...panel.querySelectorAll(".rp1-list .rp1-person")].filter(row => {
+      if (row.hidden || row.classList.contains("rp1-stable-hidden")) return false;
+      return window.getComputedStyle(row).display !== "none";
+    });
+  }
+
+  function updateVisibleSelection(root, shouldSelect) {
+    const current = assignment.get(SCOPE);
+    const selected = new Set(current.selectedKeys || []);
+
+    visibleRows(root).forEach(row => {
+      const checkbox = row.querySelector("[data-rp1-check]");
+      const key = text(checkbox?.dataset.rp1Check);
+      if (!key) return;
+
+      const isSelected = selected.has(key);
+      if (isSelected !== shouldSelect) {
+        assignment.toggleSelection(SCOPE, key);
+        shouldSelect ? selected.add(key) : selected.delete(key);
+      }
+    });
+
+    window.$PF?.reassignmentV1?.render?.();
+  }
+
+  document.addEventListener("click", event => {
+    const root = event.target.closest?.("#" + ROOT_ID);
+    if (!root) return;
+
+    const actionButton = event.target.closest("[data-rp1]");
+    const action = actionButton?.dataset.rp1;
+    if (action !== "select-all" && action !== "clear-selection") return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    updateVisibleSelection(root, action === "select-all");
+  }, true);
+
+  console.info("Reassignment V1 visible-only selection active.");
+})();
+</script>
