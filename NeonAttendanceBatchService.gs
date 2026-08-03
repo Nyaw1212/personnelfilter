@@ -1,12 +1,11 @@
 // ==================================
-// Neon attendance high-speed save service
+// Neon attendance JSON save service
 // ==================================
-// Saves a complete attendance payload with one multi-row UPSERT per chunk,
-// using one JDBC connection and one database transaction.
+// Sends the complete attendance payload as one JSON parameter and lets
+// PostgreSQL expand it with jsonb_to_recordset(). This avoids thousands of
+// slow Apps Script JDBC setter calls.
 
 const NeonAttendanceBatchService = Object.freeze({
-  MAX_ROWS_PER_STATEMENT: 500,
-
   validateRow_(record) {
     const row = record || {};
     const required = [
@@ -28,18 +27,22 @@ const NeonAttendanceBatchService = Object.freeze({
     return row;
   },
 
-  buildSql_(rowCount) {
-    const valueGroups = Array.from(
-      { length: rowCount },
-      () => "(?, CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?)"
-    ).join(", ");
-
+  buildSql_() {
     return [
+      "WITH source_rows AS (",
+      "SELECT * FROM jsonb_to_recordset(CAST(? AS jsonb)) AS x(",
+      "personnel_uid text, attendance_date text, full_name text, rank text,",
+      "camp text, office text, status text, remarks text, created_by text",
+      ")",
+      ")",
       "INSERT INTO public.attendance (",
       "personnel_uid, attendance_date, full_name, rank, camp, office,",
       "status, remarks, created_by",
-      ") VALUES",
-      valueGroups,
+      ")",
+      "SELECT",
+      "personnel_uid, CAST(attendance_date AS date), full_name, rank, camp,",
+      "office, status, remarks, created_by",
+      "FROM source_rows",
       "ON CONFLICT (personnel_uid, attendance_date) DO UPDATE SET",
       "full_name = EXCLUDED.full_name,",
       "rank = EXCLUDED.rank,",
@@ -52,38 +55,11 @@ const NeonAttendanceBatchService = Object.freeze({
     ].join(" ");
   },
 
-  bindRows_(statement, rows) {
-    let parameter = 1;
-
-    rows.forEach(row => {
-      statement.setString(parameter++, String(row.personnel_uid));
-      statement.setString(parameter++, String(row.attendance_date));
-      statement.setString(parameter++, String(row.full_name));
-
-      if (row.rank == null || String(row.rank).trim() === "") {
-        statement.setNull(parameter++, Jdbc.TYPE_VARCHAR);
-      } else {
-        statement.setString(parameter++, String(row.rank));
-      }
-
-      statement.setString(parameter++, String(row.camp));
-      statement.setString(parameter++, String(row.office));
-      statement.setString(parameter++, String(row.status));
-
-      if (row.remarks == null || String(row.remarks).trim() === "") {
-        statement.setNull(parameter++, Jdbc.TYPE_VARCHAR);
-      } else {
-        statement.setString(parameter++, String(row.remarks));
-      }
-
-      statement.setString(parameter++, String(row.created_by));
-    });
-  },
-
   save(rows) {
     const startedAt = Date.now();
     const timing = {
       validateMs: 0,
+      jsonBuildMs: 0,
       connectMs: 0,
       transactionSetupMs: 0,
       sqlBuildMs: 0,
@@ -93,8 +69,8 @@ const NeonAttendanceBatchService = Object.freeze({
       commitMs: 0,
       cleanupMs: 0,
       totalMs: 0,
-      chunks: 0,
-      rows: 0
+      rows: 0,
+      payloadBytes: 0
     };
 
     const validateStartedAt = Date.now();
@@ -104,6 +80,11 @@ const NeonAttendanceBatchService = Object.freeze({
     timing.rows = payload.length;
 
     if (!payload.length) return [];
+
+    const jsonStartedAt = Date.now();
+    const jsonPayload = JSON.stringify(payload);
+    timing.jsonBuildMs = Date.now() - jsonStartedAt;
+    timing.payloadBytes = jsonPayload.length;
 
     let connection;
     let statement;
@@ -117,36 +98,21 @@ const NeonAttendanceBatchService = Object.freeze({
       connection.setAutoCommit(false);
       timing.transactionSetupMs = Date.now() - transactionStartedAt;
 
-      for (
-        let start = 0;
-        start < payload.length;
-        start += this.MAX_ROWS_PER_STATEMENT
-      ) {
-        timing.chunks++;
-        const chunk = payload.slice(
-          start,
-          start + this.MAX_ROWS_PER_STATEMENT
-        );
+      const sqlStartedAt = Date.now();
+      const sql = this.buildSql_();
+      timing.sqlBuildMs = Date.now() - sqlStartedAt;
 
-        const sqlStartedAt = Date.now();
-        const sql = this.buildSql_(chunk.length);
-        timing.sqlBuildMs += Date.now() - sqlStartedAt;
+      const prepareStartedAt = Date.now();
+      statement = connection.prepareStatement(sql);
+      timing.prepareMs = Date.now() - prepareStartedAt;
 
-        const prepareStartedAt = Date.now();
-        statement = connection.prepareStatement(sql);
-        timing.prepareMs += Date.now() - prepareStartedAt;
+      const bindStartedAt = Date.now();
+      statement.setString(1, jsonPayload);
+      timing.bindMs = Date.now() - bindStartedAt;
 
-        const bindStartedAt = Date.now();
-        this.bindRows_(statement, chunk);
-        timing.bindMs += Date.now() - bindStartedAt;
-
-        const executeStartedAt = Date.now();
-        statement.executeUpdate();
-        timing.executeMs += Date.now() - executeStartedAt;
-
-        NeonService.closeQuietly_(statement);
-        statement = null;
-      }
+      const executeStartedAt = Date.now();
+      statement.executeUpdate();
+      timing.executeMs = Date.now() - executeStartedAt;
 
       const commitStartedAt = Date.now();
       connection.commit();
@@ -163,7 +129,7 @@ const NeonAttendanceBatchService = Object.freeze({
           connection.rollback();
         } catch (rollbackError) {
           console.error(
-            "Neon multi-row rollback failed: " +
+            "Neon JSON save rollback failed: " +
             (rollbackError && rollbackError.message
               ? rollbackError.message
               : String(rollbackError))
@@ -172,7 +138,7 @@ const NeonAttendanceBatchService = Object.freeze({
       }
 
       throw new Error(
-        "Neon attendance save failed; transaction rolled back: " +
+        "Neon attendance JSON save failed; transaction rolled back: " +
         (error && error.message ? error.message : String(error))
       );
     } finally {
@@ -188,11 +154,12 @@ const NeonAttendanceBatchService = Object.freeze({
       timing.totalMs = Date.now() - startedAt;
 
       console.log(
-        "[PERF][Neon Save] total=%sms rows=%s chunks=%s validate=%sms connect=%sms txSetup=%sms sqlBuild=%sms prepare=%sms bind=%sms execute=%sms commit=%sms cleanup=%sms",
+        "[PERF][Neon Save JSON] total=%sms rows=%s payloadBytes=%s validate=%sms jsonBuild=%sms connect=%sms txSetup=%sms sqlBuild=%sms prepare=%sms bind=%sms execute=%sms commit=%sms cleanup=%sms",
         timing.totalMs,
         timing.rows,
-        timing.chunks,
+        timing.payloadBytes,
         timing.validateMs,
+        timing.jsonBuildMs,
         timing.connectMs,
         timing.transactionSetupMs,
         timing.sqlBuildMs,
