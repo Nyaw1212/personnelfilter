@@ -59,11 +59,7 @@ const NeonService = Object.freeze({
 
   openJdbcConnection_() {
     const config = this.getJdbcConfig_();
-    return Jdbc.getConnection(
-      config.jdbcUrl,
-      config.user,
-      config.password
-    );
+    return Jdbc.getConnection(config.jdbcUrl, config.user, config.password);
   },
 
   closeQuietly_(resource) {
@@ -89,16 +85,13 @@ const NeonService = Object.freeze({
         config.port,
         config.database
       );
-
       connection = this.openJdbcConnection_();
-
       const result = {
         success: true,
         message: "Connected to Neon successfully.",
         catalog: connection.getCatalog(),
         autoCommit: connection.getAutoCommit()
       };
-
       console.log(JSON.stringify(result, null, 2));
       return result;
     } catch (error) {
@@ -110,16 +103,29 @@ const NeonService = Object.freeze({
     }
   },
 
+  mapAttendanceRow_(resultSet) {
+    return {
+      id: resultSet.getLong("id"),
+      personnel_uid: resultSet.getString("personnel_uid"),
+      attendance_date: resultSet.getString("attendance_date_text"),
+      full_name: resultSet.getString("full_name"),
+      rank: resultSet.getString("rank"),
+      camp: resultSet.getString("camp"),
+      office: resultSet.getString("office"),
+      status: resultSet.getString("status"),
+      remarks: resultSet.getString("remarks"),
+      created_by: resultSet.getString("created_by"),
+      created_at: resultSet.getString("created_at_text"),
+      updated_by: resultSet.getString("updated_by"),
+      updated_at: resultSet.getString("updated_at_text") || null
+    };
+  },
+
   insertAttendanceJdbc(record) {
     const row = record || {};
     const required = [
-      "personnel_uid",
-      "attendance_date",
-      "full_name",
-      "camp",
-      "office",
-      "status",
-      "created_by"
+      "personnel_uid", "attendance_date", "full_name", "camp", "office",
+      "status", "created_by"
     ];
 
     required.forEach(field => {
@@ -133,8 +139,10 @@ const NeonService = Object.freeze({
       "personnel_uid, attendance_date, full_name, rank, camp, office,",
       "status, remarks, created_by",
       ") VALUES (?, CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?)",
-      "RETURNING id, personnel_uid, attendance_date, full_name, rank,",
-      "camp, office, status, remarks, created_by, created_at"
+      "RETURNING id, personnel_uid, attendance_date::text AS attendance_date_text,",
+      "full_name, rank, camp, office, status, remarks, created_by,",
+      "created_at::text AS created_at_text, updated_by,",
+      "updated_at::text AS updated_at_text"
     ].join(" ");
 
     let connection;
@@ -147,43 +155,25 @@ const NeonService = Object.freeze({
       statement.setString(1, String(row.personnel_uid));
       statement.setString(2, String(row.attendance_date));
       statement.setString(3, String(row.full_name));
-
       if (row.rank == null || String(row.rank).trim() === "") {
         statement.setNull(4, Jdbc.TYPE_VARCHAR);
       } else {
         statement.setString(4, String(row.rank));
       }
-
       statement.setString(5, String(row.camp));
       statement.setString(6, String(row.office));
       statement.setString(7, String(row.status));
-
       if (row.remarks == null || String(row.remarks).trim() === "") {
         statement.setNull(8, Jdbc.TYPE_VARCHAR);
       } else {
         statement.setString(8, String(row.remarks));
       }
-
       statement.setString(9, String(row.created_by));
       resultSet = statement.executeQuery();
-
       if (!resultSet.next()) {
         throw new Error("Neon insert completed without returning a row.");
       }
-
-      return {
-        id: resultSet.getLong("id"),
-        personnel_uid: resultSet.getString("personnel_uid"),
-        attendance_date: String(resultSet.getDate("attendance_date")),
-        full_name: resultSet.getString("full_name"),
-        rank: resultSet.getString("rank"),
-        camp: resultSet.getString("camp"),
-        office: resultSet.getString("office"),
-        status: resultSet.getString("status"),
-        remarks: resultSet.getString("remarks"),
-        created_by: resultSet.getString("created_by"),
-        created_at: String(resultSet.getTimestamp("created_at"))
-      };
+      return this.mapAttendanceRow_(resultSet);
     } finally {
       this.closeQuietly_(resultSet);
       this.closeQuietly_(statement);
@@ -191,8 +181,6 @@ const NeonService = Object.freeze({
     }
   },
 
-  // Phase 2.2 public write method. Multiple rows are currently inserted one at
-  // a time; Phase 2.3 will replace this with one transaction/batch operation.
   insertAttendance(rows) {
     const payload = Array.isArray(rows) ? rows : [rows];
     if (!payload.length) return [];
@@ -216,10 +204,16 @@ const NeonService = Object.freeze({
       clauses.push("office = ?");
       values.push(String(params.office));
     }
+    if (params.personnelUid) {
+      clauses.push("personnel_uid = ?");
+      values.push(String(params.personnelUid));
+    }
 
     const sql = [
-      "SELECT id, personnel_uid, attendance_date, full_name, rank, camp,",
-      "office, status, remarks, created_by, created_at, updated_by, updated_at",
+      "SELECT id, personnel_uid, attendance_date::text AS attendance_date_text,",
+      "full_name, rank, camp, office, status, remarks, created_by,",
+      "created_at::text AS created_at_text, updated_by,",
+      "updated_at::text AS updated_at_text",
       "FROM public.attendance",
       clauses.length ? "WHERE " + clauses.join(" AND ") : "",
       "ORDER BY attendance_date DESC, full_name ASC"
@@ -235,26 +229,7 @@ const NeonService = Object.freeze({
       statement = connection.prepareStatement(sql);
       values.forEach((value, index) => statement.setString(index + 1, value));
       resultSet = statement.executeQuery();
-
-      while (resultSet.next()) {
-        const updatedAt = resultSet.getTimestamp("updated_at");
-        rows.push({
-          id: resultSet.getLong("id"),
-          personnel_uid: resultSet.getString("personnel_uid"),
-          attendance_date: String(resultSet.getDate("attendance_date")),
-          full_name: resultSet.getString("full_name"),
-          rank: resultSet.getString("rank"),
-          camp: resultSet.getString("camp"),
-          office: resultSet.getString("office"),
-          status: resultSet.getString("status"),
-          remarks: resultSet.getString("remarks"),
-          created_by: resultSet.getString("created_by"),
-          created_at: String(resultSet.getTimestamp("created_at")),
-          updated_by: resultSet.getString("updated_by"),
-          updated_at: updatedAt ? String(updatedAt) : null
-        });
-      }
-
+      while (resultSet.next()) rows.push(this.mapAttendanceRow_(resultSet));
       return rows;
     } finally {
       this.closeQuietly_(resultSet);
@@ -270,12 +245,11 @@ const NeonService = Object.freeze({
   getAttendanceAuditByAttendanceIdJdbc(attendanceId) {
     const sql = [
       "SELECT audit_id, attendance_id, action, personnel_uid,",
-      "attendance_date, new_full_name, new_office, new_status,",
-      "changed_by, changed_at",
+      "attendance_date::text AS attendance_date_text, new_full_name,",
+      "new_office, new_status, changed_by, changed_at::text AS changed_at_text",
       "FROM public.attendance_audit",
       "WHERE attendance_id = ?",
-      "ORDER BY audit_id DESC",
-      "LIMIT 1"
+      "ORDER BY audit_id DESC LIMIT 1"
     ].join(" ");
 
     let connection;
@@ -287,20 +261,18 @@ const NeonService = Object.freeze({
       statement = connection.prepareStatement(sql);
       statement.setLong(1, Number(attendanceId));
       resultSet = statement.executeQuery();
-
       if (!resultSet.next()) return null;
-
       return {
         audit_id: resultSet.getLong("audit_id"),
         attendance_id: resultSet.getLong("attendance_id"),
         action: resultSet.getString("action"),
         personnel_uid: resultSet.getString("personnel_uid"),
-        attendance_date: String(resultSet.getDate("attendance_date")),
+        attendance_date: resultSet.getString("attendance_date_text"),
         full_name: resultSet.getString("new_full_name"),
         office: resultSet.getString("new_office"),
         status: resultSet.getString("new_status"),
         changed_by: resultSet.getString("changed_by"),
-        changed_at: String(resultSet.getTimestamp("changed_at"))
+        changed_at: resultSet.getString("changed_at_text")
       };
     } finally {
       this.closeQuietly_(resultSet);
@@ -309,7 +281,6 @@ const NeonService = Object.freeze({
     }
   },
 
-  // Temporary Data API helper retained for rollback/testing only.
   request_(path, options) {
     const config = this.getConfig_();
     const cleanPath = String(path || "").replace(/^\/+/, "");
@@ -317,9 +288,7 @@ const NeonService = Object.freeze({
       { Accept: "application/json" },
       options && options.headers ? options.headers : {}
     );
-
     if (config.token) headers.Authorization = "Bearer " + config.token;
-
     const requestOptions = Object.assign(
       {
         method: "get",
@@ -330,7 +299,6 @@ const NeonService = Object.freeze({
       options || {},
       { headers }
     );
-
     const response = UrlFetchApp.fetch(
       config.apiUrl + "/" + cleanPath,
       requestOptions
@@ -338,14 +306,12 @@ const NeonService = Object.freeze({
     const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
     const body = ServerUtils.parseJsonSafely(responseText);
-
     if (statusCode < 200 || statusCode >= 300) {
       throw new Error(
         "Neon Data API request failed (" + statusCode + "): " +
         (typeof body === "string" ? body : JSON.stringify(body))
       );
     }
-
     return body;
   }
 });
@@ -367,7 +333,6 @@ function testInsertAttendanceViaJdbc() {
     "yyyy-MM-dd"
   );
   const email = Session.getActiveUser().getEmail() || "apps-script-test";
-
   const inserted = NeonService.insertAttendanceJdbc({
     personnel_uid: "PHASE2-JDBC-" + suffix,
     attendance_date: attendanceDate,
@@ -379,7 +344,6 @@ function testInsertAttendanceViaJdbc() {
     remarks: "Phase 2.1 JDBC insert test",
     created_by: email
   });
-
   const audit = NeonService.getAttendanceAuditByAttendanceIdJdbc(inserted.id);
   const result = {
     success: true,
@@ -388,7 +352,6 @@ function testInsertAttendanceViaJdbc() {
     audit,
     auditVerified: Boolean(audit && audit.action === "INSERT")
   };
-
   console.log(JSON.stringify(result, null, 2));
   return result;
 }
