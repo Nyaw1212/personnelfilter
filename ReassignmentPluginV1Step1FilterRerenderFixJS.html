@@ -1,0 +1,53 @@
+<script>
+// Reassignment V1 Step 1 filter rerender bridge
+// The base plugin uses its private render() function for mode, destination,
+// assignment, undo/redo, and checkbox changes. Those renders bypass the
+// public render wrapper installed by the filter adapter. Re-run the public
+// render once after those actions so the filter UI is restored.
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  let refreshQueued = false;
+
+  function queueFilteredRender() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+
+    setTimeout(() => {
+      refreshQueued = false;
+      const root = document.getElementById(ROOT_ID);
+      const plugin = window.$PF?.reassignmentV1;
+      if (!root || root.hidden || !plugin?.render) return;
+      plugin.render();
+    }, 0);
+  }
+
+  document.addEventListener("click", event => {
+    const root = event.target.closest?.("#" + ROOT_ID);
+    if (!root) return;
+
+    // Filter controls manage their own UI and must not trigger a workspace render.
+    if (event.target.closest(".rp1-step1-filter")) return;
+
+    const causesBaseRender = event.target.closest([
+      "[data-rp1-mode]",
+      "[data-rp1-destination]",
+      "[data-rp1-remove]",
+      "[data-rp1='assign']",
+      "[data-rp1='undo']",
+      "[data-rp1='redo']",
+      "[data-rp1='clear-all']"
+    ].join(","));
+
+    if (causesBaseRender) queueFilteredRender();
+  }, true);
+
+  document.addEventListener("change", event => {
+    if (!event.target.closest?.("#" + ROOT_ID)) return;
+    if (event.target.matches?.("[data-rp1-check]")) queueFilteredRender();
+  }, true);
+
+  console.info("Reassignment V1 Step 1 filter rerender bridge active.");
+})();
+</script>
