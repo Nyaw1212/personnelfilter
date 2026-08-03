@@ -101,7 +101,8 @@ function includePlatformBundle() {
     "PlatformReportLauncherUXJS",
     "PlatformUIControlBridgeFixJS",
     "PlatformKeyboardEngineJS",
-    "PlatformGlassGreenThemeJS"
+    "PlatformGlassGreenThemeJS",
+    "ReassignmentPluginV1Step1FilterStableJS"
   ];
 
   return platformModules.map(function(moduleName) {
