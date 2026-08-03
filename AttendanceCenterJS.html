@@ -182,17 +182,29 @@
 
     message("Loading saved attendance for " + office + "...");
     try {
-      const savedDays = await Promise.all(state.week.map(day => server("loadAttendanceCenterRecords", { date: iso(day), camp, office })));
-      savedDays.forEach((response, index) => {
-        const dateText = iso(state.week[index]);
-        (response && response.records || []).forEach(record => {
-          const cellKey = key(String(record.employeeKey), dateText);
-          if (state.cells.has(cellKey)) state.cells.set(cellKey, norm(record.status) || "UNRECORDED");
-        });
+      const response = await server("loadAttendanceCenterWeek", {
+        weekStart: iso(state.week[0]),
+        weekEnd: iso(state.week[6]),
+        camp,
+        office
       });
+
+      (response && response.records || []).forEach(record => {
+        const dateText = String(record.attendanceDate || "");
+        const cellKey = key(String(record.employeeKey || ""), dateText);
+        if (state.cells.has(cellKey)) {
+          state.cells.set(cellKey, norm(record.status) || "UNRECORDED");
+        }
+      });
+
       render();
       renderSummary();
-      message(state.roster.length + " personnel loaded for " + office + ".");
+
+      const timing = response && response.timing;
+      const timingText = timing
+        ? " Loaded in " + (Number(timing.totalMs || 0) / 1000).toFixed(2) + "s."
+        : "";
+      message(state.roster.length + " personnel loaded for " + office + "." + timingText);
     } catch (error) {
       render();
       renderSummary();
