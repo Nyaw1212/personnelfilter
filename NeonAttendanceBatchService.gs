@@ -1,10 +1,12 @@
 // ==================================
-// Neon attendance batch service
+// Neon attendance high-speed save service
 // ==================================
-// Phase 2.3: saves many attendance snapshots using one JDBC connection,
-// one prepared statement, and one database transaction.
+// Saves a complete attendance payload with one multi-row UPSERT per chunk,
+// using one JDBC connection and one database transaction.
 
 const NeonAttendanceBatchService = Object.freeze({
+  MAX_ROWS_PER_STATEMENT: 500,
+
   validateRow_(record) {
     const row = record || {};
     const required = [
@@ -26,29 +28,56 @@ const NeonAttendanceBatchService = Object.freeze({
     return row;
   },
 
-  bindRow_(statement, row) {
-    statement.setString(1, String(row.personnel_uid));
-    statement.setString(2, String(row.attendance_date));
-    statement.setString(3, String(row.full_name));
+  buildSql_(rowCount) {
+    const valueGroups = Array.from(
+      { length: rowCount },
+      () => "(?, CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?)"
+    ).join(", ");
 
-    if (row.rank == null || String(row.rank).trim() === "") {
-      statement.setNull(4, Jdbc.TYPE_VARCHAR);
-    } else {
-      statement.setString(4, String(row.rank));
-    }
+    return [
+      "INSERT INTO public.attendance (",
+      "personnel_uid, attendance_date, full_name, rank, camp, office,",
+      "status, remarks, created_by",
+      ") VALUES",
+      valueGroups,
+      "ON CONFLICT (personnel_uid, attendance_date) DO UPDATE SET",
+      "full_name = EXCLUDED.full_name,",
+      "rank = EXCLUDED.rank,",
+      "camp = EXCLUDED.camp,",
+      "office = EXCLUDED.office,",
+      "status = EXCLUDED.status,",
+      "remarks = EXCLUDED.remarks,",
+      "updated_by = EXCLUDED.created_by,",
+      "updated_at = NOW()"
+    ].join(" ");
+  },
 
-    statement.setString(5, String(row.camp));
-    statement.setString(6, String(row.office));
-    statement.setString(7, String(row.status));
+  bindRows_(statement, rows) {
+    let parameter = 1;
 
-    if (row.remarks == null || String(row.remarks).trim() === "") {
-      statement.setNull(8, Jdbc.TYPE_VARCHAR);
-    } else {
-      statement.setString(8, String(row.remarks));
-    }
+    rows.forEach(row => {
+      statement.setString(parameter++, String(row.personnel_uid));
+      statement.setString(parameter++, String(row.attendance_date));
+      statement.setString(parameter++, String(row.full_name));
 
-    statement.setString(9, String(row.created_by));
-    statement.setString(10, String(row.created_by));
+      if (row.rank == null || String(row.rank).trim() === "") {
+        statement.setNull(parameter++, Jdbc.TYPE_VARCHAR);
+      } else {
+        statement.setString(parameter++, String(row.rank));
+      }
+
+      statement.setString(parameter++, String(row.camp));
+      statement.setString(parameter++, String(row.office));
+      statement.setString(parameter++, String(row.status));
+
+      if (row.remarks == null || String(row.remarks).trim() === "") {
+        statement.setNull(parameter++, Jdbc.TYPE_VARCHAR);
+      } else {
+        statement.setString(parameter++, String(row.remarks));
+      }
+
+      statement.setString(parameter++, String(row.created_by));
+    });
   },
 
   save(rows) {
@@ -57,42 +86,44 @@ const NeonAttendanceBatchService = Object.freeze({
 
     if (!payload.length) return [];
 
-    const sql = [
-      "INSERT INTO public.attendance (",
-      "personnel_uid, attendance_date, full_name, rank, camp, office,",
-      "status, remarks, created_by",
-      ") VALUES (?, CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?)",
-      "ON CONFLICT (personnel_uid, attendance_date) DO UPDATE SET",
-      "full_name = EXCLUDED.full_name,",
-      "rank = EXCLUDED.rank,",
-      "camp = EXCLUDED.camp,",
-      "office = EXCLUDED.office,",
-      "status = EXCLUDED.status,",
-      "remarks = EXCLUDED.remarks,",
-      "updated_by = ?,",
-      "updated_at = NOW()"
-    ].join(" ");
-
     let connection;
     let statement;
+    const startedAt = Date.now();
 
     try {
       connection = NeonService.openJdbcConnection_();
       connection.setAutoCommit(false);
-      statement = connection.prepareStatement(sql);
 
-      payload.forEach(row => {
-        this.bindRow_(statement, row);
-        statement.addBatch();
-      });
+      for (
+        let start = 0;
+        start < payload.length;
+        start += this.MAX_ROWS_PER_STATEMENT
+      ) {
+        const chunk = payload.slice(
+          start,
+          start + this.MAX_ROWS_PER_STATEMENT
+        );
 
-      const counts = statement.executeBatch();
+        statement = connection.prepareStatement(this.buildSql_(chunk.length));
+        this.bindRows_(statement, chunk);
+        statement.executeUpdate();
+        NeonService.closeQuietly_(statement);
+        statement = null;
+      }
+
       connection.commit();
 
-      return payload.map((row, index) => ({
+      const elapsedMs = Date.now() - startedAt;
+      console.log(
+        "Neon multi-row attendance upsert: %s row(s) in %s ms",
+        payload.length,
+        elapsedMs
+      );
+
+      return payload.map(row => ({
         personnel_uid: row.personnel_uid,
         attendance_date: row.attendance_date,
-        affected: Number(counts[index] == null ? 0 : counts[index])
+        affected: 1
       }));
     } catch (error) {
       if (connection) {
@@ -100,7 +131,7 @@ const NeonAttendanceBatchService = Object.freeze({
           connection.rollback();
         } catch (rollbackError) {
           console.error(
-            "Neon batch rollback failed: " +
+            "Neon multi-row rollback failed: " +
             (rollbackError && rollbackError.message
               ? rollbackError.message
               : String(rollbackError))
@@ -109,7 +140,7 @@ const NeonAttendanceBatchService = Object.freeze({
       }
 
       throw new Error(
-        "Neon attendance batch save failed; transaction rolled back: " +
+        "Neon attendance save failed; transaction rolled back: " +
         (error && error.message ? error.message : String(error))
       );
     } finally {
