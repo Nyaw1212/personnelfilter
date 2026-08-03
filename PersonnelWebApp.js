@@ -97,8 +97,6 @@ function includePlatformBundle() {
     "PlatformNameFormatEngineJS",
     "ReassignmentPluginV1PolishJS",
     "ReassignmentRankDisplayFixJS",
-    "ReassignmentPluginV1Step1FilterJS",
-    "ReassignmentPluginV1Step1FilterRerenderFixJS",
     "PlatformReportLauncherUXJS",
     "PlatformUIControlBridgeFixJS",
     "PlatformKeyboardEngineJS",
