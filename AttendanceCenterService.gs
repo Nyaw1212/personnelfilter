@@ -109,34 +109,47 @@ function getAttendanceCenterBootstrap() {
   };
 }
 
+// Phase 2.4 wiring: weekly Attendance Center reloads saved attendance from Neon.
 function loadAttendanceCenterRecords(request) {
   const source = request && typeof request === "object" ? request : {};
   const dateText = String(source.date || "").trim();
-  const camp = normalizeAttendanceValue_(source.camp);
-  const office = normalizeAttendanceValue_(source.office);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return { success: true, records: [] };
+  const camp = String(source.camp || "").trim();
+  const office = String(source.office || "").trim();
 
-  setupAttendanceCenterSheets();
-  const spreadsheet = SpreadsheetApp.openById(ATTENDANCE_CENTER_CONFIG.spreadsheetId);
-  const sheet = spreadsheet.getSheetByName(ATTENDANCE_CENTER_CONFIG.logSheet);
-  if (!sheet || sheet.getLastRow() < 2) return { success: true, records: [] };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    return { success: true, storage: "NEON_JDBC", records: [] };
+  }
+  if (!camp || !office) {
+    return { success: true, storage: "NEON_JDBC", records: [] };
+  }
 
-  const timezone = Session.getScriptTimeZone();
-  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, ATTENDANCE_LOG_HEADERS.length).getValues();
-  const records = values.filter(row => {
-    const date = row[1] instanceof Date ? Utilities.formatDate(row[1], timezone, "yyyy-MM-dd") : String(row[1] || "");
-    return date === dateText && normalizeAttendanceValue_(row[6]) === camp && normalizeAttendanceValue_(row[5]) === office;
-  }).map(row => ({
-    attendanceId: row[0],
-    employeeKey: String(row[2] || ""),
-    fullName: String(row[3] || ""),
-    status: String(row[8] || ""),
-    remarks: String(row[9] || ""),
-  }));
+  const rows = AttendanceService.loadAttendance({
+    attendanceDate: dateText,
+    camp,
+    office,
+  });
 
-  return { success: true, records };
+  return {
+    success: true,
+    storage: "NEON_JDBC",
+    records: rows.map(row => ({
+      attendanceId: row.id,
+      employeeKey: String(row.personnel_uid || ""),
+      fullName: String(row.full_name || ""),
+      rank: String(row.rank || ""),
+      office: String(row.office || ""),
+      camp: String(row.camp || ""),
+      status: String(row.status || "UNRECORDED"),
+      remarks: String(row.remarks || ""),
+      createdBy: String(row.created_by || ""),
+      createdAt: row.created_at || null,
+      updatedBy: String(row.updated_by || ""),
+      updatedAt: row.updated_at || null,
+    })),
+  };
 }
 
+// Legacy single-day Google Sheets writer retained temporarily for rollback.
 function saveAttendanceCenterSubmission(payload) {
   const source = payload && typeof payload === "object" ? payload : {};
   const dateText = String(source.date || "").trim();
