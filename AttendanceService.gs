@@ -36,31 +36,103 @@ const AttendanceService = Object.freeze({
   },
 
   saveAttendance(records) {
+    const callStartedAt = Date.now();
     const source = Array.isArray(records) ? records : [records];
-    if (!source.length) {
+
+    console.log(
+      "[PERF][Apps Script] AttendanceService.saveAttendance START rows=%s",
+      source.length
+    );
+
+    try {
+      if (!source.length) {
+        return {
+          success: true,
+          storage: "NEON_JDBC_BATCH",
+          saved: 0,
+          records: [],
+          performance: {
+            appsScriptMs: Date.now() - callStartedAt
+          }
+        };
+      }
+
+      const normalizeStartedAt = Date.now();
+      const normalized = source.map(record => this.normalizeRecord_(record));
+      const normalizeMs = Date.now() - normalizeStartedAt;
+
+      const storageStartedAt = Date.now();
+      const saved = normalized.length > 1
+        ? NeonAttendanceBatchService.save(normalized)
+        : NeonService.insertAttendance(normalized);
+      const storageMs = Date.now() - storageStartedAt;
+      const appsScriptMs = Date.now() - callStartedAt;
+
+      console.log(
+        "[PERF][Apps Script] AttendanceService.saveAttendance END total=%sms normalize=%sms storage=%sms rows=%s",
+        appsScriptMs,
+        normalizeMs,
+        storageMs,
+        normalized.length
+      );
+
       return {
         success: true,
-        storage: "NEON_JDBC_BATCH",
-        saved: 0,
-        records: []
+        storage: normalized.length > 1 ? "NEON_JDBC_BATCH" : "NEON_JDBC",
+        saved: Array.isArray(saved) ? saved.length : normalized.length,
+        records: saved,
+        performance: {
+          appsScriptMs,
+          normalizeMs,
+          storageMs,
+          rowCount: normalized.length
+        }
       };
+    } catch (error) {
+      console.error(
+        "[PERF][Apps Script] AttendanceService.saveAttendance FAILED after %sms: %s",
+        Date.now() - callStartedAt,
+        error && error.message ? error.message : String(error)
+      );
+      throw error;
     }
-
-    const normalized = source.map(record => this.normalizeRecord_(record));
-    const saved = normalized.length > 1
-      ? NeonAttendanceBatchService.save(normalized)
-      : NeonService.insertAttendance(normalized);
-
-    return {
-      success: true,
-      storage: normalized.length > 1 ? "NEON_JDBC_BATCH" : "NEON_JDBC",
-      saved: Array.isArray(saved) ? saved.length : normalized.length,
-      records: saved
-    };
   },
 
   loadAttendance(filters) {
-    return NeonService.getAttendance(filters || {});
+    const callStartedAt = Date.now();
+    const request = filters || {};
+
+    console.log(
+      "[PERF][Apps Script] AttendanceService.loadAttendance START date=%s camp=%s office=%s uid=%s",
+      request.attendanceDate || "",
+      request.camp || "",
+      request.office || "",
+      request.personnelUid || ""
+    );
+
+    try {
+      const rows = NeonService.getAttendance(request);
+      const appsScriptMs = Date.now() - callStartedAt;
+
+      console.log(
+        "[PERF][Apps Script] AttendanceService.loadAttendance END total=%sms rows=%s date=%s office=%s",
+        appsScriptMs,
+        Array.isArray(rows) ? rows.length : 0,
+        request.attendanceDate || "",
+        request.office || ""
+      );
+
+      return rows;
+    } catch (error) {
+      console.error(
+        "[PERF][Apps Script] AttendanceService.loadAttendance FAILED after %sms date=%s office=%s: %s",
+        Date.now() - callStartedAt,
+        request.attendanceDate || "",
+        request.office || "",
+        error && error.message ? error.message : String(error)
+      );
+      throw error;
+    }
   }
 });
 
