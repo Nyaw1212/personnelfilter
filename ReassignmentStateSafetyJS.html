@@ -1,0 +1,241 @@
+<script>
+// Reassignment V1 save-state safety
+// Persists the complete AssignmentCore workspace in localStorage so a refresh,
+// browser crash, or failed report generation does not erase the user's work.
+(function () {
+  "use strict";
+
+  const SCOPE = "reassignment-v1";
+  const STORAGE_KEY = "personnel-platform:reassignment-v1:saved-state:v1";
+  const SAVE_DELAY_MS = 350;
+
+  const platform = window.PersonnelPlatform;
+  const assignment = platform?.engines?.get?.("assignmentCore");
+  if (!platform || !assignment) return;
+
+  let saveTimer = null;
+  let restoring = false;
+  let lastSavedAt = "";
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function hasWork(state) {
+    return Boolean(
+      state && (
+        (state.participants || []).length ||
+        (state.selectedKeys || []).length ||
+        (state.assignments || []).length ||
+        text(state.destination)
+      )
+    );
+  }
+
+  function snapshot() {
+    const state = assignment.get(SCOPE);
+    return {
+      version: 1,
+      scope: SCOPE,
+      savedAt: new Date().toISOString(),
+      state: {
+        participants: clone(state.participants || []),
+        transferMode: state.transferMode || "OFFICE_TO_OFFICE",
+        destination: text(state.destination),
+        selectedKeys: clone(state.selectedKeys || []),
+        assignments: clone(state.assignments || [])
+      }
+    };
+  }
+
+  function readSaved() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1 || parsed.scope !== SCOPE || !parsed.state) return null;
+      return parsed;
+    } catch (error) {
+      console.warn("Reassignment saved state could not be read:", error);
+      return null;
+    }
+  }
+
+  function writeNow() {
+    if (restoring) return null;
+    const payload = snapshot();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      lastSavedAt = payload.savedAt;
+      updateStatus("Saved", payload.savedAt);
+      return payload;
+    } catch (error) {
+      updateStatus("Save failed", "");
+      console.error("Reassignment save-state failed:", error);
+      return null;
+    }
+  }
+
+  function scheduleSave() {
+    if (restoring) return;
+    updateStatus("Saving…", "");
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(writeNow, SAVE_DELAY_MS);
+  }
+
+  function clearSaved() {
+    clearTimeout(saveTimer);
+    localStorage.removeItem(STORAGE_KEY);
+    lastSavedAt = "";
+    updateStatus("Not saved", "");
+  }
+
+  function restoreSaved(options) {
+    const saved = readSaved();
+    if (!saved || !hasWork(saved.state)) return false;
+
+    const current = assignment.get(SCOPE);
+    if (!options?.force && hasWork(current) && (current.assignments || []).length) {
+      return false;
+    }
+
+    restoring = true;
+    try {
+      assignment.commit(SCOPE, {
+        participants: saved.state.participants || [],
+        transferMode: saved.state.transferMode || "OFFICE_TO_OFFICE",
+        destination: saved.state.destination || "",
+        selectedKeys: saved.state.selectedKeys || [],
+        assignments: saved.state.assignments || []
+      }, "RESTORE_SAVED_STATE", { recordHistory: false });
+      lastSavedAt = saved.savedAt || "";
+      updateStatus("Recovered", lastSavedAt);
+      return true;
+    } finally {
+      restoring = false;
+    }
+  }
+
+  function formatTime(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
+
+  function ensureStatusUi() {
+    const root = document.getElementById("reassignmentPluginV1Root");
+    if (!root || root.hidden) return null;
+    const actions = root.querySelector(".rp1-header .rp1-actions");
+    if (!actions) return null;
+
+    let wrap = root.querySelector("[data-rp1-save-state]");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.dataset.rp1SaveState = "true";
+      wrap.style.cssText = "display:flex;align-items:center;gap:7px;flex-wrap:wrap";
+      wrap.innerHTML = `
+        <span data-rp1-save-status style="font-size:11px;font-weight:800;opacity:.75;white-space:nowrap">Save state ready</span>
+        <button type="button" class="rp1-btn" data-rp1-save-now>Save State</button>
+        <button type="button" class="rp1-btn" data-rp1-restore-state>Restore</button>`;
+      actions.prepend(wrap);
+
+      wrap.querySelector("[data-rp1-save-now]").addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        writeNow();
+      });
+
+      wrap.querySelector("[data-rp1-restore-state]").addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (restoreSaved({ force: true })) {
+          window.$PF?.reassignmentV1?.render?.();
+          requestAnimationFrame(() => updateStatus("Recovered", lastSavedAt));
+        }
+      });
+    }
+    return wrap;
+  }
+
+  function updateStatus(label, iso) {
+    const wrap = ensureStatusUi();
+    const status = wrap?.querySelector("[data-rp1-save-status]");
+    if (!status) return;
+    const time = formatTime(iso);
+    status.textContent = time ? `${label} ${time}` : label;
+  }
+
+  function decoratePlugin() {
+    const plugin = window.$PF?.reassignmentV1;
+    if (!plugin || plugin.__saveStateSafetyWrapped) return Boolean(plugin);
+
+    const originalOpen = plugin.open.bind(plugin);
+    plugin.open = function () {
+      const result = originalOpen();
+      const restored = restoreSaved();
+      if (restored) plugin.render();
+      requestAnimationFrame(() => {
+        ensureStatusUi();
+        updateStatus(restored ? "Recovered" : (lastSavedAt ? "Saved" : "Save state ready"), lastSavedAt);
+      });
+      return result;
+    };
+
+    const originalRender = plugin.render.bind(plugin);
+    plugin.render = function () {
+      const result = originalRender();
+      requestAnimationFrame(() => {
+        ensureStatusUi();
+        updateStatus(lastSavedAt ? "Saved" : "Save state ready", lastSavedAt);
+      });
+      return result;
+    };
+
+    plugin.saveState = writeNow;
+    plugin.restoreState = () => {
+      const restored = restoreSaved({ force: true });
+      if (restored) plugin.render();
+      return restored;
+    };
+    plugin.clearSavedState = clearSaved;
+    plugin.savedState = readSaved;
+    plugin.__saveStateSafetyWrapped = true;
+    return true;
+  }
+
+  platform.events.on(`assignment-core:changed:${SCOPE}`, event => {
+    if (event?.action === "RESTORE_SAVED_STATE") return;
+    scheduleSave();
+  });
+
+  window.addEventListener("beforeunload", () => {
+    clearTimeout(saveTimer);
+    writeNow();
+  });
+
+  if (!decoratePlugin()) {
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      if (decoratePlugin() || attempts >= 60) clearInterval(timer);
+    }, 100);
+  }
+
+  window.$PF = window.$PF || {};
+  window.$PF.reassignmentStateSafety = {
+    version: "1.0.0",
+    save: writeNow,
+    restore: options => restoreSaved(options || { force: true }),
+    clear: clearSaved,
+    read: readSaved,
+    storageKey: STORAGE_KEY
+  };
+
+  console.info("Reassignment save-state safety v1.0.0 active.");
+})();
+</script>
