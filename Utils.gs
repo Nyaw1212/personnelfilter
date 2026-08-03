@@ -12,6 +12,15 @@ const ServerUtils = Object.freeze({
   },
 
   formatIsoDate(value) {
+    const text = this.normalizeText(value);
+
+    // Preserve an already-normalized calendar date exactly as supplied.
+    // Parsing YYYY-MM-DD with new Date() treats it as UTC and can shift it to
+    // the previous day in the Apps Script timezone.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) {
       throw new Error("Invalid date value.");
