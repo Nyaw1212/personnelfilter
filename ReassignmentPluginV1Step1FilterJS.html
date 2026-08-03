@@ -1,0 +1,258 @@
+<script>
+// Reassignment V1 Step 1 filter adapter
+// Adds persistent rank/location chips and multiline personnel search without
+// changing AssignmentCore state or removing hidden selections.
+(function () {
+  "use strict";
+
+  const ROOT_ID = "reassignmentPluginV1Root";
+  const SCOPE = "reassignment-v1";
+  const platform = window.PersonnelPlatform;
+  const assignment = platform?.engines?.get?.("assignmentCore");
+  if (!platform || !assignment) return;
+
+  const uiState = {
+    searchText: "",
+    ranks: new Set(),
+    locations: new Set(),
+    selectionMode: "ALL"
+  };
+
+  function text(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function norm(value) {
+    return text(value)
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Z0-9]+/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+  }
+
+  function escapeHtml(value) {
+    return text(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function installStyles() {
+    if (document.getElementById("rp1Step1FilterStyles")) return;
+    const style = document.createElement("style");
+    style.id = "rp1Step1FilterStyles";
+    style.textContent = `
+      .rp1-step1-filter { margin-bottom:10px; padding:10px; border:1px solid #d5e6d9; border-radius:12px; background:#f2f9f3; }
+      .rp1-step1-filter textarea { width:100%; min-height:74px; resize:vertical; box-sizing:border-box; border:1px solid #bfd5c5; border-radius:9px; padding:9px 10px; font:inherit; background:#fff; }
+      .rp1-step1-filter-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+      .rp1-step1-filter-title { font-size:11px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+      .rp1-step1-filter-actions { display:flex; gap:6px; }
+      .rp1-filter-section { margin-top:9px; }
+      .rp1-filter-label { display:block; margin-bottom:5px; font-size:10px; font-weight:900; opacity:.72; text-transform:uppercase; letter-spacing:.05em; }
+      .rp1-filter-chips { display:flex; flex-wrap:wrap; gap:5px; max-height:82px; overflow:auto; }
+      .rp1-filter-chip { border:1px solid #bfd5c5; border-radius:999px; background:#fff; color:#173d23; padding:5px 9px; font:inherit; font-size:11px; font-weight:800; cursor:pointer; }
+      .rp1-filter-chip.active { background:#236b39; color:#fff; border-color:#236b39; }
+      .rp1-filter-result { margin-top:7px; font-size:11px; color:#526c59; }
+      .rp1-person.rp1-filter-hidden { display:none !important; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getPanel() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.hidden) return null;
+    return root.querySelector(".rp1-grid > .rp1-panel:first-child");
+  }
+
+  function rows(panel) {
+    return [...panel.querySelectorAll(".rp1-list .rp1-person")];
+  }
+
+  function rowData(row) {
+    const nameText = text(row.querySelector(".rp1-person-name")?.textContent);
+    const location = text(row.querySelector(".rp1-person-sub")?.textContent);
+    const checkbox = row.querySelector("[data-rp1-check]");
+    const rank = nameText.split(/\s+/)[0] || "UNRANKED";
+    return {
+      row,
+      checkbox,
+      key: text(checkbox?.dataset.rp1Check),
+      rank,
+      location: location || "UNASSIGNED",
+      haystack: norm(nameText + " " + location)
+    };
+  }
+
+  function unique(values) {
+    return [...new Set(values.filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  function searchTerms() {
+    return text(uiState.searchText)
+      .split(/\r?\n/)
+      .map(norm)
+      .filter(Boolean);
+  }
+
+  function isVisible(data) {
+    const terms = searchTerms();
+    const matchesText = !terms.length || terms.some(term => data.haystack.includes(term));
+    const matchesRank = !uiState.ranks.size || uiState.ranks.has(norm(data.rank));
+    const matchesLocation = !uiState.locations.size || uiState.locations.has(norm(data.location));
+    const checked = Boolean(data.checkbox?.checked);
+    const matchesSelection = uiState.selectionMode === "ALL" ||
+      (uiState.selectionMode === "SELECTED" && checked) ||
+      (uiState.selectionMode === "UNSELECTED" && !checked);
+    return matchesText && matchesRank && matchesLocation && matchesSelection;
+  }
+
+  function chip(label, type, value, active) {
+    return `<button type="button" class="rp1-filter-chip${active ? " active" : ""}" data-rp1-filter-type="${type}" data-rp1-filter-value="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+  }
+
+  function renderControls(panel) {
+    const data = rows(panel).map(rowData);
+    const ranks = unique(data.map(item => item.rank));
+    const locations = unique(data.map(item => item.location));
+    let controls = panel.querySelector(".rp1-step1-filter");
+    if (!controls) {
+      controls = document.createElement("div");
+      controls.className = "rp1-step1-filter";
+      const toolbar = panel.querySelector(".rp1-toolbar");
+      panel.insertBefore(controls, toolbar || panel.querySelector(".rp1-list"));
+    }
+
+    const rankChips = chip("All", "rank-all", "ALL", !uiState.ranks.size) + ranks.map(value =>
+      chip(value, "rank", norm(value), uiState.ranks.has(norm(value)))
+    ).join("");
+    const locationChips = chip("All", "location-all", "ALL", !uiState.locations.size) + locations.map(value =>
+      chip(value, "location", norm(value), uiState.locations.has(norm(value)))
+    ).join("");
+
+    controls.innerHTML = `
+      <div class="rp1-step1-filter-head">
+        <span class="rp1-step1-filter-title">Personnel filters</span>
+        <span class="rp1-step1-filter-actions"><button type="button" class="rp1-btn" data-rp1-filter-clear>Clear Filters</button></span>
+      </div>
+      <textarea id="rp1PersonnelMultiSearch" placeholder="Paste one personnel name per line...">${escapeHtml(uiState.searchText)}</textarea>
+      <div class="rp1-filter-section"><span class="rp1-filter-label">Rank</span><div class="rp1-filter-chips">${rankChips}</div></div>
+      <div class="rp1-filter-section"><span class="rp1-filter-label">Current location</span><div class="rp1-filter-chips">${locationChips}</div></div>
+      <div class="rp1-filter-section"><span class="rp1-filter-label">Selection</span><div class="rp1-filter-chips">
+        ${chip("All", "selection", "ALL", uiState.selectionMode === "ALL")}
+        ${chip("Selected", "selection", "SELECTED", uiState.selectionMode === "SELECTED")}
+        ${chip("Unselected", "selection", "UNSELECTED", uiState.selectionMode === "UNSELECTED")}
+      </div></div>
+      <div class="rp1-filter-result" id="rp1FilterResult"></div>`;
+  }
+
+  function applyFilters() {
+    const panel = getPanel();
+    if (!panel) return;
+    renderControls(panel);
+    const data = rows(panel).map(rowData);
+    let visible = 0;
+    data.forEach(item => {
+      const show = isVisible(item);
+      item.row.classList.toggle("rp1-filter-hidden", !show);
+      if (show) visible++;
+    });
+    const result = panel.querySelector("#rp1FilterResult");
+    if (result) result.textContent = visible + " visible of " + data.length + " unassigned";
+    const count = panel.querySelector("h2 small");
+    if (count) count.textContent = visible + " / " + data.length;
+  }
+
+  function visibleCheckboxes() {
+    const panel = getPanel();
+    if (!panel) return [];
+    return rows(panel)
+      .filter(row => !row.classList.contains("rp1-filter-hidden"))
+      .map(row => row.querySelector("[data-rp1-check]"))
+      .filter(Boolean);
+  }
+
+  function updateVisibleSelection(selectValue) {
+    const current = assignment.get(SCOPE);
+    const selected = new Set(current.selectedKeys || []);
+    visibleCheckboxes().forEach(checkbox => {
+      const key = text(checkbox.dataset.rp1Check);
+      const has = selected.has(key);
+      if (selectValue !== has) assignment.toggleSelection(SCOPE, key);
+    });
+    window.$PF?.reassignmentV1?.render?.();
+  }
+
+  document.addEventListener("input", event => {
+    if (event.target.id !== "rp1PersonnelMultiSearch") return;
+    uiState.searchText = event.target.value;
+    applyFilters();
+  });
+
+  document.addEventListener("click", event => {
+    const root = event.target.closest?.("#" + ROOT_ID);
+    if (!root) return;
+
+    const clear = event.target.closest("[data-rp1-filter-clear]");
+    if (clear) {
+      event.preventDefault();
+      uiState.searchText = "";
+      uiState.ranks.clear();
+      uiState.locations.clear();
+      uiState.selectionMode = "ALL";
+      applyFilters();
+      return;
+    }
+
+    const filter = event.target.closest("[data-rp1-filter-type]");
+    if (filter) {
+      event.preventDefault();
+      const type = filter.dataset.rp1FilterType;
+      const value = filter.dataset.rp1FilterValue;
+      if (type === "rank-all") uiState.ranks.clear();
+      else if (type === "location-all") uiState.locations.clear();
+      else if (type === "rank") uiState.ranks.has(value) ? uiState.ranks.delete(value) : uiState.ranks.add(value);
+      else if (type === "location") uiState.locations.has(value) ? uiState.locations.delete(value) : uiState.locations.add(value);
+      else if (type === "selection") uiState.selectionMode = value;
+      applyFilters();
+      return;
+    }
+
+    const action = event.target.closest("[data-rp1]")?.dataset.rp1;
+    if (action === "select-all") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateVisibleSelection(true);
+    } else if (action === "clear-selection") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateVisibleSelection(false);
+    }
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    const panel = getPanel();
+    if (!panel || panel.dataset.rp1FilterApplying === "1") return;
+    panel.dataset.rp1FilterApplying = "1";
+    requestAnimationFrame(() => {
+      try { applyFilters(); } finally { delete panel.dataset.rp1FilterApplying; }
+    });
+  });
+
+  function start() {
+    installStyles();
+    observer.observe(document.body, { childList: true, subtree: true });
+    applyFilters();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  console.info("Reassignment V1 Step 1 filters active: multiline search, chips, and visible selection.");
+})();
+</script>
