@@ -81,44 +81,76 @@ const NeonAttendanceBatchService = Object.freeze({
   },
 
   save(rows) {
+    const startedAt = Date.now();
+    const timing = {
+      validateMs: 0,
+      connectMs: 0,
+      transactionSetupMs: 0,
+      sqlBuildMs: 0,
+      prepareMs: 0,
+      bindMs: 0,
+      executeMs: 0,
+      commitMs: 0,
+      cleanupMs: 0,
+      totalMs: 0,
+      chunks: 0,
+      rows: 0
+    };
+
+    const validateStartedAt = Date.now();
     const payload = (Array.isArray(rows) ? rows : [rows])
       .map(row => this.validateRow_(row));
+    timing.validateMs = Date.now() - validateStartedAt;
+    timing.rows = payload.length;
 
     if (!payload.length) return [];
 
     let connection;
     let statement;
-    const startedAt = Date.now();
 
     try {
+      const connectStartedAt = Date.now();
       connection = NeonService.openJdbcConnection_();
+      timing.connectMs = Date.now() - connectStartedAt;
+
+      const transactionStartedAt = Date.now();
       connection.setAutoCommit(false);
+      timing.transactionSetupMs = Date.now() - transactionStartedAt;
 
       for (
         let start = 0;
         start < payload.length;
         start += this.MAX_ROWS_PER_STATEMENT
       ) {
+        timing.chunks++;
         const chunk = payload.slice(
           start,
           start + this.MAX_ROWS_PER_STATEMENT
         );
 
-        statement = connection.prepareStatement(this.buildSql_(chunk.length));
+        const sqlStartedAt = Date.now();
+        const sql = this.buildSql_(chunk.length);
+        timing.sqlBuildMs += Date.now() - sqlStartedAt;
+
+        const prepareStartedAt = Date.now();
+        statement = connection.prepareStatement(sql);
+        timing.prepareMs += Date.now() - prepareStartedAt;
+
+        const bindStartedAt = Date.now();
         this.bindRows_(statement, chunk);
+        timing.bindMs += Date.now() - bindStartedAt;
+
+        const executeStartedAt = Date.now();
         statement.executeUpdate();
+        timing.executeMs += Date.now() - executeStartedAt;
+
         NeonService.closeQuietly_(statement);
         statement = null;
       }
 
+      const commitStartedAt = Date.now();
       connection.commit();
-
-      const elapsedMs = Date.now() - startedAt;
-      console.log(
-        "Neon multi-row attendance upsert: %s row(s) in %s ms",
-        payload.length,
-        elapsedMs
-      );
+      timing.commitMs = Date.now() - commitStartedAt;
 
       return payload.map(row => ({
         personnel_uid: row.personnel_uid,
@@ -144,6 +176,7 @@ const NeonAttendanceBatchService = Object.freeze({
         (error && error.message ? error.message : String(error))
       );
     } finally {
+      const cleanupStartedAt = Date.now();
       NeonService.closeQuietly_(statement);
       if (connection) {
         try {
@@ -151,6 +184,24 @@ const NeonAttendanceBatchService = Object.freeze({
         } catch (ignore) {}
       }
       NeonService.closeQuietly_(connection);
+      timing.cleanupMs = Date.now() - cleanupStartedAt;
+      timing.totalMs = Date.now() - startedAt;
+
+      console.log(
+        "[PERF][Neon Save] total=%sms rows=%s chunks=%s validate=%sms connect=%sms txSetup=%sms sqlBuild=%sms prepare=%sms bind=%sms execute=%sms commit=%sms cleanup=%sms",
+        timing.totalMs,
+        timing.rows,
+        timing.chunks,
+        timing.validateMs,
+        timing.connectMs,
+        timing.transactionSetupMs,
+        timing.sqlBuildMs,
+        timing.prepareMs,
+        timing.bindMs,
+        timing.executeMs,
+        timing.commitMs,
+        timing.cleanupMs
+      );
     }
   }
 });
