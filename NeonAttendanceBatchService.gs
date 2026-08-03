@@ -1,9 +1,8 @@
 // ==================================
 // Neon attendance JSON save service
 // ==================================
-// Sends the complete attendance payload as one JSON parameter and lets
-// PostgreSQL expand it with jsonb_to_recordset(). This avoids thousands of
-// slow Apps Script JDBC setter calls.
+// Attendance-specific validation and SQL now delegate transport,
+// transactions, cleanup, and performance logging to NeonJsonEngine.
 
 const NeonAttendanceBatchService = Object.freeze({
   validateRow_(record) {
@@ -56,119 +55,33 @@ const NeonAttendanceBatchService = Object.freeze({
   },
 
   save(rows) {
-    const startedAt = Date.now();
-    const timing = {
-      validateMs: 0,
-      jsonBuildMs: 0,
-      connectMs: 0,
-      transactionSetupMs: 0,
-      sqlBuildMs: 0,
-      prepareMs: 0,
-      bindMs: 0,
-      executeMs: 0,
-      commitMs: 0,
-      cleanupMs: 0,
-      totalMs: 0,
-      rows: 0,
-      payloadBytes: 0
-    };
-
     const validateStartedAt = Date.now();
     const payload = (Array.isArray(rows) ? rows : [rows])
       .map(row => this.validateRow_(row));
-    timing.validateMs = Date.now() - validateStartedAt;
-    timing.rows = payload.length;
+    const validateMs = Date.now() - validateStartedAt;
 
     if (!payload.length) return [];
 
-    const jsonStartedAt = Date.now();
-    const jsonPayload = JSON.stringify(payload);
-    timing.jsonBuildMs = Date.now() - jsonStartedAt;
-    timing.payloadBytes = jsonPayload.length;
+    const result = NeonJsonEngine.executeJson({
+      name: "AttendanceBatchUpsert",
+      sql: this.buildSql_(),
+      payload,
+      useTransaction: true
+    });
 
-    let connection;
-    let statement;
+    console.log(
+      "[PERF][NeonAttendanceBatchService] total=%sms engine=%sms validate=%sms rows=%s affected=%s",
+      result.timing.totalMs + validateMs,
+      result.timing.totalMs,
+      validateMs,
+      payload.length,
+      result.affectedRows
+    );
 
-    try {
-      const connectStartedAt = Date.now();
-      connection = NeonService.openJdbcConnection_();
-      timing.connectMs = Date.now() - connectStartedAt;
-
-      const transactionStartedAt = Date.now();
-      connection.setAutoCommit(false);
-      timing.transactionSetupMs = Date.now() - transactionStartedAt;
-
-      const sqlStartedAt = Date.now();
-      const sql = this.buildSql_();
-      timing.sqlBuildMs = Date.now() - sqlStartedAt;
-
-      const prepareStartedAt = Date.now();
-      statement = connection.prepareStatement(sql);
-      timing.prepareMs = Date.now() - prepareStartedAt;
-
-      const bindStartedAt = Date.now();
-      statement.setString(1, jsonPayload);
-      timing.bindMs = Date.now() - bindStartedAt;
-
-      const executeStartedAt = Date.now();
-      statement.executeUpdate();
-      timing.executeMs = Date.now() - executeStartedAt;
-
-      const commitStartedAt = Date.now();
-      connection.commit();
-      timing.commitMs = Date.now() - commitStartedAt;
-
-      return payload.map(row => ({
-        personnel_uid: row.personnel_uid,
-        attendance_date: row.attendance_date,
-        affected: 1
-      }));
-    } catch (error) {
-      if (connection) {
-        try {
-          connection.rollback();
-        } catch (rollbackError) {
-          console.error(
-            "Neon JSON save rollback failed: " +
-            (rollbackError && rollbackError.message
-              ? rollbackError.message
-              : String(rollbackError))
-          );
-        }
-      }
-
-      throw new Error(
-        "Neon attendance JSON save failed; transaction rolled back: " +
-        (error && error.message ? error.message : String(error))
-      );
-    } finally {
-      const cleanupStartedAt = Date.now();
-      NeonService.closeQuietly_(statement);
-      if (connection) {
-        try {
-          connection.setAutoCommit(true);
-        } catch (ignore) {}
-      }
-      NeonService.closeQuietly_(connection);
-      timing.cleanupMs = Date.now() - cleanupStartedAt;
-      timing.totalMs = Date.now() - startedAt;
-
-      console.log(
-        "[PERF][Neon Save JSON] total=%sms rows=%s payloadBytes=%s validate=%sms jsonBuild=%sms connect=%sms txSetup=%sms sqlBuild=%sms prepare=%sms bind=%sms execute=%sms commit=%sms cleanup=%sms",
-        timing.totalMs,
-        timing.rows,
-        timing.payloadBytes,
-        timing.validateMs,
-        timing.jsonBuildMs,
-        timing.connectMs,
-        timing.transactionSetupMs,
-        timing.sqlBuildMs,
-        timing.prepareMs,
-        timing.bindMs,
-        timing.executeMs,
-        timing.commitMs,
-        timing.cleanupMs
-      );
-    }
+    return payload.map(row => ({
+      personnel_uid: row.personnel_uid,
+      attendance_date: row.attendance_date,
+      affected: 1
+    }));
   }
 });
