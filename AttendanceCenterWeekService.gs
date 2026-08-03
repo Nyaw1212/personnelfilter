@@ -2,7 +2,7 @@
 // Attendance Center weekly Neon loader
 // ==================================
 // Loads an entire office week with one Apps Script execution,
-// one JDBC connection, and one SQL query.
+// one JDBC connection, one SQL query, and one JDBC payload read.
 
 function loadAttendanceCenterWeek(request) {
   const startedAt = Date.now();
@@ -13,7 +13,8 @@ function loadAttendanceCenterWeek(request) {
     prepareMs: 0,
     bindMs: 0,
     executeMs: 0,
-    readRowsMs: 0,
+    readPayloadMs: 0,
+    parseJsonMs: 0,
     cleanupMs: 0,
     totalMs: 0
   };
@@ -37,21 +38,32 @@ function loadAttendanceCenterWeek(request) {
 
   const sqlStartedAt = Date.now();
   const sql = [
-    "SELECT id, personnel_uid, attendance_date::text AS attendance_date_text,",
-    "full_name, rank, camp, office, status, remarks, created_by,",
-    "created_at::text AS created_at_text, updated_by,",
-    "updated_at::text AS updated_at_text",
+    "SELECT COALESCE(json_agg(row_to_json(q)), '[]'::json)::text AS payload",
+    "FROM (",
+    "SELECT id AS \"attendanceId\",",
+    "attendance_date::text AS \"attendanceDate\",",
+    "personnel_uid AS \"employeeKey\",",
+    "full_name AS \"fullName\",",
+    "COALESCE(rank, '') AS rank,",
+    "office, camp,",
+    "COALESCE(status, 'UNRECORDED') AS status,",
+    "COALESCE(remarks, '') AS remarks,",
+    "COALESCE(created_by, '') AS \"createdBy\",",
+    "created_at::text AS \"createdAt\",",
+    "COALESCE(updated_by, '') AS \"updatedBy\",",
+    "updated_at::text AS \"updatedAt\"",
     "FROM public.attendance",
     "WHERE attendance_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)",
     "AND camp = ? AND office = ?",
-    "ORDER BY attendance_date ASC, full_name ASC"
+    "ORDER BY attendance_date ASC, full_name ASC",
+    ") q"
   ].join(" ");
   timing.sqlBuildMs = Date.now() - sqlStartedAt;
 
   let connection;
   let statement;
   let resultSet;
-  const records = [];
+  let records = [];
 
   try {
     const connectStartedAt = Date.now();
@@ -74,24 +86,16 @@ function loadAttendanceCenterWeek(request) {
     timing.executeMs = Date.now() - executeStartedAt;
 
     const readStartedAt = Date.now();
-    while (resultSet.next()) {
-      records.push({
-        attendanceId: resultSet.getLong("id"),
-        attendanceDate: resultSet.getString("attendance_date_text"),
-        employeeKey: String(resultSet.getString("personnel_uid") || ""),
-        fullName: String(resultSet.getString("full_name") || ""),
-        rank: String(resultSet.getString("rank") || ""),
-        office: String(resultSet.getString("office") || ""),
-        camp: String(resultSet.getString("camp") || ""),
-        status: String(resultSet.getString("status") || "UNRECORDED"),
-        remarks: String(resultSet.getString("remarks") || ""),
-        createdBy: String(resultSet.getString("created_by") || ""),
-        createdAt: resultSet.getString("created_at_text") || null,
-        updatedBy: String(resultSet.getString("updated_by") || ""),
-        updatedAt: resultSet.getString("updated_at_text") || null
-      });
+    let payloadText = "[]";
+    if (resultSet.next()) {
+      payloadText = resultSet.getString("payload") || "[]";
     }
-    timing.readRowsMs = Date.now() - readStartedAt;
+    timing.readPayloadMs = Date.now() - readStartedAt;
+
+    const parseStartedAt = Date.now();
+    const parsed = JSON.parse(payloadText);
+    records = Array.isArray(parsed) ? parsed : [];
+    timing.parseJsonMs = Date.now() - parseStartedAt;
   } finally {
     const cleanupStartedAt = Date.now();
     NeonService.closeQuietly_(resultSet);
@@ -102,7 +106,7 @@ function loadAttendanceCenterWeek(request) {
 
   timing.totalMs = Date.now() - startedAt;
   console.log(
-    "[PERF][Neon Load] total=%sms rows=%s validate=%sms sqlBuild=%sms connect=%sms prepare=%sms bind=%sms execute=%sms readRows=%sms cleanup=%sms week=%s..%s camp=%s office=%s",
+    "[PERF][Neon Load JSON] total=%sms rows=%s validate=%sms sqlBuild=%sms connect=%sms prepare=%sms bind=%sms execute=%sms readPayload=%sms parseJson=%sms cleanup=%sms week=%s..%s camp=%s office=%s",
     timing.totalMs,
     records.length,
     timing.validateMs,
@@ -111,7 +115,8 @@ function loadAttendanceCenterWeek(request) {
     timing.prepareMs,
     timing.bindMs,
     timing.executeMs,
-    timing.readRowsMs,
+    timing.readPayloadMs,
+    timing.parseJsonMs,
     timing.cleanupMs,
     weekStart,
     weekEnd,
@@ -121,7 +126,7 @@ function loadAttendanceCenterWeek(request) {
 
   return {
     success: true,
-    storage: "NEON_JDBC_WEEK",
+    storage: "NEON_JDBC_WEEK_JSON",
     weekStart,
     weekEnd,
     records,
