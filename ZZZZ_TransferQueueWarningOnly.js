@@ -154,9 +154,10 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
       }
       timing.listWriteMs += Date.now() - listWriteStartedAt;
 
-      const verifyFlushStartedAt = Date.now();
-      SpreadsheetApp.flush();
-      timing.verifyFlushMs += Date.now() - verifyFlushStartedAt;
+      // Phase 1 performance change:
+      // Do not force SpreadsheetApp.flush() for every personnel row.
+      // The verification reads remain unchanged for safety. Apps Script may
+      // still synchronize pending writes when those values are read.
 
       const verifyReadStartedAt = Date.now();
       const verifiedOffice = String(
