@@ -12,6 +12,10 @@
       .toLowerCase();
   }
 
+  function compact_(value) {
+    return normalize_(value).replace(/[^a-z0-9]/g, "");
+  }
+
   function terms_(value) {
     if (typeof getMultiSearchTerms === "function") {
       return getMultiSearchTerms(value);
@@ -26,6 +30,50 @@
         seen.add(term);
         return true;
       });
+  }
+
+  function searchTargets_(record, normalized) {
+    const storedKey = compact_(
+      record?.["PERSONNEL SEARCH KEY"] ||
+      record?.personnelIdentityKey ||
+      ""
+    );
+
+    const canonicalName = normalize_(
+      record?.["CANONICAL NAME WITH RANK"] ||
+      record?.canonicalNameWithRank ||
+      record?.["Full Name"] ||
+      ""
+    );
+
+    const generalText = normalized?.searchText ||
+      PERSONNEL_APP_CONFIG.searchableColumns
+        .map(column => normalize_(record?.[column]))
+        .join("\u0001");
+
+    return {
+      storedKey,
+      canonicalName,
+      generalText,
+    };
+  }
+
+  function termMatches_(term, targets) {
+    const normalizedTerm = normalize_(term);
+    const compactTerm = compact_(term);
+
+    return Boolean(
+      (compactTerm && targets.storedKey.includes(compactTerm)) ||
+      (normalizedTerm && targets.canonicalName.includes(normalizedTerm)) ||
+      (normalizedTerm && targets.generalText.includes(normalizedTerm))
+    );
+  }
+
+  function firstMatchingTermIndex_(terms, targets) {
+    for (let index = 0; index < terms.length; index++) {
+      if (termMatches_(terms[index], targets)) return index;
+    }
+    return Number.MAX_SAFE_INTEGER;
   }
 
   function install_() {
@@ -45,8 +93,9 @@
         : "ANY";
       const groups = PERSONNEL_APP_CONFIG.filterGroups;
       const selectedRanks = PersonnelState.filters.ranks;
+      const matches = [];
 
-      return PersonnelState.records.filter(record => {
+      PersonnelState.records.forEach((record, sourceIndex) => {
         const normalized = typeof normalizePersonnelRecord_ === "function"
           ? normalizePersonnelRecord_(record)
           : null;
@@ -57,30 +106,44 @@
             ? normalized[group.recordKey]
             : String(record[group.recordKey] || "").trim();
 
-          if (selected.size && !selected.has(recordValue)) {
-            return false;
-          }
+          if (selected.size && !selected.has(recordValue)) return;
         }
 
         const rankValue = normalized
           ? normalized.Rank
           : String(record.Rank || "").trim();
 
-        if (selectedRanks.size && !selectedRanks.has(rankValue)) {
-          return false;
+        if (selectedRanks.size && !selectedRanks.has(rankValue)) return;
+
+        if (!searchTerms.length) {
+          matches.push({ record, sourceIndex, termIndex: sourceIndex });
+          return;
         }
 
-        if (!searchTerms.length) return true;
+        const targets = searchTargets_(record, normalized);
+        const matched = mode === "ALL"
+          ? searchTerms.every(term => termMatches_(term, targets))
+          : searchTerms.some(term => termMatches_(term, targets));
 
-        const haystack = normalized?.searchText ||
-          PERSONNEL_APP_CONFIG.searchableColumns
-            .map(column => normalize_(record[column]))
-            .join("\u0001");
+        if (!matched) return;
 
-        return mode === "ALL"
-          ? searchTerms.every(term => haystack.includes(term))
-          : searchTerms.some(term => haystack.includes(term));
+        matches.push({
+          record,
+          sourceIndex,
+          termIndex: mode === "ANY"
+            ? firstMatchingTermIndex_(searchTerms, targets)
+            : sourceIndex,
+        });
       });
+
+      if (searchTerms.length && mode === "ANY") {
+        matches.sort((left, right) =>
+          left.termIndex - right.termIndex ||
+          left.sourceIndex - right.sourceIndex
+        );
+      }
+
+      return matches.map(item => item.record);
     };
 
     window.filterPersonnelRecords = filterPersonnelRecords;
@@ -90,7 +153,7 @@
       else if (typeof filterAndRenderPersonnel === "function") filterAndRenderPersonnel();
     } catch (_) {}
 
-    console.info("MultiTextSearch performance filter fix v1.1.0 active.");
+    console.info("MultiTextSearch performance filter fix v1.2.0 active: input-order results enabled.");
   }
 
   if (document.readyState === "loading") {
