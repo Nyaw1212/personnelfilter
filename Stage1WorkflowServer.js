@@ -33,15 +33,35 @@ function sendStage1ReassignmentToAogen(payload) {
       ? "UPDATE_REASSIGNMENT"
       : "GENERATE_REASSIGNMENT";
 
-    const response = UrlFetchApp.fetch(endpoint, {
+    let response = UrlFetchApp.fetch(endpoint, {
       method: "post",
       contentType: "application/json",
       payload: JSON.stringify({ action, apiKey, payload: normalizedPayload }),
       muteHttpExceptions: true,
-      followRedirects: true,
+      followRedirects: false,
     });
 
-    const statusCode = response.getResponseCode();
+    let statusCode = response.getResponseCode();
+
+    if (statusCode >= 300 && statusCode < 400) {
+      const headers = response.getAllHeaders();
+      const redirectUrl = headers.Location || headers.location;
+
+      if (!redirectUrl) {
+        throw new Error(
+          "AOGENup redirected the request without providing a Location header."
+        );
+      }
+
+      response = UrlFetchApp.fetch(redirectUrl, {
+        method: "get",
+        muteHttpExceptions: true,
+        followRedirects: true,
+      });
+
+      statusCode = response.getResponseCode();
+    }
+
     const responseText = response.getContentText();
     let result;
 
