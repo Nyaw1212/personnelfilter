@@ -1,9 +1,8 @@
 //----------------------------------
-// Transfer Queue warning-only verification + performance timing
+// Transfer Queue warning-only verification + batch performance engine
 //----------------------------------
-// Previous-office mismatches are advisory. A uniquely matched personnel
-// record may still be applied, while the discrepancy is returned and stored
-// as a warning for review.
+// Reads LIST and TRANSFER_QUEUE once, updates values in memory, writes each
+// sheet once, flushes once, and verifies the affected LIST rows in one read.
 
 function canonicalApplyTransfers_(transferIds, approveFirst) {
   const startedAt = Date.now();
@@ -15,13 +14,13 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
     openSpreadsheetMs: 0,
     loadSheetsMs: 0,
     readQueueMs: 0,
+    readListMs: 0,
     buildIndexMs: 0,
-    loopMs: 0,
-    liveReadMs: 0,
-    listWriteMs: 0,
-    verifyFlushMs: 0,
+    planMs: 0,
+    listBatchWriteMs: 0,
+    flushMs: 0,
     verifyReadMs: 0,
-    queueWriteMs: 0,
+    queueBatchWriteMs: 0,
     finalFlushMs: 0,
     releaseLockMs: 0,
     selected: ids.size,
@@ -38,10 +37,9 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
   }
 
   console.log(
-    "[PERF][TransferQ Apply] START approveFirst=%s selected=%s ids=%s",
+    "[PERF][TransferQ Batch Apply] START approveFirst=%s selected=%s",
     approveFirst,
-    ids.size,
-    JSON.stringify(Array.from(ids))
+    ids.size
   );
 
   const lock = LockService.getScriptLock();
@@ -69,152 +67,206 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
     const queue = queueSheet.getDataRange().getValues();
     timing.readQueueMs = Date.now() - queueReadStartedAt;
 
+    const lastListRow = listSheet.getLastRow();
+    if (lastListRow < 2) throw new Error("The LIST sheet has no personnel rows.");
+
+    const listRowCount = lastListRow - 1;
+    const listReadStartedAt = Date.now();
+
+    // D:F contains Office, the untouched middle column, and Camp.
+    const listAssignmentValues = listSheet
+      .getRange(2, 4, listRowCount, 3)
+      .getValues();
+
+    // R:S contains CANONICAL NAME WITH RANK and PERSONNEL SEARCH KEY.
+    const listIdentityValues = listSheet
+      .getRange(2, 18, listRowCount, 2)
+      .getDisplayValues();
+
+    timing.readListMs = Date.now() - listReadStartedAt;
+
     const indexStartedAt = Date.now();
-    const index = buildCanonicalPersonnelIndex_(listSheet);
+    const recordsByName = new Map();
+
+    for (let rowOffset = 0; rowOffset < listRowCount; rowOffset++) {
+      const canonicalWithRank = String(
+        listIdentityValues[rowOffset][0] || ""
+      ).trim();
+      const storedSearchKey = canonicalKey_(
+        listIdentityValues[rowOffset][1] || canonicalWithRank
+      );
+      const nameWithoutRank = canonicalNormalizeName_(canonicalWithRank, "");
+      const keys = new Set([
+        storedSearchKey,
+        canonicalKey_(canonicalWithRank),
+        canonicalKey_(nameWithoutRank),
+      ].filter(Boolean));
+
+      const record = {
+        rowNumber: rowOffset + 2,
+        rowOffset,
+        fullName: nameWithoutRank,
+        office: String(listAssignmentValues[rowOffset][0] || "").trim(),
+        camp: String(listAssignmentValues[rowOffset][2] || "").trim(),
+      };
+
+      keys.forEach(key => {
+        const bucket = recordsByName.get(key) || [];
+        bucket.push(record);
+        recordsByName.set(key, bucket);
+      });
+    }
     timing.buildIndexMs = Date.now() - indexStartedAt;
 
     const approvedBy =
       Session.getActiveUser().getEmail() || "Personnel Filter user";
     const now = new Date();
-
-    let applied = 0;
-    let skipped = 0;
     const failures = [];
     const warnings = [];
+    const planned = [];
+    let skipped = 0;
 
-    const loopStartedAt = Date.now();
+    const planStartedAt = Date.now();
 
-    for (let i = 1; i < queue.length; i++) {
-      const rowStartedAt = Date.now();
-      const row = queue[i];
+    for (let queueOffset = 1; queueOffset < queue.length; queueOffset++) {
+      const row = queue[queueOffset];
       const id = String(row[0] || "").trim();
       if (!ids.has(id)) continue;
 
       timing.scanned++;
-
       const status = canonicalDisplayStatus_(row[9]);
+
       if (["APPLIED", "CANCELLED"].includes(status)) {
         skipped++;
         timing.skipped++;
         continue;
       }
 
-      if (!approveFirst && status !== "APPROVED") {
-        failures.push(
-          `${String(row[3] || "").trim()}: Transfer must be APPROVED before applying.`
-        );
-        timing.failed++;
-        continue;
-      }
-
       const fullName = String(row[3] || "").trim();
-      const previousOffice = String(row[5] || "").trim();
-      const newOffice = String(row[7] || "").trim();
-      const newCamp = String(row[8] || "").trim();
-      const match = canonicalFindMatch_(index, fullName, previousOffice);
 
-      if (!match) {
-        const message = "Personnel was not uniquely matched in LIST.";
-        const queueWriteStartedAt = Date.now();
-        canonicalMarkFailed_(queueSheet, i + 1, message);
-        timing.queueWriteMs += Date.now() - queueWriteStartedAt;
+      if (!approveFirst && status !== "APPROVED") {
+        const message = "Transfer must be APPROVED before applying.";
+        row[9] = "FAILED";
+        row[14] = message;
         failures.push(`${fullName}: ${message}`);
         timing.failed++;
         continue;
       }
 
+      const previousOffice = String(row[5] || "").trim();
+      const newOffice = String(row[7] || "").trim();
+      const newCamp = String(row[8] || "").trim();
+      const nameKey = canonicalKey_(fullName);
+      let matches = (recordsByName.get(nameKey) || []).slice();
+
+      if (matches.length > 1 && previousOffice) {
+        const officeKey = canonicalKey_(previousOffice);
+        const officeMatches = matches.filter(record =>
+          canonicalKey_(record.office) === officeKey
+        );
+        if (officeMatches.length) matches = officeMatches;
+      }
+
+      if (matches.length !== 1) {
+        const message = "Personnel was not uniquely matched in LIST.";
+        row[9] = "FAILED";
+        row[14] = message;
+        failures.push(`${fullName}: ${message}`);
+        timing.failed++;
+        continue;
+      }
+
+      const match = matches[0];
       timing.matched++;
 
-      const liveReadStartedAt = Date.now();
-      const liveOffice = String(
-        listSheet.getRange(match.rowNumber, 4).getDisplayValue() || ""
-      ).trim();
-      timing.liveReadMs += Date.now() - liveReadStartedAt;
-
-      const liveOfficeKey = canonicalKey_(liveOffice);
+      const liveOfficeKey = canonicalKey_(match.office);
       const previousOfficeKey = canonicalKey_(previousOffice);
       let rowWarning = "";
 
       if (previousOfficeKey && liveOfficeKey !== previousOfficeKey) {
         rowWarning = liveOfficeKey
-          ? `WARNING: Current LIST office is ${liveOffice}, not ${previousOffice}. Transfer applied after advisory review.`
+          ? `WARNING: Current LIST office is ${match.office}, not ${previousOffice}. Transfer applied after advisory review.`
           : `WARNING: Current LIST office is blank; previous office ${previousOffice} could not be verified. Transfer applied.`;
-
         warnings.push(`${fullName}: ${rowWarning}`);
         timing.warnings++;
-        console.warn("[TransferQ][Warning] %s", `${fullName}: ${rowWarning}`);
       }
 
-      const listWriteStartedAt = Date.now();
-      if (newOffice) {
-        listSheet.getRange(match.rowNumber, 4).setValue(newOffice);
-      }
-      if (newCamp) {
-        listSheet.getRange(match.rowNumber, 6).setValue(newCamp);
-      }
-      timing.listWriteMs += Date.now() - listWriteStartedAt;
+      if (newOffice) listAssignmentValues[match.rowOffset][0] = newOffice;
+      if (newCamp) listAssignmentValues[match.rowOffset][2] = newCamp;
 
-      // Phase 1 performance change:
-      // Do not force SpreadsheetApp.flush() for every personnel row.
-      // The verification reads remain unchanged for safety. Apps Script may
-      // still synchronize pending writes when those values are read.
-
-      const verifyReadStartedAt = Date.now();
-      const verifiedOffice = String(
-        listSheet.getRange(match.rowNumber, 4).getDisplayValue() || ""
-      ).trim();
-      const verifiedCamp = String(
-        listSheet.getRange(match.rowNumber, 6).getDisplayValue() || ""
-      ).trim();
-      timing.verifyReadMs += Date.now() - verifyReadStartedAt;
-
-      const officeOk =
-        !newOffice || canonicalKey_(verifiedOffice) === canonicalKey_(newOffice);
-      const campOk =
-        !newCamp || canonicalKey_(verifiedCamp) === canonicalKey_(newCamp);
-
-      if (!officeOk || !campOk) {
-        const message =
-          `LIST verification failed. Office=${verifiedOffice}; Camp=${verifiedCamp}.`;
-        const queueWriteStartedAt = Date.now();
-        canonicalMarkFailed_(queueSheet, i + 1, message);
-        timing.queueWriteMs += Date.now() - queueWriteStartedAt;
-        failures.push(`${fullName}: ${message}`);
-        timing.failed++;
-        continue;
-      }
-
-      const existingApprovedBy = String(row[10] || "").trim();
-      const existingApprovedDate = row[11] || "";
-
-      const queueWriteStartedAt = Date.now();
-      queueSheet.getRange(i + 1, 10, 1, 4).setValues([[
-        "APPLIED",
-        existingApprovedBy || approvedBy,
-        existingApprovedDate || now,
-        now,
-      ]]);
-
-      if (rowWarning) {
-        queueSheet.getRange(i + 1, 15).setValue(rowWarning);
-      } else {
-        queueSheet.getRange(i + 1, 15).clearContent();
-      }
-      timing.queueWriteMs += Date.now() - queueWriteStartedAt;
-
-      applied++;
-      timing.applied++;
-
-      console.log(
-        "[PERF][TransferQ Row] id=%s name=%s total=%sms warning=%s",
-        id,
+      planned.push({
+        queueOffset,
+        listRowOffset: match.rowOffset,
         fullName,
-        Date.now() - rowStartedAt,
-        Boolean(rowWarning)
-      );
+        newOffice,
+        newCamp,
+        rowWarning,
+      });
     }
 
-    timing.loopMs = Date.now() - loopStartedAt;
+    timing.planMs = Date.now() - planStartedAt;
+
+    if (planned.length) {
+      const listWriteStartedAt = Date.now();
+      listSheet
+        .getRange(2, 4, listRowCount, 3)
+        .setValues(listAssignmentValues);
+      timing.listBatchWriteMs = Date.now() - listWriteStartedAt;
+
+      const flushStartedAt = Date.now();
+      SpreadsheetApp.flush();
+      timing.flushMs = Date.now() - flushStartedAt;
+
+      const verifyStartedAt = Date.now();
+      const verifiedAssignments = listSheet
+        .getRange(2, 4, listRowCount, 3)
+        .getDisplayValues();
+      timing.verifyReadMs = Date.now() - verifyStartedAt;
+
+      planned.forEach(item => {
+        const queueRow = queue[item.queueOffset];
+        const verifiedOffice = String(
+          verifiedAssignments[item.listRowOffset][0] || ""
+        ).trim();
+        const verifiedCamp = String(
+          verifiedAssignments[item.listRowOffset][2] || ""
+        ).trim();
+
+        const officeOk =
+          !item.newOffice ||
+          canonicalKey_(verifiedOffice) === canonicalKey_(item.newOffice);
+        const campOk =
+          !item.newCamp ||
+          canonicalKey_(verifiedCamp) === canonicalKey_(item.newCamp);
+
+        if (!officeOk || !campOk) {
+          const message =
+            `LIST verification failed. Office=${verifiedOffice}; Camp=${verifiedCamp}.`;
+          queueRow[9] = "FAILED";
+          queueRow[14] = message;
+          failures.push(`${item.fullName}: ${message}`);
+          timing.failed++;
+          return;
+        }
+
+        const existingApprovedBy = String(queueRow[10] || "").trim();
+        const existingApprovedDate = queueRow[11] || "";
+        queueRow[9] = "APPLIED";
+        queueRow[10] = existingApprovedBy || approvedBy;
+        queueRow[11] = existingApprovedDate || now;
+        queueRow[12] = now;
+        queueRow[14] = item.rowWarning || "";
+        timing.applied++;
+      });
+    }
+
+    const queueWriteStartedAt = Date.now();
+    if (queue.length > 1) {
+      queueSheet
+        .getRange(2, 1, queue.length - 1, CANONICAL_TRANSFER_QUEUE_HEADERS.length)
+        .setValues(queue.slice(1));
+    }
+    timing.queueBatchWriteMs = Date.now() - queueWriteStartedAt;
 
     const finalFlushStartedAt = Date.now();
     SpreadsheetApp.flush();
@@ -224,9 +276,9 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
       ? `; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`
       : "";
 
-    const result = {
+    return {
       success: failures.length === 0,
-      applied,
+      applied: timing.applied,
       skipped,
       failed: failures.length,
       failures,
@@ -234,11 +286,9 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
       warnings,
       timing,
       message: failures.length
-        ? `${applied} transfer(s) applied; ${failures.length} failed${warningSuffix}${skipped ? `; ${skipped} skipped` : ""}.`
-        : `${applied} transfer(s) applied to LIST${warningSuffix}${skipped ? `; ${skipped} skipped` : ""}.`,
+        ? `${timing.applied} transfer(s) applied; ${failures.length} failed${warningSuffix}${skipped ? `; ${skipped} skipped` : ""}.`
+        : `${timing.applied} transfer(s) applied to LIST${warningSuffix}${skipped ? `; ${skipped} skipped` : ""}.`,
     };
-
-    return result;
   } catch (error) {
     timing.failed++;
     return {
@@ -255,7 +305,7 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
     timing.totalMs = Date.now() - startedAt;
 
     console.log(
-      "[PERF][TransferQ Apply] END total=%sms selected=%s scanned=%s matched=%s applied=%s skipped=%s failed=%s warnings=%s lock=%sms open=%sms sheets=%sms readQueue=%sms buildIndex=%sms loop=%sms liveRead=%sms listWrite=%sms verifyFlush=%sms verifyRead=%sms queueWrite=%sms finalFlush=%sms releaseLock=%sms",
+      "[PERF][TransferQ Batch Apply] END total=%sms selected=%s scanned=%s matched=%s applied=%s skipped=%s failed=%s warnings=%s lock=%sms open=%sms sheets=%sms readQueue=%sms readList=%sms buildIndex=%sms plan=%sms listBatchWrite=%sms flush=%sms verifyRead=%sms queueBatchWrite=%sms finalFlush=%sms releaseLock=%sms",
       timing.totalMs,
       timing.selected,
       timing.scanned,
@@ -268,13 +318,13 @@ function canonicalApplyTransfers_(transferIds, approveFirst) {
       timing.openSpreadsheetMs,
       timing.loadSheetsMs,
       timing.readQueueMs,
+      timing.readListMs,
       timing.buildIndexMs,
-      timing.loopMs,
-      timing.liveReadMs,
-      timing.listWriteMs,
-      timing.verifyFlushMs,
+      timing.planMs,
+      timing.listBatchWriteMs,
+      timing.flushMs,
       timing.verifyReadMs,
-      timing.queueWriteMs,
+      timing.queueBatchWriteMs,
       timing.finalFlushMs,
       timing.releaseLockMs
     );
