@@ -54,7 +54,7 @@ const PersonnelAPI = {
 };
 
 //----------------------------------
-// Normalize personnel before table use
+// Add canonical identity fields without changing table/search fields
 //----------------------------------
 
 function normalizePersonnelApiResponse_(response) {
@@ -79,12 +79,19 @@ function normalizePersonnelApiResponse_(response) {
 
     return {
       ...record,
+
+      // Keep the original table/search contract unchanged.
+      "Full Name": rawFullName,
+      displayName: rawFullName,
+
+      // Add normalized identity fields for TransferQ and other engines.
       "Raw Full Name": rawFullName,
-      "Full Name": canonicalName,
-      displayName: canonicalName,
       canonicalName,
       canonicalNameWithRank,
       normalizedName: normalizedParts,
+      personnelIdentityKey: canonicalNameWithRank
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, ""),
     };
   });
 
@@ -96,6 +103,7 @@ function normalizePersonnelApiResponse_(response) {
       version: nameEngine.version || "unknown",
       canonicalOrder: "G + I + J + H + K",
       normalizedCount: normalizedRecords.length,
+      preservesFullName: true,
     },
   };
 }
