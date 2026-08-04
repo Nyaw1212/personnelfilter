@@ -65,6 +65,18 @@
   }
 
   function canonicalFullName(person, includeRank = true) {
+    const stored = includeRank
+      ? field(person, [
+          "canonicalNameWithRank",
+          "CANONICAL NAME WITH RANK",
+        ])
+      : field(person, [
+          "canonicalName",
+          "CANONICAL NAME",
+        ]);
+
+    if (stored) return upper(stored);
+
     const parts = normalize(person);
 
     return [
@@ -121,10 +133,12 @@
   }
 
   function format(person, options = {}) {
+    const storedCanonical = canonicalFullName(person, options.includeRank !== false);
+    if (storedCanonical) return storedCanonical;
+
     const structured = formatStructured(person, options);
     if (structured) return structured;
 
-    // Compatibility fallback only when structured LIST fields are unavailable.
     const fallback = legacyFullName(person);
     if (options.includeRank === false) {
       const rank = normalize(person).rank;
@@ -137,7 +151,7 @@
   }
 
   const engine = {
-    version: "2.0.0",
+    version: "2.1.0",
     normalize,
     format,
     formatStructured,
@@ -153,6 +167,7 @@
         version: this.version,
         canonicalOrder: "G + I + J + H + K",
         canonicalFields: "RANK + FIRST + MIDDLE + LAST + SUFFIX",
+        storedCanonicalPreferred: true,
         legacyFullNameFallback: true,
       };
       console.table(report);
@@ -170,7 +185,7 @@
   window.$PF.name = engine;
 
   console.info(
-    "NameHandlerEngine v2.0.0 active: G + I + J + H + K is canonical."
+    "NameHandlerEngine v2.1.0 active: stored canonical fields preferred."
   );
 })();
 </script>
