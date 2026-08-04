@@ -54,7 +54,7 @@ const PersonnelAPI = {
 };
 
 //----------------------------------
-// Add canonical identity fields without changing table/search fields
+// Use stored canonical identity fields as the authoritative app values
 //----------------------------------
 
 function normalizePersonnelApiResponse_(response) {
@@ -63,35 +63,56 @@ function normalizePersonnelApiResponse_(response) {
   const nameEngine = window.PersonnelPlatform?.engines?.get?.("nameHandler") ||
     window.$PF?.name;
 
-  if (!nameEngine) {
-    console.warn(
-      "PersonnelAPI returned raw names because NameHandlerEngine was unavailable."
-    );
-    return { ...source, records };
-  }
-
   const normalizedRecords = records.map(record => {
     const rawFullName = String(record?.["Full Name"] || "").trim();
-    const normalizedParts = nameEngine.normalize(record);
-    const canonicalName = nameEngine.canonicalFullName(record, false) || rawFullName;
-    const canonicalNameWithRank = nameEngine.canonicalFullName(record, true) ||
-      [record?.Rank, canonicalName].filter(Boolean).join(" ");
+    const storedCanonicalName = String(
+      record?.["CANONICAL NAME"] || record?.canonicalName || ""
+    ).trim();
+    const storedCanonicalNameWithRank = String(
+      record?.["CANONICAL NAME WITH RANK"] ||
+      record?.canonicalNameWithRank ||
+      ""
+    ).trim();
+    const storedSearchKey = String(
+      record?.["PERSONNEL SEARCH KEY"] ||
+      record?.personnelSearchKey ||
+      ""
+    ).trim();
+
+    const normalizedParts = nameEngine?.normalize
+      ? nameEngine.normalize(record)
+      : null;
+
+    const canonicalName = storedCanonicalName ||
+      (nameEngine?.canonicalFullName
+        ? nameEngine.canonicalFullName(record, false)
+        : rawFullName);
+
+    const canonicalNameWithRank = storedCanonicalNameWithRank ||
+      (nameEngine?.canonicalFullName
+        ? nameEngine.canonicalFullName(record, true)
+        : [record?.Rank, canonicalName].filter(Boolean).join(" "));
+
+    const personnelSearchKey = storedSearchKey ||
+      canonicalNameWithRank
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
 
     return {
       ...record,
 
-      // Keep the original table/search contract unchanged.
-      "Full Name": rawFullName,
-      displayName: rawFullName,
-
-      // Add normalized identity fields for TransferQ and other engines.
+      // Preserve the original sheet value for auditing and recovery.
       "Raw Full Name": rawFullName,
+
+      // Canonical columns are now authoritative across the app.
+      "Full Name": canonicalNameWithRank || canonicalName || rawFullName,
+      displayName: canonicalNameWithRank || canonicalName || rawFullName,
       canonicalName,
       canonicalNameWithRank,
+      personnelSearchKey,
+      searchKey: personnelSearchKey,
+      personnelIdentityKey: personnelSearchKey,
       normalizedName: normalizedParts,
-      personnelIdentityKey: canonicalNameWithRank
-        .toUpperCase()
-        .replace(/[^A-Z0-9]/g, ""),
     };
   });
 
@@ -99,11 +120,11 @@ function normalizePersonnelApiResponse_(response) {
     ...source,
     records: normalizedRecords,
     nameNormalization: {
-      engine: "nameHandler",
-      version: nameEngine.version || "unknown",
+      engine: nameEngine ? "nameHandler" : "stored-canonical-fields",
+      version: nameEngine?.version || "stored",
       canonicalOrder: "G + I + J + H + K",
       normalizedCount: normalizedRecords.length,
-      preservesFullName: true,
+      canonicalColumnsAuthoritative: true,
     },
   };
 }
