@@ -2,7 +2,8 @@
 // Personnel Table V2 Server
 //----------------------------------
 // Always reads the current LIST sheet directly.
-// No CacheService and no optimized personnel cache.
+// Returns both the legacy Full Name and the structured LIST name fields so
+// the client NameHandlerEngine can produce one canonical identity.
 
 function getPersonnelTableV2Data() {
   const sheet = getPersonnelWebSheet_();
@@ -40,7 +41,7 @@ function getPersonnelTableV2Data() {
     { key: "FIRST NAME", aliases: ["FIRST NAME"] },
     { key: "MIDDLE NAME", aliases: ["MIDDLE NAME"] },
     { key: "LAST NAME", aliases: ["LAST NAME"] },
-    { key: "SUFFIX", aliases: ["SUFFIX"] },
+    { key: "SUFFIX", aliases: ["SUFFIX", "NAME EXTENSION"] },
     { key: "Rank", aliases: ["RANK"] },
     { key: "Gender", aliases: ["GENDER"] },
     { key: "Category", aliases: ["CATEGORY"] },
@@ -73,16 +74,22 @@ function getPersonnelTableV2Data() {
         : "";
     });
 
-    const fullName = source["Full Name"] || [
+    const structuredName = [
       source["FIRST NAME"],
       source["MIDDLE NAME"],
       source["LAST NAME"],
       source["SUFFIX"],
     ].filter(Boolean).join(" ");
 
+    const fullName = source["Full Name"] || structuredName;
+
     const record = {
       __sheetRow: rowIndex + 1,
       "Full Name": fullName,
+      "FIRST NAME": source["FIRST NAME"],
+      "MIDDLE NAME": source["MIDDLE NAME"],
+      "LAST NAME": source["LAST NAME"],
+      "SUFFIX": source["SUFFIX"],
       Rank: source.Rank || "",
       Gender: source.Gender || "",
       Category: source.Category || "",
