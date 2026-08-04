@@ -2,7 +2,7 @@
 // Personnel Table V2 Server
 //----------------------------------
 // Always reads the current LIST sheet directly.
-// Returns legacy table/search fields plus stored canonical identity fields.
+// Column R / CANONICAL NAME WITH RANK is the authoritative table name.
 
 function getPersonnelTableV2Data() {
   const sheet = getPersonnelWebSheet_();
@@ -36,7 +36,7 @@ function getPersonnelTableV2Data() {
   });
 
   const fields = [
-    { key: "Full Name", aliases: ["FULL NAME"] },
+    { key: "Raw Full Name", aliases: ["FULL NAME"] },
     { key: "FIRST NAME", aliases: ["FIRST NAME"] },
     { key: "MIDDLE NAME", aliases: ["MIDDLE NAME"] },
     { key: "LAST NAME", aliases: ["LAST NAME"] },
@@ -78,17 +78,24 @@ function getPersonnelTableV2Data() {
     });
 
     const structuredName = [
+      source.Rank,
       source["FIRST NAME"],
       source["MIDDLE NAME"],
       source["LAST NAME"],
       source["SUFFIX"],
     ].filter(Boolean).join(" ");
 
-    const fullName = source["Full Name"] || structuredName;
+    // Prefer the stored canonical value from column R. Only fall back when
+    // column R is blank so legacy rows remain visible.
+    const tableName = source["CANONICAL NAME WITH RANK"] ||
+      source["Raw Full Name"] ||
+      structuredName;
 
     const record = {
       __sheetRow: rowIndex + 1,
-      "Full Name": fullName,
+      "Full Name": tableName,
+      displayName: tableName,
+      "Raw Full Name": source["Raw Full Name"],
       "FIRST NAME": source["FIRST NAME"],
       "MIDDLE NAME": source["MIDDLE NAME"],
       "LAST NAME": source["LAST NAME"],
@@ -124,7 +131,7 @@ function getPersonnelTableV2Data() {
     ],
     records,
     cached: false,
-    source: "direct-sheet-read",
+    source: "direct-sheet-read-column-r",
     loadedAt: new Date().toISOString(),
     sheetName: sheet.getName(),
     lastRow,
