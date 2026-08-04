@@ -13,7 +13,7 @@ const PersonnelAPI = {
       google.script.run
         .withSuccessHandler(response => {
           try {
-            resolve(normalizePersonnelApiResponse_(response));
+            resolve(useStoredCanonicalPersonnel_(response));
           } catch (error) {
             reject(normalizeServerError_(error));
           }
@@ -54,76 +54,52 @@ const PersonnelAPI = {
 };
 
 //----------------------------------
-// Use stored canonical identity fields as the authoritative app values
+// Use stored canonical fields directly
 //----------------------------------
+// LIST column R is already authoritative. Do not run NameHandlerEngine again
+// during normal personnel loading.
 
-function normalizePersonnelApiResponse_(response) {
+function useStoredCanonicalPersonnel_(response) {
   const source = response && typeof response === "object" ? response : {};
   const records = Array.isArray(source.records) ? source.records : [];
-  const nameEngine = window.PersonnelPlatform?.engines?.get?.("nameHandler") ||
-    window.$PF?.name;
 
-  const normalizedRecords = records.map(record => {
-    const rawFullName = String(record?.["Full Name"] || "").trim();
-    const storedCanonicalName = String(
+  const canonicalRecords = records.map(record => {
+    const rawFullName = String(record?.["Raw Full Name"] || "").trim();
+    const canonicalName = String(
       record?.["CANONICAL NAME"] || record?.canonicalName || ""
     ).trim();
-    const storedCanonicalNameWithRank = String(
+    const canonicalNameWithRank = String(
       record?.["CANONICAL NAME WITH RANK"] ||
       record?.canonicalNameWithRank ||
+      record?.["Full Name"] ||
       ""
     ).trim();
-    const storedSearchKey = String(
+    const personnelSearchKey = String(
       record?.["PERSONNEL SEARCH KEY"] ||
       record?.personnelSearchKey ||
-      ""
-    ).trim();
-
-    const normalizedParts = nameEngine?.normalize
-      ? nameEngine.normalize(record)
-      : null;
-
-    const canonicalName = storedCanonicalName ||
-      (nameEngine?.canonicalFullName
-        ? nameEngine.canonicalFullName(record, false)
-        : rawFullName);
-
-    const canonicalNameWithRank = storedCanonicalNameWithRank ||
-      (nameEngine?.canonicalFullName
-        ? nameEngine.canonicalFullName(record, true)
-        : [record?.Rank, canonicalName].filter(Boolean).join(" "));
-
-    const personnelSearchKey = storedSearchKey ||
-      canonicalNameWithRank
-        .toUpperCase()
-        .replace(/[^A-Z0-9]/g, "");
+      canonicalNameWithRank.replace(/[^A-Za-z0-9]/g, "")
+    ).trim().toUpperCase();
 
     return {
       ...record,
-
-      // Preserve the original sheet value for auditing and recovery.
-      "Raw Full Name": rawFullName,
-
-      // Canonical columns are now authoritative across the app.
-      "Full Name": canonicalNameWithRank || canonicalName || rawFullName,
-      displayName: canonicalNameWithRank || canonicalName || rawFullName,
+      "Raw Full Name": rawFullName || String(record?.["Full Name"] || "").trim(),
+      "Full Name": canonicalNameWithRank,
+      displayName: canonicalNameWithRank,
       canonicalName,
       canonicalNameWithRank,
       personnelSearchKey,
       searchKey: personnelSearchKey,
       personnelIdentityKey: personnelSearchKey,
-      normalizedName: normalizedParts,
     };
   });
 
   return {
     ...source,
-    records: normalizedRecords,
+    records: canonicalRecords,
     nameNormalization: {
-      engine: nameEngine ? "nameHandler" : "stored-canonical-fields",
-      version: nameEngine?.version || "stored",
-      canonicalOrder: "G + I + J + H + K",
-      normalizedCount: normalizedRecords.length,
+      engine: "bypassed",
+      source: "stored-canonical-columns",
+      normalizedCount: canonicalRecords.length,
       canonicalColumnsAuthoritative: true,
     },
   };
