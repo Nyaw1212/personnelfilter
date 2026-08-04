@@ -11,7 +11,13 @@ const PersonnelAPI = {
   loadPersonnel() {
     return new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler(response => {
+          try {
+            resolve(normalizePersonnelApiResponse_(response));
+          } catch (error) {
+            reject(normalizeServerError_(error));
+          }
+        })
         .withFailureHandler(error => {
           reject(normalizeServerError_(error));
         })
@@ -46,6 +52,53 @@ const PersonnelAPI = {
     });
   },
 };
+
+//----------------------------------
+// Normalize personnel before table use
+//----------------------------------
+
+function normalizePersonnelApiResponse_(response) {
+  const source = response && typeof response === "object" ? response : {};
+  const records = Array.isArray(source.records) ? source.records : [];
+  const nameEngine = window.PersonnelPlatform?.engines?.get?.("nameHandler") ||
+    window.$PF?.name;
+
+  if (!nameEngine) {
+    console.warn(
+      "PersonnelAPI returned raw names because NameHandlerEngine was unavailable."
+    );
+    return { ...source, records };
+  }
+
+  const normalizedRecords = records.map(record => {
+    const rawFullName = String(record?.["Full Name"] || "").trim();
+    const normalizedParts = nameEngine.normalize(record);
+    const canonicalName = nameEngine.canonicalFullName(record, false) || rawFullName;
+    const canonicalNameWithRank = nameEngine.canonicalFullName(record, true) ||
+      [record?.Rank, canonicalName].filter(Boolean).join(" ");
+
+    return {
+      ...record,
+      "Raw Full Name": rawFullName,
+      "Full Name": canonicalName,
+      displayName: canonicalName,
+      canonicalName,
+      canonicalNameWithRank,
+      normalizedName: normalizedParts,
+    };
+  });
+
+  return {
+    ...source,
+    records: normalizedRecords,
+    nameNormalization: {
+      engine: "nameHandler",
+      version: nameEngine.version || "unknown",
+      canonicalOrder: "G + I + J + H + K",
+      normalizedCount: normalizedRecords.length,
+    },
+  };
+}
 
 //----------------------------------
 // Normalize Server Error
