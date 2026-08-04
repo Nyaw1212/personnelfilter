@@ -2,8 +2,7 @@
 // Personnel Table V2 Server
 //----------------------------------
 // Always reads the current LIST sheet directly.
-// Returns both the legacy Full Name and the structured LIST name fields so
-// the client NameHandlerEngine can produce one canonical identity.
+// Returns legacy table/search fields plus stored canonical identity fields.
 
 function getPersonnelTableV2Data() {
   const sheet = getPersonnelWebSheet_();
@@ -49,6 +48,10 @@ function getPersonnelTableV2Data() {
     { key: "Office", aliases: ["OFFICE"] },
     { key: "Camp", aliases: ["CAMP"] },
     { key: "Status", aliases: ["STATUS"] },
+    { key: "CANONICAL NAME", aliases: ["CANONICAL NAME"] },
+    { key: "CANONICAL NAME WITH RANK", aliases: ["CANONICAL NAME WITH RANK"] },
+    { key: "PERSONNEL SEARCH KEY", aliases: ["PERSONNEL SEARCH KEY"] },
+    { key: "NAME ENGINE VERSION", aliases: ["NAME ENGINE VERSION"] },
   ];
 
   const resolvedFields = fields.map(field => {
@@ -97,6 +100,10 @@ function getPersonnelTableV2Data() {
       Office: source.Office || "",
       Camp: source.Camp || "",
       Status: source.Status || "",
+      "CANONICAL NAME": source["CANONICAL NAME"],
+      "CANONICAL NAME WITH RANK": source["CANONICAL NAME WITH RANK"],
+      "PERSONNEL SEARCH KEY": source["PERSONNEL SEARCH KEY"],
+      "NAME ENGINE VERSION": source["NAME ENGINE VERSION"],
     };
 
     if (record["Full Name"] || record.Rank || record.Office || record.Camp) {
