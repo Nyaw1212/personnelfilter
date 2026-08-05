@@ -45,9 +45,8 @@
         : "ANY";
       const groups = PERSONNEL_APP_CONFIG.filterGroups;
       const selectedRanks = PersonnelState.filters.ranks;
-      const matches = [];
 
-      PersonnelState.records.forEach((record, sourceIndex) => {
+      return PersonnelState.records.filter(record => {
         const normalized = typeof normalizePersonnelRecord_ === "function"
           ? normalizePersonnelRecord_(record)
           : null;
@@ -59,7 +58,7 @@
             : String(record[group.recordKey] || "").trim();
 
           if (selected.size && !selected.has(recordValue)) {
-            return;
+            return false;
           }
         }
 
@@ -68,56 +67,20 @@
           : String(record.Rank || "").trim();
 
         if (selectedRanks.size && !selectedRanks.has(rankValue)) {
-          return;
+          return false;
         }
 
-        if (!searchTerms.length) {
-          matches.push({ record, sourceIndex, searchOrder: sourceIndex });
-          return;
-        }
+        if (!searchTerms.length) return true;
 
-        const haystack = normalized && normalized.searchText
-          ? normalized.searchText
-          : PERSONNEL_APP_CONFIG.searchableColumns
-              .map(column => normalize_(record[column]))
-              .join("\u0001");
+        const haystack = normalized?.searchText ||
+          PERSONNEL_APP_CONFIG.searchableColumns
+            .map(column => normalize_(record[column]))
+            .join("\u0001");
 
-        if (mode === "ALL") {
-          if (!searchTerms.every(term => haystack.includes(term))) return;
-
-          matches.push({
-            record,
-            sourceIndex,
-            searchOrder: sourceIndex,
-          });
-          return;
-        }
-
-        let firstMatchIndex = -1;
-        for (let termIndex = 0; termIndex < searchTerms.length; termIndex++) {
-          if (haystack.includes(searchTerms[termIndex])) {
-            firstMatchIndex = termIndex;
-            break;
-          }
-        }
-
-        if (firstMatchIndex < 0) return;
-
-        matches.push({
-          record,
-          sourceIndex,
-          searchOrder: firstMatchIndex,
-        });
+        return mode === "ALL"
+          ? searchTerms.every(term => haystack.includes(term))
+          : searchTerms.some(term => haystack.includes(term));
       });
-
-      if (searchTerms.length && mode === "ANY") {
-        matches.sort((left, right) =>
-          left.searchOrder - right.searchOrder ||
-          left.sourceIndex - right.sourceIndex
-        );
-      }
-
-      return matches.map(item => item.record);
     };
 
     window.filterPersonnelRecords = filterPersonnelRecords;
@@ -127,7 +90,7 @@
       else if (typeof filterAndRenderPersonnel === "function") filterAndRenderPersonnel();
     } catch (_) {}
 
-    console.info("MultiTextSearch performance filter fix v1.2.1 active: search input order enabled.");
+    console.info("MultiTextSearch performance filter fix v1.1.0 active.");
   }
 
   if (document.readyState === "loading") {
