@@ -28,6 +28,18 @@
       });
   }
 
+  function searchText_(record) {
+    const normalized = typeof normalizePersonnelRecord_ === "function"
+      ? normalizePersonnelRecord_(record)
+      : null;
+
+    return normalized && normalized.searchText
+      ? normalized.searchText
+      : PERSONNEL_APP_CONFIG.searchableColumns
+          .map(column => normalize_(record[column]))
+          .join("\u0001");
+  }
+
   function install_() {
     if (
       typeof PersonnelState === "undefined" ||
@@ -46,7 +58,7 @@
       const groups = PERSONNEL_APP_CONFIG.filterGroups;
       const selectedRanks = PersonnelState.filters.ranks;
 
-      return PersonnelState.records.filter(record => {
+      const filteredRecords = PersonnelState.records.filter(record => {
         const normalized = typeof normalizePersonnelRecord_ === "function"
           ? normalizePersonnelRecord_(record)
           : null;
@@ -72,15 +84,50 @@
 
         if (!searchTerms.length) return true;
 
-        const haystack = normalized?.searchText ||
-          PERSONNEL_APP_CONFIG.searchableColumns
-            .map(column => normalize_(record[column]))
-            .join("\u0001");
+        const haystack = normalized && normalized.searchText
+          ? normalized.searchText
+          : PERSONNEL_APP_CONFIG.searchableColumns
+              .map(column => normalize_(record[column]))
+              .join("\u0001");
 
         return mode === "ALL"
           ? searchTerms.every(term => haystack.includes(term))
           : searchTerms.some(term => haystack.includes(term));
       });
+
+      // Preserve the original, known-good filter behavior above.
+      // Only Match ANY results are reordered after filtering is complete.
+      if (mode !== "ANY" || searchTerms.length < 2 || filteredRecords.length < 2) {
+        return filteredRecords;
+      }
+
+      const sourceOrder = new Map(
+        PersonnelState.records.map((record, index) => [record, index])
+      );
+
+      return filteredRecords
+        .map(record => {
+          const haystack = searchText_(record);
+          let termIndex = searchTerms.length;
+
+          for (let index = 0; index < searchTerms.length; index++) {
+            if (haystack.includes(searchTerms[index])) {
+              termIndex = index;
+              break;
+            }
+          }
+
+          return {
+            record,
+            termIndex,
+            sourceIndex: sourceOrder.get(record) ?? Number.MAX_SAFE_INTEGER,
+          };
+        })
+        .sort((left, right) =>
+          left.termIndex - right.termIndex ||
+          left.sourceIndex - right.sourceIndex
+        )
+        .map(item => item.record);
     };
 
     window.filterPersonnelRecords = filterPersonnelRecords;
@@ -90,7 +137,7 @@
       else if (typeof filterAndRenderPersonnel === "function") filterAndRenderPersonnel();
     } catch (_) {}
 
-    console.info("MultiTextSearch performance filter fix v1.1.0 active.");
+    console.info("MultiTextSearch performance filter fix v1.2.2 active: safe post-filter ordering enabled.");
   }
 
   if (document.readyState === "loading") {
