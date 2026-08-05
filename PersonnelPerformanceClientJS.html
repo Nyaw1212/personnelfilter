@@ -6,18 +6,18 @@ const PERSONNEL_SEARCH_DEBOUNCE_MS = 250;
 
 window.addEventListener("DOMContentLoaded", () => {
   PERSONNEL_APP_CONFIG.previewRowLimit = 100;
-  PersonnelState.autoApply = false;
+  PersonnelState.autoApply = true;
 
   const autoApplyToggle = document.getElementById("autoApplyToggle");
-  if (autoApplyToggle) autoApplyToggle.checked = false;
+  if (autoApplyToggle) autoApplyToggle.checked = true;
 
   installDebouncedPersonnelSearch_();
   patchPersonnelFiltering_();
   patchPersonnelSummaryCounting_();
   patchAoRowButtonsForFastUpdates_();
 
-  setSyncStatus("Preview only", "ready");
-  setLastSyncLabel("Auto Apply is off. Click Apply Now only when you want to sync the Sheet view.");
+  setSyncStatus("Auto Apply on", "ready");
+  setLastSyncLabel("Auto Apply is on. Filter changes will sync to the Sheet view automatically.");
 });
 
 function installDebouncedPersonnelSearch_() {
